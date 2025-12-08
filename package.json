@@ -1,57 +1,96 @@
 {
   "name": "artesa-backend",
-  "version": "1.0.0",
-  "description": "Sistema de Gestión de Producción ARTESA - Backend API",
+  "version": "2.0.0",
+  "description": "Sistema Integral de Gestión de Producción ARTESA - Backend API REST con integración SAP",
   "main": "src/server.js",
+  "type": "commonjs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jaycoach/WebApp-LaArtesa-Produccion.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Jaycoach/WebApp-LaArtesa-Produccion/issues"
+  },
+  "homepage": "https://github.com/Jaycoach/WebApp-LaArtesa-Produccion#readme",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js",
+    "dev": "nodemon src/server.js --ignore logs/",
+    "dev:debug": "node --inspect=0.0.0.0:9229 src/server.js",
+    "test": "jest --coverage --detectOpenHandles",
+    "test:watch": "jest --watch --onlyChanged",
+    "test:debug": "node --inspect-brk ./node_modules/.bin/jest --runInBand",
+    "lint": "eslint src/**/*.js",
+    "lint:fix": "eslint src/**/*.js --fix",
+    "format": "prettier --write 'src/**/*.{js,json}' 'database/**/*.sql'",
+    "format:check": "prettier --check 'src/**/*.{js,json}' 'database/**/*.sql'",
     "db:create": "node src/database/scripts/createDatabase.js",
     "db:migrate": "node src/database/migrations/run.js",
     "db:seed": "node src/database/seeds/run.js",
     "db:reset": "npm run db:create && npm run db:migrate && npm run db:seed",
-    "test": "jest --coverage",
-    "test:watch": "jest --watch",
-    "lint": "eslint src/**/*.js",
-    "lint:fix": "eslint src/**/*.js --fix",
-    "format": "prettier --write 'src/**/*.{js,json}'",
-    "docs": "node src/swagger/generator.js"
+    "db:clean": "node src/database/scripts/cleanDatabase.js",
+    "docs": "node src/swagger/generator.js",
+    "docs:serve": "http-server ./docs -p 8080",
+    "security:audit": "npm audit --production",
+    "security:check": "npm audit --production --audit-level=moderate",
+    "health:check": "node src/health/check.js",
+    "prestart": "npm run lint && npm run test",
+    "prestop": "npm run health:check"
   },
   "keywords": [
     "artesa",
     "produccion",
     "panaderia",
     "sap",
-    "backend"
+    "backend",
+    "api",
+    "express",
+    "postgresql",
+    "jwt",
+    "rest"
   ],
-  "author": "Jonathan Jay Zúñiga Perdomo <jaycoach@hotmail.com>",
+  "author": {
+    "name": "Jonathan Jay Zúñiga Perdomo",
+    "email": "jaycoach@hotmail.com",
+    "url": "https://github.com/Jaycoach"
+  },
+  "contributors": [],
   "license": "MIT",
+  "private": false,
   "dependencies": {
     "express": "^4.18.2",
     "express-async-errors": "^3.1.1",
+    "express-rate-limit": "^7.1.5",
+    "express-validator": "^7.0.1",
     "pg": "^8.11.3",
     "pg-hstore": "^2.3.4",
+    "redis": "^4.6.12",
     "dotenv": "^16.3.1",
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2",
     "joi": "^17.11.0",
     "helmet": "^7.1.0",
     "cors": "^2.8.5",
-    "express-rate-limit": "^7.1.5",
-    "express-mongo-sanitize": "^2.2.0",
-    "xss-clean": "^0.1.4",
-    "hpp": "^0.2.3",
     "compression": "^1.7.4",
     "morgan": "^1.10.0",
     "winston": "^3.11.0",
     "winston-daily-rotate-file": "^4.7.1",
+    "cookie-parser": "^1.4.6",
+    "express-mongo-sanitize": "^2.2.0",
+    "xss-clean": "^0.1.4",
+    "hpp": "^0.2.3",
     "axios": "^1.6.2",
     "node-cron": "^3.0.3",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.0",
-    "cookie-parser": "^1.4.6",
-    "express-validator": "^7.0.1",
-    "crypto": "^1.0.1"
+    "uuid": "^9.0.1",
+    "p-queue": "^7.3.4",
+    "bull": "^4.11.5",
+    "class-validator": "^0.14.0",
+    "class-transformer": "^0.5.1",
+    "lodash": "^4.17.21",
+    "qs": "^6.11.2",
+    "moment": "^2.29.4",
+    "moment-timezone": "^0.5.45"
   },
   "devDependencies": {
     "nodemon": "^3.0.2",
@@ -61,10 +100,77 @@
     "prettier": "^3.1.1",
     "jest": "^29.7.0",
     "supertest": "^6.3.3",
-    "@types/jest": "^29.5.11"
+    "@types/jest": "^29.5.11",
+    "@types/node": "^20.10.6",
+    "http-server": "^14.1.1",
+    "dotenv-cli": "^7.0.0",
+    "cross-env": "^7.0.3",
+    "npm-check-updates": "^16.14.12"
   },
   "engines": {
     "node": ">=18.0.0",
-    "npm": ">=9.0.0"
+    "npm": ">=9.0.0",
+    "yarn": ">=1.22.0"
+  },
+  "browserslist": [
+    "last 2 chrome versions"
+  ],
+  "jest": {
+    "testEnvironment": "node",
+    "coveragePathIgnorePatterns": [
+      "/node_modules/",
+      "/dist/"
+    ],
+    "collectCoverageFrom": [
+      "src/**/*.js",
+      "!src/**/*.test.js",
+      "!src/**/__mocks__/**"
+    ],
+    "testMatch": [
+      "**/__tests__/**/*.test.js"
+    ],
+    "verbose": true
+  },
+  "eslintConfig": {
+    "extends": "airbnb-base",
+    "env": {
+      "node": true,
+      "jest": true,
+      "es2021": true
+    },
+    "parserOptions": {
+      "ecmaVersion": "latest",
+      "sourceType": "module"
+    },
+    "rules": {
+      "no-console": "warn",
+      "func-names": "off",
+      "object-shorthand": "off",
+      "class-methods-use-this": "off"
+    }
+  },
+  "prettier": {
+    "singleQuote": true,
+    "trailingComma": "es5",
+    "tabWidth": 2,
+    "semi": true,
+    "printWidth": 100,
+    "arrowParens": "always"
+  },
+  "nodemonConfig": {
+    "watch": [
+      "src"
+    ],
+    "ignore": [
+      "src/**/*.test.js",
+      "logs/**",
+      "node_modules/**"
+    ],
+    "env": {
+      "NODE_ENV": "development"
+    },
+    "ext": "js",
+    "delay": 500,
+    "legacyWatch": false
   }
 }

@@ -1,51 +1,65 @@
+/**
+ * Middleware de Manejo de Errores
+ */
+
 const logger = require('../utils/logger');
 const config = require('../config');
 
+/**
+ * Clase de error personalizada
+ */
 class AppError extends Error {
   constructor(message, statusCode) {
     super(message);
     this.statusCode = statusCode;
-    this.status = `${statusCode}`.startsWith('4') ? 'fail' : 'error';
     this.isOperational = true;
 
     Error.captureStackTrace(this, this.constructor);
   }
 }
 
+/**
+ * Middleware principal de manejo de errores
+ */
 const errorHandler = (err, req, res, next) => {
-  err.statusCode = err.statusCode || 500;
-  err.status = err.status || 'error';
+  const statusCode = err.statusCode || 500;
+  const isDevelopment = config.server.env === 'development';
 
-  // Log del error
-  if (err.statusCode >= 500) {
-    logger.error('Error del servidor:', {
-      error: err.message,
+  // Contexto común del error
+  const errorContext = {
+    message: err.message,
+    url: req.originalUrl,
+    method: req.method,
+    ip: req.ip,
+    user: req.user?.id || 'anonymous',
+    timestamp: new Date().toISOString(),
+  };
+
+  // Log del error con diferenciación por severidad
+  if (statusCode >= 500) {
+    logger.error('🔴 Error del servidor:', {
+      ...errorContext,
       stack: err.stack,
-      path: req.path,
-      method: req.method,
-      ip: req.ip,
-      user: req.user?.id,
+      code: err.code,
     });
   } else {
-    logger.warn('Error del cliente:', {
-      error: err.message,
-      statusCode: err.statusCode,
-      path: req.path,
-      method: req.method,
-      ip: req.ip,
+    logger.warn('🟡 Error del cliente:', {
+      ...errorContext,
+      statusCode,
     });
   }
 
   // Errores específicos de PostgreSQL
   if (err.code && err.code.startsWith('23')) {
-    return handleDatabaseError(err, req, res);
+    return handleDatabaseError(err, res, isDevelopment);
   }
 
-  // JWT Errors
+  // Errores de JWT
   if (err.name === 'JsonWebTokenError') {
     return res.status(401).json({
       status: 'fail',
       message: 'Token inválido. Por favor inicie sesión nuevamente.',
+      ...(isDevelopment && { error: err.message }),
     });
   }
 
@@ -53,10 +67,12 @@ const errorHandler = (err, req, res, next) => {
     return res.status(401).json({
       status: 'fail',
       message: 'Su sesión ha expirado. Por favor inicie sesión nuevamente.',
+      code: 'TOKEN_EXPIRED',
+      ...(isDevelopment && { error: err.message }),
     });
   }
 
-  // Validation Errors
+  // Errores de validación
   if (err.name === 'ValidationError') {
     return res.status(400).json({
       status: 'fail',
@@ -65,77 +81,85 @@ const errorHandler = (err, req, res, next) => {
     });
   }
 
-  // Respuesta de desarrollo
-  if (config.server.env === 'development') {
-    return res.status(err.statusCode).json({
-      status: err.status,
-      error: err,
-      message: err.message,
-      stack: err.stack,
-    });
-  }
-
-  // Respuesta de producción
-  // Errores operacionales confiables: enviar mensaje al cliente
+  // Errores personalizados con statusCode
   if (err.isOperational) {
-    return res.status(err.statusCode).json({
-      status: err.status,
+    return res.status(statusCode).json({
+      status: statusCode < 500 ? 'fail' : 'error',
       message: err.message,
+      ...(isDevelopment && { stack: err.stack }),
     });
   }
 
-  // Errores de programación u otros errores desconocidos: no filtrar detalles
-  logger.error('ERROR NO OPERACIONAL:', err);
-  
+  // Error genérico de servidor
+  logger.error('❌ ERROR NO OPERACIONAL:', {
+    ...errorContext,
+    stack: err.stack,
+  });
+
   return res.status(500).json({
     status: 'error',
-    message: 'Ocurrió un error en el servidor',
+    message: isDevelopment ? err.message : 'Ocurrió un error en el servidor',
+    ...(isDevelopment && { stack: err.stack, name: err.name }),
   });
 };
 
-const handleDatabaseError = (err, req, res) => {
+/**
+ * Manejo de errores específicos de base de datos PostgreSQL
+ */
+const handleDatabaseError = (err, res, isDevelopment) => {
   const errors = {
     // Violación de unique constraint
     '23505': {
-      status: 409,
-      message: 'El registro ya existe',
+      statusCode: 409,
+      message: 'El recurso ya existe',
     },
     // Violación de foreign key
     '23503': {
-      status: 400,
+      statusCode: 400,
       message: 'Referencia inválida a otro registro',
     },
     // Violación de not null
     '23502': {
-      status: 400,
+      statusCode: 400,
       message: 'Campo requerido faltante',
     },
     // Violación de check constraint
     '23514': {
-      status: 400,
+      statusCode: 400,
       message: 'Datos inválidos',
     },
   };
 
   const error = errors[err.code] || {
-    status: 500,
+    statusCode: 500,
     message: 'Error de base de datos',
   };
 
-  // Extraer detalles adicionales si es posible
-  let detail = '';
-  if (err.detail) {
-    detail = err.detail;
-  } else if (err.constraint) {
-    detail = `Constraint violada: ${err.constraint}`;
-  }
-
-  return res.status(error.status).json({
+  const response = {
     status: 'fail',
     message: error.message,
-    ...(config.server.env === 'development' && { detail, code: err.code }),
-  });
+    ...(isDevelopment && {
+      code: err.code,
+      detail: err.detail || (err.constraint ? `Constraint violada: ${err.constraint}` : undefined),
+    }),
+  };
+
+  return res.status(error.statusCode).json(response);
 };
 
-module.exports = errorHandler;
-module.exports.AppError = AppError;
+/**
+ * Middleware para errores 404
+ */
+const notFound = (req, res, next) => {
+  const error = new AppError(
+    `Ruta no encontrada: ${req.method} ${req.originalUrl}`,
+    404
+  );
+  next(error);
+};
+
+module.exports = {
+  errorHandler,
+  notFound,
+  AppError,
+};

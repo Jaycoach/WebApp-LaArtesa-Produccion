@@ -30,9 +30,21 @@ class Database {
       this.pool.on('connect', () => {
         logger.debug('Nueva conexión establecida con PostgreSQL');
       });
-
+      
       this.pool.on('error', (err) => {
         logger.error('Error inesperado en el pool de conexiones:', err);
+        // En entornos de producción un error inesperado en el pool puede
+        // dejar la aplicación en un estado inconsistente. Forzar la salida
+        // permite que un gestor de procesos (pm2, systemd, docker restart)
+        // reinicie la instancia y recupere un estado limpio.
+        try {
+          if (config.server && config.server.env === 'production') {
+            logger.error('Error crítico en pool, saliendo del proceso');
+            process.exit(-1);
+          }
+        } catch (e) {
+          // No hacer caer al logger si process.exit falla por alguna razón
+        }
       });
 
       this.pool.on('remove', () => {
@@ -70,6 +82,36 @@ class Database {
       logger.error('Error al desconectar de PostgreSQL:', error);
       throw error;
     }
+  }
+
+  /**
+   * Chequeo de conexión simple (devuelve boolean)
+   * Similar a la sugerencia: intenta hacer SELECT NOW() y retorna true/false
+   */
+  async checkConnection() {
+    try {
+      if (!this.pool) {
+        // No forzamos conectar el pool completo si ya existe la configuración,
+        // pero intentar establecer la conexión inicial si no existe.
+        await this.connect();
+      }
+
+      const client = await this.pool.connect();
+      const result = await client.query('SELECT NOW()');
+      client.release();
+      logger.info('Conexión a PostgreSQL exitosa:', result.rows[0].now);
+      return true;
+    } catch (error) {
+      logger.error('Error al conectar con PostgreSQL:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Cerrar pool (alias de disconnect para compatibilidad)
+   */
+  async closePool() {
+    return this.disconnect();
   }
 
   /**
@@ -226,3 +268,10 @@ class Database {
 const db = new Database();
 
 module.exports = db;
+// Exports adicionales para compatibilidad con la sugerencia
+module.exports.pool = () => db.pool;
+module.exports.getPool = () => db.pool;
+module.exports.checkConnection = db.checkConnection.bind(db);
+module.exports.closePool = db.closePool.bind(db);
+// Export por defecto (compatibilidad CommonJS/ESM interop)
+module.exports.default = db;

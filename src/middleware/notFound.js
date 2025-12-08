@@ -1,11 +1,8 @@
-const { AppError } = require('./errorHandler');
+/**
+ * Este archivo se mantiene por compatibilidad, pero la función notFound
+ * ahora está en errorHandler.js y se exporta desde allí
+ */
 
-const notFound = (req, res, next) => {
-  const error = new AppError(
-    `Ruta no encontrada: ${req.method} ${req.originalUrl}`,
-    404
-  );
-  next(error);
-};
+const { notFound } = require('./errorHandler');
 
 module.exports = { notFound };

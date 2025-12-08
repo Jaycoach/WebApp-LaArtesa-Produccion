@@ -18,7 +18,7 @@ const colors = {
   warn: 'yellow',
   info: 'green',
   http: 'magenta',
-  debug: 'blue',
+  debug: 'white',
 };
 
 winston.addColors(colors);
@@ -64,8 +64,8 @@ transports.push(
     filename: path.join(logDir, 'error-%DATE%.log'),
     datePattern: 'YYYY-MM-DD',
     level: 'error',
-    maxSize: config.logging.maxSize,
-    maxFiles: config.logging.maxFiles,
+    maxSize: 5242880, // 5MB
+    maxFiles: 5,
     format: prodFormat,
   })
 );
@@ -75,8 +75,8 @@ transports.push(
   new DailyRotateFile({
     filename: path.join(logDir, 'combined-%DATE%.log'),
     datePattern: 'YYYY-MM-DD',
-    maxSize: config.logging.maxSize,
-    maxFiles: config.logging.maxFiles,
+    maxSize: 5242880, // 5MB
+    maxFiles: 5,
     format: prodFormat,
   })
 );
@@ -87,8 +87,8 @@ transports.push(
     filename: path.join(logDir, 'sap-sync-%DATE%.log'),
     datePattern: 'YYYY-MM-DD',
     level: 'info',
-    maxSize: config.logging.maxSize,
-    maxFiles: config.logging.maxFiles,
+    maxSize: 5242880, // 5MB
+    maxFiles: 5,
     format: prodFormat,
     // Solo loguear eventos de SAP
     filter: (info) => {
@@ -99,7 +99,7 @@ transports.push(
 
 // Crear logger
 const logger = winston.createLogger({
-  level: config.logging.level,
+  level: config.logs.level,
   levels,
   format: config.server.env === 'production' ? prodFormat : devFormat,
   transports,
@@ -159,8 +159,8 @@ if (config.server.env === 'production') {
     new DailyRotateFile({
       filename: path.join(logDir, 'exceptions-%DATE%.log'),
       datePattern: 'YYYY-MM-DD',
-      maxSize: config.logging.maxSize,
-      maxFiles: config.logging.maxFiles,
+      maxSize: 5242880, // 5MB
+      maxFiles: 5,
     })
   );
 
@@ -168,8 +168,8 @@ if (config.server.env === 'production') {
     new DailyRotateFile({
       filename: path.join(logDir, 'rejections-%DATE%.log'),
       datePattern: 'YYYY-MM-DD',
-      maxSize: config.logging.maxSize,
-      maxFiles: config.logging.maxFiles,
+      maxSize: 5242880, // 5MB
+      maxFiles: 5,
     })
   );
 }

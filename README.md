@@ -1,109 +1,281 @@
-# ARTESA - Sistema de Gestión de Producción
+# 🍞 Artesa Backend - Sistema de Gestión de Producción
 
-Backend API REST para el sistema de gestión de producción de panadería con integración SAP Business One.
+Backend API RESTful para el sistema de gestión de producción de panadería **LA ARTESA SAS**.
 
-## 🚀 Características
+---
 
-- ✅ API REST completa con Express.js
-- ✅ Autenticación JWT con refresh tokens
-- ✅ PostgreSQL como base de datos
-- ✅ Integración con SAP Business One vía Service Layer
-- ✅ Sistema de permisos basado en roles (RBAC)
-- ✅ Rate limiting y seguridad avanzada
-- ✅ Logging completo con Winston
-- ✅ Documentación con Swagger
-- ✅ Docker y Docker Compose
-- ✅ Nginx como reverse proxy
-- ✅ Sincronización automática con SAP
+## ✅ Estado del Proyecto
 
-## 📋 Requisitos Previos
+**Fase Actual:** Implementación de Autenticación y Usuarios
 
-- Docker y Docker Compose
-- Node.js 18+ (para desarrollo local)
-- Git
-- ngrok (opcional, para desarrollo remoto)
+### ✅ Completado (PASO 1 y PASO 2)
 
-## 🛠️ Instalación
+#### Servicios de Autenticación
+- [x] Register
+- [x] Login
+- [x] Refresh Token
+- [x] Logout
+- [x] Forgot Password
+- [x] Reset Password
+- [x] Change Password
+- [x] Get Profile
+- [x] Update Profile
+
+#### Servicios de Usuarios
+- [x] CRUD completo
+- [x] Gestión de roles
+- [x] Activar/Desactivar usuarios
+- [x] Resetear contraseñas
+- [x] Desbloquear usuarios
+- [x] Obtener actividad
+- [x] Estadísticas de usuarios
+
+#### Infraestructura Base
+- [x] Configuración centralizada
+- [x] Conexión a PostgreSQL
+- [x] Sistema de logging con Winston
+- [x] Middleware de seguridad
+- [x] Middleware de autenticación JWT
+- [x] Middleware de verificación de roles
+- [x] Manejo de errores centralizado
+- [x] Rate limiting (10 limitadores especializados)
+- [x] Request logging
+
+---
+
+## 🚀 Inicio Rápido
+
+### Prerrequisitos
+
+- Node.js >= 18.0.0
+- PostgreSQL >= 15
+- npm >= 9.0.0
+- Docker y Docker Compose (opcional)
 
 ### Opción 1: Con Docker (Recomendado)
 
-1. **Clonar el repositorio:**
 ```bash
+# 1. Clonar el repositorio
 git clone <repository-url>
 cd artesa-backend
-```
 
-2. **Configurar variables de entorno:**
-```bash
-cp .env.example .env
-```
+# 2. Las variables de entorno ya están configuradas
+# (Incluyen secretos JWT seguros generados)
 
-Editar `.env` y configurar:
-- Credenciales de base de datos
-- Secretos JWT (IMPORTANTE: generar nuevos)
-- Credenciales SAP
-- Otras configuraciones
-
-3. **Generar secretos JWT seguros:**
-```bash
-# En Node.js, ejecutar:
-node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
-```
-
-Copiar y pegar en `JWT_SECRET` y `JWT_REFRESH_SECRET` en `.env`
-
-4. **Iniciar con Docker Compose:**
-```bash
+# 3. Iniciar servicios
 docker-compose up -d
-```
 
-5. **Verificar que esté corriendo:**
-```bash
+# 4. Verificar que esté corriendo
 docker-compose ps
 docker-compose logs -f backend
+
+# 5. Probar la API
+curl http://localhost:3000/health
 ```
 
-6. **La API estará disponible en:**
-- Development: http://localhost:3000
-- Documentation: http://localhost:3000/api-docs
+**API disponible en:**
+- API: http://localhost:3000
+- Docs: http://localhost:3000/api-docs
 - Health: http://localhost:3000/health
 
 ### Opción 2: Desarrollo Local (sin Docker)
 
-1. **Instalar PostgreSQL localmente**
-
-2. **Configurar variables de entorno:**
 ```bash
-cp .env.example .env
-# Editar .env con configuración local
-```
+# 1. Clonar el repositorio
+git clone <repository-url>
+cd artesa-backend
 
-3. **Instalar dependencias:**
-```bash
+# 2. Instalar dependencias
 npm install
-```
 
-4. **Crear base de datos:**
-```bash
-# Conectarse a PostgreSQL
+# 3. Configurar PostgreSQL
 psql -U postgres
 
 CREATE DATABASE artesa_db;
-CREATE USER artesa_user WITH PASSWORD 'artesa_secure_password_2025';
+CREATE USER artesa_user WITH PASSWORD 'artesa_password_2025';
 GRANT ALL PRIVILEGES ON DATABASE artesa_db TO artesa_user;
-```
+\q
 
-5. **Ejecutar migraciones:**
-```bash
-# Ejecutar scripts SQL manualmente
+# 4. Ejecutar scripts de inicialización
 psql -U artesa_user -d artesa_db -f database/init/01-init.sql
 psql -U artesa_user -d artesa_db -f database/init/02-seed.sql
-```
+psql -U artesa_user -d artesa_db -f database/init/03-sessions.sql
 
-6. **Iniciar servidor en modo desarrollo:**
-```bash
+# 5. Iniciar servidor
 npm run dev
 ```
+
+---
+
+## 📚 API Endpoints
+
+### Autenticación (`/api/auth`)
+
+| Método | Endpoint | Descripción | Auth |
+|--------|----------|-------------|------|
+| POST | `/register` | Registrar nuevo usuario | No |
+| POST | `/login` | Iniciar sesión | No |
+| POST | `/refresh` | Refrescar token | No |
+| POST | `/logout` | Cerrar sesión | No |
+| POST | `/forgot-password` | Solicitar recuperación | No |
+| POST | `/reset-password` | Resetear con token | No |
+| POST | `/change-password` | Cambiar contraseña | Sí |
+| GET | `/profile` | Obtener perfil | Sí |
+| PUT | `/profile` | Actualizar perfil | Sí |
+| GET | `/verify` | Verificar token | Sí |
+
+### Usuarios (`/api/users`)
+
+| Método | Endpoint | Descripción | Rol Requerido |
+|--------|----------|-------------|---------------|
+| GET | `/` | Listar usuarios | Admin, Supervisor |
+| GET | `/:id` | Obtener usuario | Admin, Supervisor |
+| POST | `/` | Crear usuario | Admin |
+| PUT | `/:id` | Actualizar usuario | Admin |
+| DELETE | `/:id` | Eliminar usuario | Admin |
+| POST | `/:id/activate` | Activar usuario | Admin |
+| POST | `/:id/deactivate` | Desactivar usuario | Admin |
+| POST | `/:id/reset-password` | Resetear contraseña | Admin |
+| POST | `/:id/unlock` | Desbloquear usuario | Admin |
+| GET | `/:id/activity` | Ver actividad | Admin, Supervisor |
+| GET | `/stats` | Estadísticas | Admin, Supervisor |
+
+---
+
+## 🔐 Autenticación
+
+El sistema usa **JWT (JSON Web Tokens)** con dos tipos de tokens:
+
+- **Access Token**: Válido por 24 horas
+- **Refresh Token**: Válido por 7 días
+
+### Ejemplo de Login
+
+```bash
+POST /api/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "Admin123!@#"
+}
+```
+
+**Respuesta:**
+```json
+{
+  "success": true,
+  "message": "Login exitoso",
+  "data": {
+    "user": {
+      "id": 1,
+      "username": "admin",
+      "email": "admin@artesa.com",
+      "nombre_completo": "Administrador del Sistema",
+      "rol": "admin"
+    },
+    "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+    "refreshToken": "eyJhbGciOiJIUzI1NiIs...",
+    "expiresIn": "24h"
+  }
+}
+```
+
+### Usar Token en Requests
+
+```bash
+GET /api/users
+Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+```
+
+---
+
+## 👥 Sistema de Roles
+
+| Rol | Descripción | Permisos |
+|-----|-------------|----------|
+| `admin` | Administrador | Todos los permisos |
+| `supervisor` | Supervisor | Ver usuarios, órdenes, reportes |
+| `operador` | Operador | Gestionar órdenes, procesos |
+| `visualizador` | Solo lectura | Solo ver información |
+
+---
+
+## 🗄️ Estructura del Proyecto
+
+```
+artesa-backend/
+├── src/
+│   ├── config/
+│   │   └── index.js           # Configuración centralizada
+│   ├── controllers/
+│   │   ├── auth.controller.js # Controlador de autenticación
+│   │   └── user.controller.js # Controlador de usuarios
+│   ├── database/
+│   │   └── connection.js      # Conexión PostgreSQL
+│   ├── middleware/
+│   │   ├── auth.js            # Middleware de autenticación
+│   │   ├── roleCheck.js       # Verificación de roles
+│   │   ├── errorHandler.js    # Manejo de errores
+│   │   ├── rateLimiter.js     # Rate limiting (10 limitadores)
+│   │   └── requestLogger.js   # Logging de requests
+│   ├── routes/
+│   │   ├── index.js           # Router principal
+│   │   ├── auth.routes.js     # Rutas de autenticación
+│   │   └── user.routes.js     # Rutas de usuarios
+│   ├── services/
+│   │   ├── auth.service.js    # Lógica de autenticación
+│   │   └── user.service.js    # Lógica de usuarios
+│   ├── utils/
+│   │   ├── jwt.js             # Utilidades JWT
+│   │   └── logger.js          # Sistema de logging
+│   ├── validators/
+│   │   ├── auth.validator.js  # Validadores de auth
+│   │   └── user.validator.js  # Validadores de users
+│   └── server.js              # Servidor principal
+│
+├── database/
+│   └── init/
+│       ├── 01-init.sql        # Tablas iniciales
+│       ├── 02-seed.sql        # Datos de prueba
+│       └── 03-sessions.sql    # Tabla de sesiones
+│
+├── logs/                      # Archivos de log
+├── nginx/                     # Configuración Nginx
+├── .env                       # Variables de entorno (incluidas)
+├── .env.example               # Template de respaldo
+├── docker-compose.yml         # Orquestación de servicios
+├── Dockerfile                 # Imagen del backend
+├── package.json              # Dependencias del proyecto
+└── README.md                 # Este archivo
+```
+
+---
+
+## 📊 Scripts NPM
+
+```bash
+# Desarrollo
+npm start          # Iniciar en producción
+npm run dev        # Iniciar en desarrollo (con nodemon)
+
+# Testing
+npm test           # Ejecutar tests
+npm run test:watch # Tests en modo watch
+
+# Code Quality
+npm run lint       # Revisar código
+npm run lint:fix   # Corregir problemas de lint
+npm run format     # Formatear código
+
+# Seguridad
+npm run security:check # Auditar vulnerabilidades
+
+# Documentación
+npm run docs       # Generar documentación
+```
+
+---
 
 ## 🐳 Comandos Docker
 
@@ -111,7 +283,7 @@ npm run dev
 # Iniciar servicios
 docker-compose up -d
 
-# Ver logs
+# Ver logs en tiempo real
 docker-compose logs -f backend
 
 # Detener servicios
@@ -120,7 +292,7 @@ docker-compose down
 # Reconstruir imágenes
 docker-compose up -d --build
 
-# Ejecutar comandos en el contenedor
+# Ejecutar comando en contenedor
 docker-compose exec backend npm run <comando>
 
 # Acceder a PostgreSQL
@@ -129,48 +301,67 @@ docker-compose exec postgres psql -U artesa_user -d artesa_db
 # Ver estado de servicios
 docker-compose ps
 
-# Reiniciar solo el backend
+# Reiniciar servicios
 docker-compose restart backend
 ```
 
-## 📊 Base de Datos
+---
 
-### Estructura de Tablas
+## 🔧 Variables de Entorno
 
-- `usuarios` - Gestión de usuarios y autenticación
-- `ordenes_produccion` - Órdenes de producción
-- `orden_productos` - Productos por orden
-- `etapas_proceso` - Etapas del proceso productivo
-- `control_calidad` - Control de calidad
-- `recetas` - Recetas/fórmulas
-- `receta_ingredientes` - Ingredientes de recetas
-- `lotes` - Control de lotes
-- `sap_sync_log` - Log de sincronización SAP
-- `auditoria` - Auditoría del sistema
-- `configuracion_sistema` - Configuraciones
+El archivo `.env` ya incluye todas las variables necesarias:
 
-### Comandos Base de Datos
+```env
+# Servidor
+NODE_ENV=development
+PORT=3000
 
-```bash
-# Backup
-docker-compose exec postgres pg_dump -U artesa_user artesa_db > backup.sql
+# Base de datos
+DB_HOST=postgres
+DB_PORT=5432
+DB_NAME=artesa_db
+DB_USER=artesa_user
+DB_PASSWORD=artesa_password_2025
 
-# Restore
-docker-compose exec -T postgres psql -U artesa_user artesa_db < backup.sql
+# JWT (¡Ya generados y seguros!)
+JWT_SECRET=<valor-incluido>
+JWT_REFRESH_SECRET=<valor-incluido>
 
-# Resetear base de datos (CUIDADO en producción)
-docker-compose down -v
-docker-compose up -d
+# Rate Limiting
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_WINDOW_MS=900000
+RATE_LIMIT_MAX_REQUESTS=100
+
+# CORS
+CORS_ORIGIN=http://localhost:3000
+
+# Logging
+LOG_LEVEL=debug
 ```
 
-## 🔐 Seguridad
+**Cambiar en producción:**
+- Credenciales de base de datos
+- Secretos JWT (regenerar con: `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"`)
+- Variables SAP cuando corresponda
 
-### Características de Seguridad Implementadas:
+---
+
+## 🔐 Seguridad Implementada
+
+### Características de Seguridad:
 
 1. **Autenticación JWT** con access y refresh tokens
 2. **Bcrypt** para hashing de contraseñas (12 rounds)
 3. **Helmet** para headers HTTP seguros
-4. **Rate Limiting** por IP
+4. **Rate Limiting** - 10 limitadores especializados:
+   - General (100 req/15min por IP)
+   - Auth (5 intentos/15min por IP)
+   - Create/Update/Delete (limitados)
+   - Admin (operaciones administrativas)
+   - Strict (operaciones críticas)
+   - SAP (sincronización)
+   - Query (consultas complejas)
+   - Export (exportación de datos)
 5. **CORS** configurado
 6. **XSS Protection**
 7. **HPP** (HTTP Parameter Pollution)
@@ -188,115 +379,74 @@ Email: admin@artesa.com
 Password: Admin123!@#
 ```
 
-Al primer login, se solicitará cambiar la contraseña.
+**Al primer login se debe cambiar la contraseña.**
 
-## 📝 API Endpoints
+---
 
-### Autenticación
-```
-POST   /api/auth/register      - Registrar usuario
-POST   /api/auth/login         - Iniciar sesión
-POST   /api/auth/refresh       - Renovar token
-POST   /api/auth/logout        - Cerrar sesión
-GET    /api/auth/me            - Perfil actual
-```
+## 📊 Base de Datos
 
-### Órdenes de Producción
-```
-GET    /api/ordenes            - Listar órdenes
-GET    /api/ordenes/:id        - Detalle de orden
-POST   /api/ordenes/sync       - Sincronizar con SAP
-PUT    /api/ordenes/:id/start  - Iniciar producción
-PUT    /api/ordenes/:id/close  - Cerrar producción
-```
+### Tablas Principales
 
-### Proceso Productivo
-```
-POST   /api/proceso/:id/pesaje
-POST   /api/proceso/:id/amasado
-POST   /api/proceso/:id/division
-POST   /api/proceso/:id/formado
-POST   /api/proceso/:id/fermentacion
-POST   /api/proceso/:id/horneado
-```
+| Tabla | Descripción |
+|-------|-------------|
+| `usuarios` | Gestión de usuarios y autenticación |
+| `ordenes_produccion` | Órdenes de producción |
+| `orden_productos` | Productos por orden |
+| `etapas_proceso` | Etapas del proceso productivo |
+| `control_calidad` | Control de calidad |
+| `recetas` | Recetas/fórmulas |
+| `receta_ingredientes` | Ingredientes de recetas |
+| `lotes` | Control de lotes |
+| `sap_sync_log` | Log de sincronización SAP |
+| `auditoria` | Auditoría del sistema |
+| `configuracion_sistema` | Configuraciones |
+| `sesiones_usuarios` | Control de sesiones |
 
-Ver documentación completa en `/api-docs`
-
-## 🔧 Scripts NPM
+### Respaldo y Restauración
 
 ```bash
-# Desarrollo
-npm run dev              # Iniciar en modo desarrollo (nodemon)
+# Crear backup
+docker-compose exec postgres pg_dump -U artesa_user artesa_db > backup.sql
 
-# Producción
-npm start                # Iniciar en modo producción
+# Restaurar backup
+docker-compose exec -T postgres psql -U artesa_user artesa_db < backup.sql
 
-# Base de datos
-npm run db:create        # Crear base de datos
-npm run db:migrate       # Ejecutar migraciones
-npm run db:seed          # Cargar datos iniciales
-npm run db:reset         # Resetear BD completa
-
-# Testing
-npm test                 # Ejecutar tests
-npm run test:watch       # Tests en modo watch
-
-# Code Quality
-npm run lint             # Verificar código
-npm run lint:fix         # Corregir problemas
-npm run format           # Formatear código
-
-# Documentación
-npm run docs             # Generar documentación
+# Resetear base de datos (⚠️ Cuidado en producción)
+docker-compose down -v
+docker-compose up -d
 ```
 
-## 🌐 Ngrok (Desarrollo Remoto)
+---
 
-Para exponer la API localmente y permitir acceso remoto:
+## 📊 Monitoreo
+
+### Health Check
 
 ```bash
-# Instalar ngrok
-brew install ngrok  # macOS
-# o descargar de https://ngrok.com
-
-# Configurar auth token
-ngrok config add-authtoken <your-token>
-
-# Exponer puerto 3000
-ngrok http 3000
+curl http://localhost:3000/health
 ```
 
-Actualizar `CORS_ORIGIN` en `.env` con la URL de ngrok.
-
-## 🔄 Integración SAP
-
-### Configuración
-
-Editar en `.env`:
-```bash
-SAP_URL=https://your-sap-server:50000/b1s/v1
-SAP_COMPANY=ARTESA_SAS
-SAP_USER=api_user
-SAP_PASSWORD=your_password
+**Respuesta:**
+```json
+{
+  "status": "OK",
+  "timestamp": "2025-01-07T...",
+  "uptime": 1234.56,
+  "environment": "development",
+  "database": "Connected"
+}
 ```
 
-### Sincronización Automática
-
-La sincronización con SAP se ejecuta automáticamente a las 8:00 PM (Lun-Vie).
-
-Para ejecutar manualmente:
-```bash
-curl -X POST http://localhost:3000/api/sync/now \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
-
-## 📊 Logs
+### Logs
 
 Los logs se guardan en `logs/`:
 
-- `combined-YYYY-MM-DD.log` - Todos los logs
-- `error-YYYY-MM-DD.log` - Solo errores
-- `sap-sync-YYYY-MM-DD.log` - Sincronización SAP
+```
+logs/
+├── combined-YYYY-MM-DD.log  # Todos los logs
+├── error-YYYY-MM-DD.log     # Solo errores
+└── sap-sync-YYYY-MM-DD.log  # Sincronización SAP
+```
 
 Ver logs en tiempo real:
 ```bash
@@ -307,131 +457,97 @@ docker-compose logs -f backend
 tail -f logs/combined-*.log
 ```
 
+---
+
 ## 🧪 Testing
 
 ```bash
 # Ejecutar todos los tests
 npm test
 
-# Con coverage
+# Tests en modo watch
+npm run test:watch
+
+# Tests con coverage
 npm test -- --coverage
 
 # Tests específicos
 npm test -- auth.test.js
 ```
 
+---
+
+## 🔄 Integración SAP
+
+### Configuración
+
+Las credenciales SAP se configuran en `.env`:
+
+```env
+SAP_URL=https://tu-servidor-sap:50000/b1s/v1
+SAP_COMPANY=ARTESA_SAS
+SAP_USER=tu_usuario_api
+SAP_PASSWORD=tu_password
+```
+
+### Sincronización Automática
+
+La sincronización se ejecuta automáticamente a las 8:00 PM (Lun-Vie).
+
+Ejecutar manualmente:
+```bash
+curl -X POST http://localhost:3000/api/sync/now \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+---
+
 ## 🚀 Despliegue a Producción
 
 ### Preparación
 
-1. **Actualizar variables de entorno producción:**
+1. **Generar nuevos secretos JWT:**
 ```bash
-cp .env.example .env.production
-# Editar con valores de producción
+node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
 ```
 
-2. **Generar nuevos secretos JWT**
+2. **Actualizar `.env` con valores de producción:**
+   - Credenciales seguras de BD
+   - Nuevos secretos JWT
+   - URLs correctas
+   - SAP credenciales
 
-3. **Configurar SSL/TLS** en nginx
+3. **Configurar SSL/TLS en Nginx**
 
-4. **Habilitar perfil de producción:**
+4. **Iniciar con perfil de producción:**
 ```bash
 docker-compose --profile production up -d
 ```
 
-### Con Nginx
+---
 
-Nginx ya está configurado como reverse proxy con:
-- SSL/TLS
-- Rate limiting
-- Compresión
-- Headers de seguridad
-- Cacheo
+## 🎯 Próximos Pasos
 
-Certificados SSL en: `nginx/ssl/`
+### PASO 3: Órdenes de Producción (Siguiente)
 
-## 📈 Monitoreo
+- [ ] Servicios de órdenes
+- [ ] Controladores
+- [ ] Validadores
+- [ ] Rutas
+- [ ] Integración SAP
 
-### Health Check
+Ver `PROXIMOS_PASOS.md` para el roadmap completo.
 
-```bash
-curl http://localhost:3000/health
-```
+---
 
-Respuesta:
-```json
-{
-  "status": "OK",
-  "timestamp": "2025-01-XX...",
-  "uptime": 1234.56,
-  "environment": "development",
-  "database": "Connected"
-}
-```
+## 📞 Soporte
 
-### Métricas
+- **Email**: jaycoach@hotmail.com
+- **Autor**: Jonathan Jay Zúñiga Perdomo
+- **Rol**: Consultor SAP Business One | FullStack Developer
 
-Ver estadísticas del pool de conexiones:
-```bash
-curl http://localhost:3000/api/metrics
-```
-
-## 🤝 Contribuir
-
-1. Fork el proyecto
-2. Crear feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit cambios (`git commit -m 'Add some AmazingFeature'`)
-4. Push al branch (`git push origin feature/AmazingFeature`)
-5. Abrir Pull Request
+---
 
 ## 📄 Licencia
 
 MIT
-
-## 👤 Autor
-
-**Jonathan Jay Zúñiga Perdomo**
-- Email: jaycoach@hotmail.com
-- Consultor SAP Business One
-- FullStack Developer
-
-## 📞 Soporte
-
-Para soporte técnico:
-- Email: jaycoach@hotmail.com
-- Issues: GitHub Issues
-
----
-
-## ⚡ Quick Start
-
-```bash
-# Clonar e iniciar
-git clone <repo>
-cd artesa-backend
-cp .env.example .env
-# Editar .env
-docker-compose up -d
-
-# Verificar
-curl http://localhost:3000/health
-
-# Ver docs
-open http://localhost:3000/api-docs
-```
-
-## 🎯 Roadmap Fase 1 (MVP)
-
-- [x] Estructura base del proyecto
-- [x] Base de datos PostgreSQL
-- [x] Sistema de autenticación JWT
-- [x] Middleware de seguridad
-- [ ] Controladores de producción
-- [ ] Integración SAP Service Layer
-- [ ] Sincronización automática
-- [ ] API completa
-- [ ] Tests unitarios
-- [ ] Documentación Swagger
-- [ ] Deploy inicial
-
-**Duración estimada:** 8 semanas

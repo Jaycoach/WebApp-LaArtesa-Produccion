@@ -1,112 +1,187 @@
+/**
+ * Servidor Principal - Artesa Backend
+ * Sistema de Gestión de Producción para Panadería
+ */
+
 require('express-async-errors');
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const compression = require('compression');
-const cookieParser = require('cookie-parser');
-const morgan = require('morgan');
 
 const config = require('./config');
 const logger = require('./utils/logger');
-const db = require('./database/connection');
-const errorHandler = require('./middleware/errorHandler');
+const { pool, checkConnection } = require('./database/connection');
+const { errorHandler, notFound } = require('./middleware/errorHandler');
+const requestLoggers = require('./middleware/requestLogger');
+const { general: generalLimiter } = require('./middleware/rateLimiter');
+
+// Importar rutas
 const routes = require('./routes');
 
-// Inicializar Express
+// Crear aplicación Express
 const app = express();
 
-// Configuración de seguridad
-app.use(helmet());
-app.use(cors(config.cors));
-app.use(compression());
+/**
+ * MIDDLEWARE
+ */
 
-// Body parser
+// Seguridad con Helmet
+app.use(helmet());
+
+// Habilitar CORS
+app.use(cors(config.cors));
+
+// Parsear JSON y URL-encoded
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(cookieParser());
 
-// Request logger
-app.use(morgan('dev', { stream: logger.stream }));
+// Comprimir respuestas
+app.use(compression());
 
-// Health check
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    environment: config.server.env,
-    database: db.isConnected() ? 'Connected' : 'Disconnected',
-  });
+// Request logger (array de middlewares)
+app.use(requestLoggers);
+
+// Rate limiting general
+app.use('/api/', generalLimiter);
+
+/**
+ * HEALTH CHECK
+ */
+app.get('/health', async (req, res) => {
+  try {
+    const dbConnected = await checkConnection();
+    
+    res.json({
+      status: 'OK',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      environment: config.server.env,
+      database: dbConnected ? 'Connected' : 'Disconnected',
+      memory: {
+        used: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)} MB`,
+        total: `${Math.round(process.memoryUsage().heapTotal / 1024 / 1024)} MB`
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'ERROR',
+      message: error.message
+    });
+  }
 });
 
-// API Routes
+/**
+ * RUTAS PRINCIPALES
+ */
 app.use('/api', routes);
 
-// Ruta raíz
+/**
+ * ROOT ENDPOINT
+ */
 app.get('/', (req, res) => {
   res.json({
-    message: 'API ARTESA - Sistema de Gestión de Producción',
+    success: true,
+    message: 'Artesa Backend API',
     version: '1.0.0',
-    status: 'running',
+    description: 'Sistema de Gestión de Producción para Panadería',
+    documentation: '/api-docs',
+    health: '/health',
     endpoints: {
-      health: '/health',
       api: '/api',
+      auth: '/api/auth',
+      users: '/api/users'
     }
   });
 });
 
-// Error Handler (debe ser el último middleware)
+/**
+ * MANEJO DE ERRORES
+ */
+
+// 404 Not Found
+app.use(notFound);
+
+// Error handler centralizado
 app.use(errorHandler);
 
-// Inicialización del servidor
+/**
+ * INICIAR SERVIDOR
+ */
+const PORT = config.server.port;
+
 const startServer = async () => {
   try {
-    // Conectar a la base de datos
-    logger.info('🔌 Conectando a la base de datos...');
-    await db.connect();
-    logger.info('✅ Base de datos conectada');
-
-    // Iniciar servidor
-    const PORT = config.server.port;
-    app.listen(PORT, () => {
-      logger.info('='.repeat(50));
-      logger.info(`🚀 Servidor ARTESA iniciado`);
-      logger.info(`📍 Entorno: ${config.server.env}`);
-      logger.info(`🌐 Puerto: ${PORT}`);
-      logger.info(`🕐 Timezone: ${config.server.timezone}`);
-      logger.info(`✅ Health: http://localhost:${PORT}/health`);
-      logger.info(`✅ API: http://localhost:${PORT}/api`);
-      logger.info('='.repeat(50));
-    });
-
-    // Manejo de señales de terminación
-    process.on('SIGTERM', async () => {
-      logger.info('SIGTERM recibido. Cerrando servidor...');
-      await db.disconnect();
-      process.exit(0);
-    });
-
-  } catch (error) {
-    logger.error('❌ Error al iniciar el servidor:', error);
-    // Si es error de BD, continuar de todos modos en desarrollo
-    if (config.server.env === 'development') {
-      logger.warn('⚠️  Continuando sin base de datos...');
-      const PORT = config.server.port;
-      app.listen(PORT, () => {
-        logger.info('='.repeat(50));
-        logger.info(`🚀 Servidor ARTESA iniciado (SIN BD)`);
-        logger.info(`🌐 Puerto: ${PORT}`);
-        logger.info(`⚠️  Base de datos no conectada`);
-        logger.info('='.repeat(50));
-      });
-    } else {
+    // Verificar conexión a la base de datos
+    const dbConnected = await checkConnection();
+    
+    if (!dbConnected) {
+      logger.error('No se pudo conectar a la base de datos. Abortando inicio del servidor.');
       process.exit(1);
     }
+    
+    // Iniciar servidor
+    app.listen(PORT, () => {
+      logger.info(`
+╔════════════════════════════════════════════════════════════╗
+║                                                            ║
+║            🍞 ARTESA - Backend API Server                  ║
+║                                                            ║
+║  Servidor corriendo en: http://localhost:${PORT}           ║
+║  Ambiente: ${config.server.env.toUpperCase().padEnd(42)}║
+║  Base de datos: PostgreSQL - Conectada                    ║
+║                                                            ║
+║  Endpoints disponibles:                                    ║
+║  - Health Check: http://localhost:${PORT}/health           ║
+║  - API Docs: http://localhost:${PORT}/api-docs             ║
+║  - API Root: http://localhost:${PORT}/api                  ║
+║                                                            ║
+╚════════════════════════════════════════════════════════════╝
+      `);
+      
+      logger.info('Sistema listo para recibir peticiones');
+    });
+    
+  } catch (error) {
+    logger.error('Error al iniciar el servidor:', error);
+    process.exit(1);
   }
 };
 
-// Iniciar
-if (process.env.NODE_ENV !== 'test') {
+/**
+ * MANEJO DE SEÑALES DE TERMINACIÓN
+ */
+const gracefulShutdown = async (signal) => {
+  logger.info(`Señal ${signal} recibida. Cerrando servidor...`);
+  
+  try {
+    await pool.end();
+    logger.info('Pool de base de datos cerrado');
+    
+    process.exit(0);
+  } catch (error) {
+    logger.error('Error durante el cierre:', error);
+    process.exit(1);
+  }
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+/**
+ * MANEJO DE ERRORES NO CAPTURADOS
+ */
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught Exception:', error);
+  gracefulShutdown('UNCAUGHT_EXCEPTION');
+});
+
+// Iniciar el servidor
+if (require.main === module) {
   startServer();
 }
 

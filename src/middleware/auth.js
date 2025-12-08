@@ -1,3 +1,7 @@
+/**
+ * Middleware de Autenticación JWT
+ */
+
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 const logger = require('../utils/logger');
@@ -5,18 +9,21 @@ const { AppError } = require('./errorHandler');
 const db = require('../database/connection');
 
 /**
- * Verificar token JWT
+ * Extraer token del header Authorization o cookies
+ */
+const extractToken = (req) => {
+  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+    return req.headers.authorization.substring(7);
+  }
+  return req.cookies?.token || null;
+};
+
+/**
+ * Verificar token JWT y validaciones de usuario
  */
 const verifyToken = async (req, res, next) => {
   try {
-    // 1. Obtener token del header
-    let token;
-    
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
-    } else if (req.cookies.token) {
-      token = req.cookies.token;
-    }
+    const token = extractToken(req);
 
     if (!token) {
       throw new AppError('No autenticado. Por favor inicie sesión.', 401);
@@ -25,15 +32,15 @@ const verifyToken = async (req, res, next) => {
     // 2. Verificar token
     const decoded = jwt.verify(token, config.jwt.secret);
 
-    // 3. Verificar que el usuario aún exista
+    // 3. Verificar que el usuario aún exista en BD
     const result = await db.query(
-      `SELECT id, uuid, username, email, nombre_completo, rol, activo, bloqueado_hasta
+      `SELECT id, uuid, username, email, nombre_completo, rol, activo, bloqueado_hasta, ultimo_cambio_password
        FROM usuarios 
        WHERE id = $1`,
       [decoded.userId]
     );
 
-    if (result.rows.length === 0) {
+    if (!result.rows.length) {
       throw new AppError('El usuario ya no existe.', 401);
     }
 
@@ -60,15 +67,15 @@ const verifyToken = async (req, res, next) => {
       throw new AppError('Usuario bloqueado temporalmente.', 403);
     }
 
-    // 6. Verificar que el usuario no haya cambiado la contraseña después de la emisión del token
+    // 6. Verificar cambio de contraseña post-emisión del token
     if (decoded.iat && user.ultimo_cambio_password) {
-      const cambioPasswordTimestamp = new Date(user.ultimo_cambio_password).getTime() / 1000;
-      if (decoded.iat < cambioPasswordTimestamp) {
+      const passwordChangeTime = new Date(user.ultimo_cambio_password).getTime() / 1000;
+      if (decoded.iat < passwordChangeTime) {
         throw new AppError('Sesión inválida. Por favor inicie sesión nuevamente.', 401);
       }
     }
 
-    // 7. Agregar usuario al request
+    // 7. Agregar usuario autenticado al request
     req.user = {
       id: user.id,
       uuid: user.uuid,
@@ -78,7 +85,7 @@ const verifyToken = async (req, res, next) => {
       rol: user.rol,
     };
 
-    // 8. Actualizar último acceso (async, sin esperar)
+    // 8. Actualizar último acceso (sin bloquear)
     db.query(
       'UPDATE usuarios SET ultimo_acceso = CURRENT_TIMESTAMP WHERE id = $1',
       [user.id]
@@ -99,8 +106,8 @@ const verifyToken = async (req, res, next) => {
 };
 
 /**
- * Middleware para verificar roles
- * @param  {...string} roles - Roles permitidos
+ * Middleware para verificar permisos por rol
+ * @param {...string} roles - Roles permitidos para acceder
  */
 const requireRole = (...roles) => {
   return (req, res, next) => {
@@ -116,10 +123,8 @@ const requireRole = (...roles) => {
         path: req.path,
         ip: req.ip,
       });
-      
-      return next(
-        new AppError('No tiene permisos para realizar esta acción', 403)
-      );
+
+      return next(new AppError('No tiene permisos para realizar esta acción', 403));
     }
 
     next();
@@ -128,24 +133,18 @@ const requireRole = (...roles) => {
 
 /**
  * Middleware opcional de autenticación
- * No falla si no hay token, solo lo verifica si existe
+ * Verifica token si existe, continúa sin él si no hay
  */
 const optionalAuth = async (req, res, next) => {
   try {
-    let token;
-    
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
-    } else if (req.cookies.token) {
-      token = req.cookies.token;
-    }
+    const token = extractToken(req);
 
     if (!token) {
       return next();
     }
 
     const decoded = jwt.verify(token, config.jwt.secret);
-    
+
     const result = await db.query(
       `SELECT id, uuid, username, email, nombre_completo, rol, activo
        FROM usuarios 
@@ -154,25 +153,28 @@ const optionalAuth = async (req, res, next) => {
     );
 
     if (result.rows.length > 0) {
+      const user = result.rows[0];
       req.user = {
-        id: result.rows[0].id,
-        uuid: result.rows[0].uuid,
-        username: result.rows[0].username,
-        email: result.rows[0].email,
-        nombreCompleto: result.rows[0].nombre_completo,
-        rol: result.rows[0].rol,
+        id: user.id,
+        uuid: user.uuid,
+        username: user.username,
+        email: user.email,
+        nombreCompleto: user.nombre_completo,
+        rol: user.rol,
       };
     }
 
     next();
   } catch (error) {
-    // Si hay error, simplemente continuar sin usuario
+    // Si hay error de validación, continuar sin usuario
+    logger.debug('Autenticación opcional fallida:', error.message);
     next();
   }
 };
 
 /**
- * Verificar que el usuario pueda acceder a su propio recurso o sea admin
+ * Middleware para verificar propiedad de recurso o rol admin
+ * @param {string} userIdParam - Nombre del parámetro que contiene el userId
  */
 const requireOwnerOrAdmin = (userIdParam = 'userId') => {
   return (req, res, next) => {
@@ -191,10 +193,8 @@ const requireOwnerOrAdmin = (userIdParam = 'userId') => {
         path: req.path,
         ip: req.ip,
       });
-      
-      return next(
-        new AppError('No tiene permisos para acceder a este recurso', 403)
-      );
+
+      return next(new AppError('No tiene permisos para acceder a este recurso', 403));
     }
 
     next();

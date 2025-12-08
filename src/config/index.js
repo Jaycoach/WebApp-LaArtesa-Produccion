@@ -72,6 +72,85 @@ module.exports = {
     skipSuccessfulRequests: true,
   },
 
+  // Configuración avanzada de Rate Limiting
+  rateLimiters: {
+    // General - Global API protection
+    general: {
+      windowMs: parseInt(process.env.RATE_LIMIT_GENERAL_WINDOW, 10) || 15 * 60 * 1000,
+      max: parseInt(process.env.RATE_LIMIT_GENERAL_MAX, 10) || 100,
+    },
+    
+    // Authentication - Brute force prevention
+    auth: {
+      windowMs: parseInt(process.env.RATE_LIMIT_AUTH_WINDOW, 10) || 15 * 60 * 1000,
+      max: parseInt(process.env.RATE_LIMIT_AUTH_MAX, 10) || 5,
+    },
+    
+    // Create - Resource creation protection
+    create: {
+      windowMs: parseInt(process.env.RATE_LIMIT_CREATE_WINDOW, 10) || 60 * 1000,
+      max: parseInt(process.env.RATE_LIMIT_CREATE_MAX, 10) || 15,
+    },
+    
+    // Update - Update operations protection
+    update: {
+      windowMs: parseInt(process.env.RATE_LIMIT_UPDATE_WINDOW, 10) || 60 * 1000,
+      max: parseInt(process.env.RATE_LIMIT_UPDATE_MAX, 10) || 30,
+    },
+    
+    // Delete - Delete operations protection (strictest)
+    delete: {
+      windowMs: parseInt(process.env.RATE_LIMIT_DELETE_WINDOW, 10) || 60 * 1000,
+      max: parseInt(process.env.RATE_LIMIT_DELETE_MAX, 10) || 5,
+    },
+    
+    // SAP - SAP B1 integration operations
+    sap: {
+      windowMs: parseInt(process.env.RATE_LIMIT_SAP_WINDOW, 10) || 60 * 1000,
+      max: parseInt(process.env.RATE_LIMIT_SAP_MAX, 10) || 25,
+    },
+    
+    // Query - Complex queries and data retrieval
+    query: {
+      windowMs: parseInt(process.env.RATE_LIMIT_QUERY_WINDOW, 10) || 60 * 1000,
+      max: parseInt(process.env.RATE_LIMIT_QUERY_MAX, 10) || 50,
+    },
+    
+    // Admin - Administrative operations
+    admin: {
+      windowMs: parseInt(process.env.RATE_LIMIT_ADMIN_WINDOW, 10) || 60 * 1000,
+      max: parseInt(process.env.RATE_LIMIT_ADMIN_MAX, 10) || 20,
+    },
+    
+    // Strict - Sensitive operations (password change, config update)
+    strict: {
+      windowMs: parseInt(process.env.RATE_LIMIT_STRICT_WINDOW, 10) || 60 * 1000,
+      max: parseInt(process.env.RATE_LIMIT_STRICT_MAX, 10) || 3,
+    },
+    
+    // Export - Data export operations
+    export: {
+      windowMs: parseInt(process.env.RATE_LIMIT_EXPORT_WINDOW, 10) || 60 * 60 * 1000, // 1 hour
+      max: parseInt(process.env.RATE_LIMIT_EXPORT_MAX, 10) || 5,
+    },
+  },
+
+  // Configuración de Redis para Rate Limiting distribuido
+  redis: {
+    enabled: process.env.REDIS_ENABLED === 'true',
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT, 10) || 6379,
+    password: process.env.REDIS_PASSWORD || undefined,
+    db: parseInt(process.env.REDIS_DB, 10) || 0,
+    retryStrategy: (times) => Math.min(times * 50, 2000),
+  },
+
+  // Configuración de Logs (simplificada)
+  logs: {
+    level: process.env.LOG_LEVEL || 'info',
+    format: process.env.LOG_FORMAT || 'json'
+  },
+
   // Configuración SAP B1
   sap: {
     url: process.env.SAP_URL || 'https://sap-server:50000/b1s/v1',
