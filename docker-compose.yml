@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: artesa-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-artesa_db}
+      POSTGRES_USER: ${DB_USER:-artesa_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-artesa_secure_password_2025}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=es_CO.UTF-8"
+      TZ: America/Bogota
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+    networks:
+      - artesa-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-artesa_user} -d ${DB_NAME:-artesa_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: ${NODE_ENV:-development}
+    container_name: artesa-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: ${PORT:-3000}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-artesa_db}
+      DB_USER: ${DB_USER:-artesa_user}
+      DB_PASSWORD: ${DB_PASSWORD:-artesa_secure_password_2025}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_EXPIRE: ${JWT_EXPIRE:-24h}
+      JWT_REFRESH_EXPIRE: ${JWT_REFRESH_EXPIRE:-7d}
+      SAP_URL: ${SAP_URL}
+      SAP_COMPANY: ${SAP_COMPANY}
+      SAP_USER: ${SAP_USER}
+      SAP_PASSWORD: ${SAP_PASSWORD}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3001}
+      TZ: America/Bogota
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - ./src:/app/src
+      - ./logs:/app/logs
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - artesa-network
+    command: npm run dev
+
+  # Nginx Reverse Proxy (para producción)
+  nginx:
+    image: nginx:alpine
+    container_name: artesa-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - backend
+    networks:
+      - artesa-network
+    profiles:
+      - production
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  artesa-network:
+    driver: bridge
