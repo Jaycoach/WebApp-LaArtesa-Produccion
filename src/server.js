@@ -8,6 +8,8 @@ const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const compression = require('compression');
+const swaggerUi = require('swagger-ui-express');
+const swaggerJsdoc = require('swagger-jsdoc');
 
 const config = require('./config');
 const logger = require('./utils/logger');
@@ -15,12 +17,38 @@ const db = require('./database/connection');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 const requestLoggers = require('./middleware/requestLogger');
 const { general: generalLimiter } = require('./middleware/rateLimiter');
+const swaggerConfig = require('./swagger/swaggerConfig');
 
 // Importar rutas
 const routes = require('./routes');
 
 // Crear aplicación Express
 const app = express();
+
+/**
+ * CONFIGURACIÓN SWAGGER
+ */
+if (config.swagger.enabled) {
+  const specs = swaggerJsdoc(swaggerConfig);
+  app.use('/api-docs', swaggerUi.serve);
+  app.get('/api-docs', swaggerUi.setup(specs, {
+    swaggerOptions: {
+      docExpansion: 'list',
+      filter: true,
+      showRequestHeaders: true,
+      persistAuthorization: true,
+    },
+    customSiteTitle: 'ARTESA API Documentation',
+  }));
+  
+  // Endpoint alternativo para el JSON de OpenAPI
+  app.get('/api-docs/swagger.json', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.send(specs);
+  });
+  
+  logger.info('📚 Swagger UI disponible en http://localhost:' + config.server.port + '/api-docs');
+}
 
 /**
  * MIDDLEWARE
