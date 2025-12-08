@@ -37,7 +37,7 @@ const verifyToken = async (req, res, next) => {
       `SELECT id, uuid, username, email, nombre_completo, rol, activo, bloqueado_hasta, ultimo_cambio_password
        FROM usuarios 
        WHERE id = $1`,
-      [decoded.userId]
+      [decoded.userId],
     );
 
     if (!result.rows.length) {
@@ -88,10 +88,10 @@ const verifyToken = async (req, res, next) => {
     // 8. Actualizar último acceso (sin bloquear)
     db.query(
       'UPDATE usuarios SET ultimo_acceso = CURRENT_TIMESTAMP WHERE id = $1',
-      [user.id]
-    ).catch(err => logger.error('Error actualizando último acceso:', err));
+      [user.id],
+    ).catch((err) => logger.error('Error actualizando último acceso:', err));
 
-    next();
+    return next();
   } catch (error) {
     // Manejar errores específicos de JWT
     if (error.name === 'JsonWebTokenError') {
@@ -100,8 +100,8 @@ const verifyToken = async (req, res, next) => {
     if (error.name === 'TokenExpiredError') {
       return next(new AppError('Token expirado. Por favor inicie sesión nuevamente.', 401));
     }
-    
-    next(error);
+
+    return next(error);
   }
 };
 
@@ -109,26 +109,24 @@ const verifyToken = async (req, res, next) => {
  * Middleware para verificar permisos por rol
  * @param {...string} roles - Roles permitidos para acceder
  */
-const requireRole = (...roles) => {
-  return (req, res, next) => {
-    if (!req.user) {
-      return next(new AppError('No autenticado', 401));
-    }
+const requireRole = (...roles) => (req, res, next) => {
+  if (!req.user) {
+    return next(new AppError('No autenticado', 401));
+  }
 
-    if (!roles.includes(req.user.rol)) {
-      logger.logSecurity('UNAUTHORIZED_ROLE_ACCESS', {
-        userId: req.user.id,
-        userRole: req.user.rol,
-        requiredRoles: roles,
-        path: req.path,
-        ip: req.ip,
-      });
+  if (!roles.includes(req.user.rol)) {
+    logger.logSecurity('UNAUTHORIZED_ROLE_ACCESS', {
+      userId: req.user.id,
+      userRole: req.user.rol,
+      requiredRoles: roles,
+      path: req.path,
+      ip: req.ip,
+    });
 
-      return next(new AppError('No tiene permisos para realizar esta acción', 403));
-    }
+    return next(new AppError('No tiene permisos para realizar esta acción', 403));
+  }
 
-    next();
-  };
+  return next();
 };
 
 /**
@@ -149,7 +147,7 @@ const optionalAuth = async (req, res, next) => {
       `SELECT id, uuid, username, email, nombre_completo, rol, activo
        FROM usuarios 
        WHERE id = $1 AND activo = true`,
-      [decoded.userId]
+      [decoded.userId],
     );
 
     if (result.rows.length > 0) {
@@ -164,11 +162,11 @@ const optionalAuth = async (req, res, next) => {
       };
     }
 
-    next();
+    return next();
   } catch (error) {
     // Si hay error de validación, continuar sin usuario
     logger.debug('Autenticación opcional fallida:', error.message);
-    next();
+    return next();
   }
 };
 
@@ -176,29 +174,27 @@ const optionalAuth = async (req, res, next) => {
  * Middleware para verificar propiedad de recurso o rol admin
  * @param {string} userIdParam - Nombre del parámetro que contiene el userId
  */
-const requireOwnerOrAdmin = (userIdParam = 'userId') => {
-  return (req, res, next) => {
-    if (!req.user) {
-      return next(new AppError('No autenticado', 401));
-    }
+const requireOwnerOrAdmin = (userIdParam = 'userId') => (req, res, next) => {
+  if (!req.user) {
+    return next(new AppError('No autenticado', 401));
+  }
 
-    const resourceUserId = parseInt(req.params[userIdParam], 10);
-    const isOwner = req.user.id === resourceUserId;
-    const isAdmin = req.user.rol === 'ADMIN';
+  const resourceUserId = parseInt(req.params[userIdParam], 10);
+  const isOwner = req.user.id === resourceUserId;
+  const isAdmin = req.user.rol === 'ADMIN';
 
-    if (!isOwner && !isAdmin) {
-      logger.logSecurity('UNAUTHORIZED_RESOURCE_ACCESS', {
-        userId: req.user.id,
-        resourceUserId,
-        path: req.path,
-        ip: req.ip,
-      });
+  if (!isOwner && !isAdmin) {
+    logger.logSecurity('UNAUTHORIZED_RESOURCE_ACCESS', {
+      userId: req.user.id,
+      resourceUserId,
+      path: req.path,
+      ip: req.ip,
+    });
 
-      return next(new AppError('No tiene permisos para acceder a este recurso', 403));
-    }
+    return next(new AppError('No tiene permisos para acceder a este recurso', 403));
+  }
 
-    next();
-  };
+  return next();
 };
 
 module.exports = {

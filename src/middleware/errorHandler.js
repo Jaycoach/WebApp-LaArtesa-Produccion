@@ -21,7 +21,7 @@ class AppError extends Error {
 /**
  * Middleware principal de manejo de errores
  */
-const errorHandler = (err, req, res, next) => {
+const errorHandler = (err, req, res) => {
   const statusCode = err.statusCode || 500;
   const isDevelopment = config.server.env === 'development';
 
@@ -51,7 +51,41 @@ const errorHandler = (err, req, res, next) => {
 
   // Errores específicos de PostgreSQL
   if (err.code && err.code.startsWith('23')) {
-    return handleDatabaseError(err, res, isDevelopment);
+    // La función handleDatabaseError está definida abajo
+    const errorMap = {
+      23505: {
+        statusCode: 409,
+        message: 'El recurso ya existe',
+      },
+      23503: {
+        statusCode: 400,
+        message: 'Referencia inválida a otro registro',
+      },
+      23502: {
+        statusCode: 400,
+        message: 'Campo requerido faltante',
+      },
+      23514: {
+        statusCode: 400,
+        message: 'Datos inválidos',
+      },
+    };
+
+    const error = errorMap[err.code] || {
+      statusCode: 500,
+      message: 'Error de base de datos',
+    };
+
+    const response = {
+      status: 'fail',
+      message: error.message,
+      ...(isDevelopment && {
+        code: err.code,
+        detail: err.detail || (err.constraint ? `Constraint violada: ${err.constraint}` : undefined),
+      }),
+    };
+
+    return res.status(error.statusCode).json(response);
   }
 
   // Errores de JWT
@@ -104,58 +138,14 @@ const errorHandler = (err, req, res, next) => {
 };
 
 /**
- * Manejo de errores específicos de base de datos PostgreSQL
- */
-const handleDatabaseError = (err, res, isDevelopment) => {
-  const errors = {
-    // Violación de unique constraint
-    '23505': {
-      statusCode: 409,
-      message: 'El recurso ya existe',
-    },
-    // Violación de foreign key
-    '23503': {
-      statusCode: 400,
-      message: 'Referencia inválida a otro registro',
-    },
-    // Violación de not null
-    '23502': {
-      statusCode: 400,
-      message: 'Campo requerido faltante',
-    },
-    // Violación de check constraint
-    '23514': {
-      statusCode: 400,
-      message: 'Datos inválidos',
-    },
-  };
-
-  const error = errors[err.code] || {
-    statusCode: 500,
-    message: 'Error de base de datos',
-  };
-
-  const response = {
-    status: 'fail',
-    message: error.message,
-    ...(isDevelopment && {
-      code: err.code,
-      detail: err.detail || (err.constraint ? `Constraint violada: ${err.constraint}` : undefined),
-    }),
-  };
-
-  return res.status(error.statusCode).json(response);
-};
-
-/**
  * Middleware para errores 404
  */
 const notFound = (req, res, next) => {
   const error = new AppError(
     `Ruta no encontrada: ${req.method} ${req.originalUrl}`,
-    404
+    404,
   );
-  next(error);
+  return next(error);
 };
 
 module.exports = {

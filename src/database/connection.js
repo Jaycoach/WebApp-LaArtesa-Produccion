@@ -149,7 +149,7 @@ class Database {
       const client = await this.pool.connect();
       
       // Agregar método de release mejorado
-      const release = client.release;
+      const { release } = client;
       client.release = () => {
         client.release = release;
         return release.apply(client);
@@ -207,10 +207,10 @@ class Database {
       `;
 
       const result = await this.query(query, [requiredTables]);
-      const existingTables = result.rows.map(row => row.table_name);
+      const existingTables = result.rows.map((row) => row.table_name);
 
       const missingTables = requiredTables.filter(
-        table => !existingTables.includes(table)
+        (table) => !existingTables.includes(table),
       );
 
       if (missingTables.length > 0) {

@@ -1,6 +1,7 @@
+const fs = require('fs');
+const path = require('path');
 const winston = require('winston');
 const DailyRotateFile = require('winston-daily-rotate-file');
-const path = require('path');
 const config = require('../config');
 
 // Definir niveles de log personalizados
@@ -28,19 +29,18 @@ const devFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.colorize({ all: true }),
   winston.format.printf(
-    (info) => `${info.timestamp} ${info.level}: ${info.message}`
-  )
+    (info) => `${info.timestamp} ${info.level}: ${info.message}`,
+  ),
 );
 
 // Formato para producción (JSON)
 const prodFormat = winston.format.combine(
   winston.format.timestamp(),
   winston.format.errors({ stack: true }),
-  winston.format.json()
+  winston.format.json(),
 );
 
 // Crear directorio de logs si no existe
-const fs = require('fs');
 const logDir = path.join(__dirname, '../../logs');
 if (!fs.existsSync(logDir)) {
   fs.mkdirSync(logDir, { recursive: true });
@@ -54,7 +54,7 @@ if (config.server.env !== 'production') {
   transports.push(
     new winston.transports.Console({
       format: devFormat,
-    })
+    }),
   );
 }
 
@@ -67,7 +67,7 @@ transports.push(
     maxSize: 5242880, // 5MB
     maxFiles: 5,
     format: prodFormat,
-  })
+  }),
 );
 
 // File transport para todos los logs
@@ -78,7 +78,7 @@ transports.push(
     maxSize: 5242880, // 5MB
     maxFiles: 5,
     format: prodFormat,
-  })
+  }),
 );
 
 // File transport específico para SAP
@@ -91,10 +91,8 @@ transports.push(
     maxFiles: 5,
     format: prodFormat,
     // Solo loguear eventos de SAP
-    filter: (info) => {
-      return info.service === 'SAP' || info.component === 'SAP_SYNC';
-    },
-  })
+    filter: (info) => info.service === 'SAP' || info.component === 'SAP_SYNC',
+  }),
 );
 
 // Crear logger
@@ -161,7 +159,7 @@ if (config.server.env === 'production') {
       datePattern: 'YYYY-MM-DD',
       maxSize: 5242880, // 5MB
       maxFiles: 5,
-    })
+    }),
   );
 
   logger.rejections.handle(
@@ -170,7 +168,7 @@ if (config.server.env === 'production') {
       datePattern: 'YYYY-MM-DD',
       maxSize: 5242880, // 5MB
       maxFiles: 5,
-    })
+    }),
   );
 }
 

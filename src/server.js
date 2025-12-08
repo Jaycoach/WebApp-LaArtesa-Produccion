@@ -47,7 +47,7 @@ if (config.swagger.enabled) {
     res.send(specs);
   });
   
-  logger.info('📚 Swagger UI disponible en http://localhost:' + config.server.port + '/api-docs');
+  logger.info(`📚 Swagger UI disponible en http://localhost:${config.server.port}/api-docs`);
 }
 
 /**
@@ -178,13 +178,13 @@ app.get('/health', async (req, res) => {
       database: dbConnected ? 'Connected' : 'Disconnected',
       memory: {
         used: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)} MB`,
-        total: `${Math.round(process.memoryUsage().heapTotal / 1024 / 1024)} MB`
-      }
+        total: `${Math.round(process.memoryUsage().heapTotal / 1024 / 1024)} MB`,
+      },
     });
   } catch (error) {
     res.status(500).json({
       status: 'ERROR',
-      message: error.message
+      message: error.message,
     });
   }
 });
@@ -202,14 +202,14 @@ app.get('/', (req, res) => {
     success: true,
     message: 'Artesa Backend API',
     version: '1.0.0',
-    description: 'Sistema de Gestión de Producción para Panadería',
+    description: 'Sistema de Gestión de Producción para Panadeía',
     documentation: '/api-docs',
     health: '/health',
     endpoints: {
       api: '/api',
       auth: '/api/auth',
-      users: '/api/users'
-    }
+      users: '/api/users',
+    },
   });
 });
 
@@ -259,7 +259,6 @@ const startServer = async () => {
       
       logger.info('Sistema listo para recibir peticiones');
     });
-    
   } catch (error) {
     logger.error('Error al iniciar el servidor:', error);
     process.exit(1);

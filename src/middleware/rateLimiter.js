@@ -1,6 +1,6 @@
 /**
  * Middleware de Rate Limiting - Versión Robusta y Compleja
- * 
+ *
  * Sistema de limitación de velocidad multi-nivel para:
  * - General: Protección global de API
  * - Autenticación: Prevención de ataques de fuerza bruta
@@ -13,9 +13,10 @@
  */
 
 const rateLimit = require('express-rate-limit');
-const RedisStore = require('rate-limit-redis');
 const config = require('../config');
 const logger = require('../utils/logger');
+
+// RedisStore es opcional y será requerido solo si Redis está habilitado
 
 // Cliente Redis (puede ser null si no está configurado)
 let redisClient = null;
@@ -27,13 +28,14 @@ let redisClient = null;
 const initializeRedis = () => {
   try {
     if (process.env.REDIS_ENABLED === 'true') {
+      // eslint-disable-next-line global-require
       const redis = require('redis');
       redisClient = redis.createClient({
         host: process.env.REDIS_HOST || 'localhost',
         port: process.env.REDIS_PORT || 6379,
         legacyMode: true,
       });
-      redisClient.connect().catch(err => {
+      redisClient.connect().catch((err) => {
         logger.warn('No se pudo conectar a Redis, usando almacenamiento en memoria', { error: err.message });
         redisClient = null;
       });
@@ -44,25 +46,13 @@ const initializeRedis = () => {
 };
 
 /**
- * Factory para crear tienda de rate limit
- * Usa Redis si está disponible, de lo contrario memoria
- */
-const createStore = (options) => {
-  if (redisClient) {
-    return new RedisStore({
-      client: redisClient,
-      prefix: options.prefix || 'rl:',
-    });
-  }
-  return undefined; // Usa MemoryStore por defecto
-};
-
-/**
  * Manejador de error estándar para rate limiting
  */
 const defaultHandler = (limitType, message) => (req, res) => {
-  const retryAfter = req.rateLimit?.resetTime || Math.ceil((req.rateLimit?.retryAfter || 60) / 1000);
-  
+  const retryAfter = req.rateLimit?.resetTime || Math.ceil(
+    (req.rateLimit?.retryAfter || 60) / 1000,
+  );
+
   logger.logSecurity(`RATE_LIMIT_EXCEEDED_${limitType}`, {
     ip: req.ip,
     path: req.path,
@@ -71,7 +61,7 @@ const defaultHandler = (limitType, message) => (req, res) => {
     userAgent: req.get('user-agent'),
     timestamp: new Date().toISOString(),
   });
-  
+
   res.status(429).json({
     success: false,
     error: {
@@ -99,12 +89,9 @@ const generalLimiter = rateLimit({
   skip: (req) => {
     // Excepciones: health check y swagger
     const excludedPaths = ['/health', '/api-docs', '/swagger'];
-    return excludedPaths.some(path => req.path.startsWith(path));
+    return excludedPaths.some((path) => req.path.startsWith(path));
   },
-  keyGenerator: (req) => {
-    // Usar X-Forwarded-For si está disponible (Nginx, proxies)
-    return req.headers['x-forwarded-for'] || req.ip;
-  },
+  keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip,
 });
 
 /**
@@ -139,9 +126,7 @@ const createLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: defaultHandler('CREATE', 'Demasiadas operaciones de creación. Por favor espera un momento.'),
-  keyGenerator: (req) => {
-    return req.headers['x-forwarded-for'] || req.ip;
-  },
+  keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip,
 });
 
 /**
@@ -155,9 +140,7 @@ const updateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: defaultHandler('UPDATE', 'Demasiadas operaciones de actualización. Por favor espera.'),
-  keyGenerator: (req) => {
-    return req.headers['x-forwarded-for'] || req.ip;
-  },
+  keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip,
 });
 
 /**
@@ -171,9 +154,7 @@ const deleteLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: defaultHandler('DELETE', 'Demasiadas operaciones de eliminación. Por favor espera.'),
-  keyGenerator: (req) => {
-    return req.headers['x-forwarded-for'] || req.ip;
-  },
+  keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip,
 });
 
 /**
@@ -208,9 +189,7 @@ const queryLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: defaultHandler('QUERY', 'Demasiadas consultas. Por favor espera antes de hacer otra solicitud.'),
-  keyGenerator: (req) => {
-    return req.headers['x-forwarded-for'] || req.ip;
-  },
+  keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip,
 });
 
 /**
@@ -224,14 +203,8 @@ const adminLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: defaultHandler('ADMIN', 'Demasiadas operaciones administrativas. Intenta de nuevo en un momento.'),
-  keyGenerator: (req) => {
-    // Limitar por usuario admin
-    return `admin_${req.user?.id || (req.headers['x-forwarded-for'] || req.ip)}`;
-  },
-  skip: (req) => {
-    // Solo aplicar a usuarios admin
-    return req.user?.rol !== 'admin';
-  },
+  keyGenerator: (req) => `admin_${req.user?.id || (req.headers['x-forwarded-for'] || req.ip)}`,
+  skip: (req) => req.user?.rol !== 'admin',
 });
 
 /**
@@ -245,9 +218,7 @@ const strictLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: defaultHandler('STRICT', 'Operación protegida. Has alcanzado el límite. Intenta más tarde.'),
-  keyGenerator: (req) => {
-    return req.headers['x-forwarded-for'] || req.ip;
-  },
+  keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip,
 });
 
 /**
@@ -261,9 +232,7 @@ const exportLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: defaultHandler('EXPORT', 'Has alcanzado el límite de exportaciones por hora. Intenta más tarde.'),
-  keyGenerator: (req) => {
-    return req.user?.id ? `export_user_${req.user.id}` : `export_ip_${req.headers['x-forwarded-for'] || req.ip}`;
-  },
+  keyGenerator: (req) => (req.user?.id ? `export_user_${req.user.id}` : `export_ip_${req.headers['x-forwarded-for'] || req.ip}`),
 });
 
 // Inicializar Redis si está habilitado

@@ -10,16 +10,13 @@ const config = require('../config');
 /**
  * Configurar Morgan según el entorno
  */
-const morganFormat = config.server.env === 'production' 
-  ? 'combined' 
+const morganFormat = config.server.env === 'production'
+  ? 'combined'
   : 'dev';
 
 const morganMiddleware = morgan(morganFormat, {
   stream: logger.stream,
-  skip: (req) => {
-    // Omitir health checks y métricas
-    return /^\/(health|metrics|ping)/.test(req.url);
-  },
+  skip: (req) => /^\/(health|metrics|ping)/.test(req.url),
 });
 
 /**
