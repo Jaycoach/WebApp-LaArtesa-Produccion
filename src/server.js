@@ -74,7 +74,97 @@ app.use(requestLoggers);
 app.use('/api/', generalLimiter);
 
 /**
- * HEALTH CHECK
+ * @swagger
+ * /:
+ *   get:
+ *     summary: Endpoint raíz de la API
+ *     description: Retorna información general sobre la API
+ *     tags:
+ *       - Health
+ *     responses:
+ *       200:
+ *         description: Información de la API
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Artesa Backend API"
+ *                 version:
+ *                   type: string
+ *                   example: "1.0.0"
+ *                 description:
+ *                   type: string
+ *                   example: "Sistema de Gestión de Producción para Panadería"
+ *                 documentation:
+ *                   type: string
+ *                   example: "/api-docs"
+ *                 health:
+ *                   type: string
+ *                   example: "/health"
+ *                 endpoints:
+ *                   type: object
+ */
+
+/**
+ * @swagger
+ * /health:
+ *   get:
+ *     summary: Health check del servidor
+ *     description: Verifica el estado del servidor y la base de datos
+ *     tags:
+ *       - Health
+ *     responses:
+ *       200:
+ *         description: Servidor y base de datos funcionando correctamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "OK"
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *                   example: "2025-01-01T10:30:00.000Z"
+ *                 uptime:
+ *                   type: number
+ *                   example: 3600
+ *                 environment:
+ *                   type: string
+ *                   example: "development"
+ *                 database:
+ *                   type: string
+ *                   example: "Connected"
+ *                 memory:
+ *                   type: object
+ *                   properties:
+ *                     used:
+ *                       type: string
+ *                       example: "125 MB"
+ *                     total:
+ *                       type: string
+ *                       example: "512 MB"
+ *       500:
+ *         description: Error del servidor
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "ERROR"
+ *                 message:
+ *                   type: string
+ *                   example: "Error al conectar con la base de datos"
  */
 app.get('/health', async (req, res) => {
   try {

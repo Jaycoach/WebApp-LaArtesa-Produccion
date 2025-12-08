@@ -62,6 +62,58 @@ const swaggerConfig = {
             },
           },
         },
+        User: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'integer',
+              example: 1,
+            },
+            email: {
+              type: 'string',
+              format: 'email',
+              example: 'usuario@example.com',
+            },
+            firstName: {
+              type: 'string',
+              example: 'Juan',
+            },
+            lastName: {
+              type: 'string',
+              example: 'Pérez',
+            },
+            role: {
+              type: 'string',
+              enum: ['admin', 'supervisor', 'user'],
+              example: 'user',
+            },
+            isActive: {
+              type: 'boolean',
+              example: true,
+            },
+            createdAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+            updatedAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+          },
+        },
+        AuthToken: {
+          type: 'object',
+          properties: {
+            accessToken: {
+              type: 'string',
+              example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+            },
+            refreshToken: {
+              type: 'string',
+              example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+            },
+          },
+        },
       },
     },
     security: [
@@ -76,11 +128,11 @@ const swaggerConfig = {
       },
       {
         name: 'Authentication',
-        description: 'Endpoints de autenticación',
+        description: 'Endpoints de autenticación y gestión de sesiones',
       },
       {
         name: 'Users',
-        description: 'Endpoints de gestión de usuarios',
+        description: 'Endpoints de gestión de usuarios (requiere autenticación)',
       },
     ],
     paths: {}, // Los paths se generarán automáticamente desde los comentarios JSDoc
