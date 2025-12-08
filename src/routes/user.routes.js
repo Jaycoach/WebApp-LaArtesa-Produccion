@@ -5,7 +5,7 @@
 const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/user.controller');
-const authMiddleware = require('../middleware/auth');
+const { verifyToken } = require('../middleware/auth');
 const { checkRole } = require('../middleware/roleCheck');
 const {
   createUserValidation,
@@ -17,7 +17,7 @@ const {
 } = require('../validators/user.validator');
 
 // Todas las rutas requieren autenticación
-router.use(authMiddleware);
+router.use(verifyToken);
 
 /**
  * @route   GET /api/users/stats

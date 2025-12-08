@@ -5,7 +5,7 @@
 const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/auth.controller');
-const authMiddleware = require('../middleware/auth');
+const { verifyToken } = require('../middleware/auth');
 const {
   registerValidation,
   loginValidation,
@@ -63,27 +63,27 @@ router.post('/reset-password', resetPasswordValidation, authController.resetPass
  * @desc    Cambiar contraseña (autenticado)
  * @access  Private
  */
-router.post('/change-password', authMiddleware, changePasswordValidation, authController.changePassword);
+router.post('/change-password', verifyToken, changePasswordValidation, authController.changePassword);
 
 /**
  * @route   GET /api/auth/profile
  * @desc    Obtener perfil del usuario autenticado
  * @access  Private
  */
-router.get('/profile', authMiddleware, authController.getProfile);
+router.get('/profile', verifyToken, authController.getProfile);
 
 /**
  * @route   PUT /api/auth/profile
  * @desc    Actualizar perfil del usuario autenticado
  * @access  Private
  */
-router.put('/profile', authMiddleware, updateProfileValidation, authController.updateProfile);
+router.put('/profile', verifyToken, updateProfileValidation, authController.updateProfile);
 
 /**
  * @route   GET /api/auth/verify
  * @desc    Verificar si el token es válido
  * @access  Private
  */
-router.get('/verify', authMiddleware, authController.verifyToken);
+router.get('/verify', verifyToken, authController.verifyToken);
 
 module.exports = router;

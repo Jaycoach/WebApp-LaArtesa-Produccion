@@ -268,8 +268,8 @@ class Database {
 const db = new Database();
 
 module.exports = db;
-// Exports adicionales para compatibilidad con la sugerencia
-module.exports.pool = () => db.pool;
+// Exports adicionales para compatibilidad
+module.exports.pool = db.pool;
 module.exports.getPool = () => db.pool;
 module.exports.checkConnection = db.checkConnection.bind(db);
 module.exports.closePool = db.closePool.bind(db);

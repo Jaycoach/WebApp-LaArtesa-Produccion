@@ -11,7 +11,7 @@ const compression = require('compression');
 
 const config = require('./config');
 const logger = require('./utils/logger');
-const { pool, checkConnection } = require('./database/connection');
+const db = require('./database/connection');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 const requestLoggers = require('./middleware/requestLogger');
 const { general: generalLimiter } = require('./middleware/rateLimiter');
@@ -50,7 +50,7 @@ app.use('/api/', generalLimiter);
  */
 app.get('/health', async (req, res) => {
   try {
-    const dbConnected = await checkConnection();
+    const dbConnected = await db.checkConnection();
     
     res.json({
       status: 'OK',
@@ -113,7 +113,7 @@ const PORT = config.server.port;
 const startServer = async () => {
   try {
     // Verificar conexión a la base de datos
-    const dbConnected = await checkConnection();
+    const dbConnected = await db.checkConnection();
     
     if (!dbConnected) {
       logger.error('No se pudo conectar a la base de datos. Abortando inicio del servidor.');
@@ -155,7 +155,7 @@ const gracefulShutdown = async (signal) => {
   logger.info(`Señal ${signal} recibida. Cerrando servidor...`);
   
   try {
-    await pool.end();
+    await db.closePool();
     logger.info('Pool de base de datos cerrado');
     
     process.exit(0);
