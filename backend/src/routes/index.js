@@ -10,6 +10,11 @@ const router = express.Router();
 // Importar rutas
 const authRoutes = require('./auth.routes');
 const userRoutes = require('./user.routes');
+const masasRoutes = require('./masas.routes');
+const fasesRoutes = require('./fases.routes');
+const pesajeRoutes = require('./pesaje.routes');
+const configRoutes = require('./config.routes');
+const sapRoutes = require('./sap.routes');
 
 /**
  * @route   GET /api
@@ -24,6 +29,11 @@ router.get('/', (req, res) => {
     endpoints: {
       auth: '/api/auth',
       users: '/api/users',
+      masas: '/api/masas',
+      fases: '/api/fases',
+      pesaje: '/api/pesaje',
+      config: '/api/config',
+      sap: '/api/sap',
       health: '/health',
       docs: '/api-docs',
     },
@@ -35,13 +45,10 @@ router.get('/', (req, res) => {
  */
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
-
-// TODO: Agregar más rutas cuando estén implementadas
-// router.use('/ordenes', ordenRoutes);
-// router.use('/proceso', procesoRoutes);
-// router.use('/calidad', calidadRoutes);
-// router.use('/recetas', recetaRoutes);
-// router.use('/dashboard', dashboardRoutes);
-// router.use('/sap', sapRoutes);
+router.use('/masas', masasRoutes);
+router.use('/fases', fasesRoutes);
+router.use('/pesaje', pesajeRoutes);
+router.use('/config', configRoutes);
+router.use('/sap', sapRoutes);
 
 module.exports = router;

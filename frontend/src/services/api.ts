@@ -176,4 +176,26 @@ class ApiService {
 
 // Exportar instancia única
 export const apiService = new ApiService();
+
+// Exportar como apiClient para compatibilidad
+export const apiClient = apiService;
+
+/**
+ * Helper para manejar respuestas de API
+ */
+export function handleApiResponse<T>(response: ApiResponse<T>): T {
+  if (response.success && response.data !== undefined) {
+    return response.data;
+  }
+  throw new Error(response.error || response.message || 'Error desconocido');
+}
+
+/**
+ * Helper para manejar errores de API
+ */
+export function handleApiError(error: any): never {
+  console.error('API Error:', error);
+  throw error;
+}
+
 export default apiService;

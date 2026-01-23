@@ -31,11 +31,14 @@ export const API_CONFIG = {
         `/masas/${masaId}/productos/${productoId}`,
     },
 
-    // Checklist
-    CHECKLIST: {
-      BASE: '/checklist',
-      BY_MASA: (masaId: string) => `/checklist/${masaId}`,
-      UPDATE: (masaId: string) => `/checklist/${masaId}`,
+    // Pesaje (incluye checklist de pesaje)
+    PESAJE: {
+      BASE: '/pesaje',
+      CHECKLIST: (masaId: number) => `/pesaje/${masaId}/checklist`,
+      UPDATE_INGREDIENTE: (masaId: number, ingredienteId: number) =>
+        `/pesaje/${masaId}/ingredientes/${ingredienteId}`,
+      CONFIRMAR: (masaId: number) => `/pesaje/${masaId}/confirmar`,
+      ENVIAR_CORREO: (masaId: number) => `/pesaje/${masaId}/enviar-correo`,
     },
 
     // Configuración

@@ -167,3 +167,27 @@ export interface EnvioCorreoResponse {
   destinatarios: string[];
   fecha_envio: string;
 }
+
+// Request para actualizar progreso de fase
+export interface UpdateProgresoFaseRequest {
+  fase: string;
+  accion: 'iniciar' | 'actualizar' | 'completar';
+  datos?: Record<string, any>;
+}
+
+// Request para completar una fase
+export interface CompletarFaseRequest {
+  responsable?: string;
+  observaciones?: string;
+  datos?: Record<string, any>;
+}
+
+// Request para actualizar configuración
+export interface UpdateConfiguracionRequest {
+  factorAbsorcion?: number;
+  emailNotificaciones?: string[];
+  temperaturaAmbienteMin?: number;
+  temperaturaAmbienteMax?: number;
+  humedadMin?: number;
+  humedadMax?: number;
+}

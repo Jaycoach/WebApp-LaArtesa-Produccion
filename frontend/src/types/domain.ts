@@ -31,7 +31,7 @@ export interface Masa {
   // Relaciones
   productos?: Producto[];
   composicion?: ComposicionIngrediente[];
-  checklist?: ChecklistPesaje;
+  checklistPreparacion?: ChecklistPreparacionPesaje;
   progreso?: ProgresoFases;
 }
 
@@ -71,8 +71,8 @@ export interface ComposicionIngrediente {
   orden: number;
 }
 
-// Checklist de pesaje
-export interface ChecklistPesaje {
+// Checklist de preparación para pesaje (verificaciones previas)
+export interface ChecklistPreparacionPesaje {
   id: string;
   masaId: string;
   verificacionBalanza: boolean;
