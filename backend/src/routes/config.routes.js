@@ -5,13 +5,13 @@
 const express = require('express');
 const router = express.Router();
 const configController = require('../controllers/config.controller');
-const { authenticate } = require('../middleware/auth');
+const { verifyToken } = require('../middleware/auth');
 const { checkRole } = require('../middleware/roleCheck');
 
 /**
  * Todas las rutas requieren autenticación
  */
-router.use(authenticate);
+router.use(verifyToken);
 
 /**
  * @route   GET /api/config/factor-absorcion

@@ -5,12 +5,11 @@
 const express = require('express');
 const router = express.Router();
 const fasesController = require('../controllers/fases.controller');
-const { authenticate } = require('../middleware/auth');
-
+const { verifyToken } = require('../middleware/auth');
 /**
  * Todas las rutas requieren autenticación
  */
-router.use(authenticate);
+router.use(verifyToken);
 
 /**
  * @route   GET /api/fases/:masaId

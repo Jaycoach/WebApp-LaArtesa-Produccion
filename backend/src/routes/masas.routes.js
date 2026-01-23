@@ -5,12 +5,12 @@
 const express = require('express');
 const router = express.Router();
 const masasController = require('../controllers/masas.controller');
-const { authenticate } = require('../middleware/auth');
+const { verifyToken } = require('../middleware/auth');
 
 /**
  * Todas las rutas requieren autenticación
  */
-router.use(authenticate);
+router.use(verifyToken);
 
 /**
  * @route   GET /api/masas
