@@ -13,28 +13,29 @@ class AuthController {
    */
   async register(req, res, next) {
     try {
-      const { username, email, password, nombre_completo, rol } = req.body;
-      
+      const {
+        username, email, password, nombre_completo, rol,
+      } = req.body;
+
       const result = await authService.register({
         username,
         email,
         password,
         nombre_completo,
-        rol
+        rol,
       });
-      
+
       res.status(201).json({
         success: true,
         message: 'Usuario registrado exitosamente',
-        data: result
+        data: result,
       });
-      
     } catch (error) {
       logger.error('Error en registro:', error);
       next(error);
     }
   }
-  
+
   /**
    * Login de usuario
    * POST /api/auth/login
@@ -42,21 +43,20 @@ class AuthController {
   async login(req, res, next) {
     try {
       const { username, password } = req.body;
-      
+
       const result = await authService.login({ username, password });
-      
+
       res.json({
         success: true,
         message: 'Login exitoso',
-        data: result
+        data: result,
       });
-      
     } catch (error) {
       logger.error('Error en login:', error);
       next(error);
     }
   }
-  
+
   /**
    * Refrescar access token
    * POST /api/auth/refresh
@@ -64,28 +64,27 @@ class AuthController {
   async refreshToken(req, res, next) {
     try {
       const { refreshToken } = req.body;
-      
+
       if (!refreshToken) {
         return res.status(400).json({
           success: false,
-          message: 'Refresh token requerido'
+          message: 'Refresh token requerido',
         });
       }
-      
+
       const tokens = await authService.refreshToken(refreshToken);
-      
+
       res.json({
         success: true,
         message: 'Token refrescado exitosamente',
-        data: tokens
+        data: tokens,
       });
-      
     } catch (error) {
       logger.error('Error al refrescar token:', error);
       next(error);
     }
   }
-  
+
   /**
    * Logout
    * POST /api/auth/logout
@@ -93,27 +92,26 @@ class AuthController {
   async logout(req, res, next) {
     try {
       const { refreshToken } = req.body;
-      
+
       if (!refreshToken) {
         return res.status(400).json({
           success: false,
-          message: 'Refresh token requerido'
+          message: 'Refresh token requerido',
         });
       }
-      
+
       await authService.logout(refreshToken);
-      
+
       res.json({
         success: true,
-        message: 'Sesión cerrada exitosamente'
+        message: 'Sesión cerrada exitosamente',
       });
-      
     } catch (error) {
       logger.error('Error en logout:', error);
       next(error);
     }
   }
-  
+
   /**
    * Solicitar recuperación de contraseña
    * POST /api/auth/forgot-password
@@ -121,29 +119,28 @@ class AuthController {
   async forgotPassword(req, res, next) {
     try {
       const { email } = req.body;
-      
+
       if (!email) {
         return res.status(400).json({
           success: false,
-          message: 'Email requerido'
+          message: 'Email requerido',
         });
       }
-      
+
       const result = await authService.forgotPassword(email);
-      
+
       res.json({
         success: true,
         message: result.message,
         // Solo incluir token en desarrollo
-        ...(process.env.NODE_ENV === 'development' && { resetToken: result.resetToken })
+        ...(process.env.NODE_ENV === 'development' && { resetToken: result.resetToken }),
       });
-      
     } catch (error) {
       logger.error('Error en forgot password:', error);
       next(error);
     }
   }
-  
+
   /**
    * Resetear contraseña con token
    * POST /api/auth/reset-password
@@ -151,27 +148,26 @@ class AuthController {
   async resetPassword(req, res, next) {
     try {
       const { resetToken, newPassword } = req.body;
-      
+
       if (!resetToken || !newPassword) {
         return res.status(400).json({
           success: false,
-          message: 'Token y nueva contraseña requeridos'
+          message: 'Token y nueva contraseña requeridos',
         });
       }
-      
+
       const result = await authService.resetPassword(resetToken, newPassword);
-      
+
       res.json({
         success: true,
-        message: result.message
+        message: result.message,
       });
-      
     } catch (error) {
       logger.error('Error al resetear contraseña:', error);
       next(error);
     }
   }
-  
+
   /**
    * Cambiar contraseña (autenticado)
    * POST /api/auth/change-password
@@ -180,27 +176,26 @@ class AuthController {
     try {
       const { currentPassword, newPassword } = req.body;
       const userId = req.user.id; // Del middleware de autenticación
-      
+
       if (!currentPassword || !newPassword) {
         return res.status(400).json({
           success: false,
-          message: 'Contraseña actual y nueva contraseña requeridas'
+          message: 'Contraseña actual y nueva contraseña requeridas',
         });
       }
-      
+
       const result = await authService.changePassword(userId, currentPassword, newPassword);
-      
+
       res.json({
         success: true,
-        message: result.message
+        message: result.message,
       });
-      
     } catch (error) {
       logger.error('Error al cambiar contraseña:', error);
       next(error);
     }
   }
-  
+
   /**
    * Obtener perfil del usuario autenticado
    * GET /api/auth/profile
@@ -208,20 +203,19 @@ class AuthController {
   async getProfile(req, res, next) {
     try {
       const userId = req.user.id; // Del middleware de autenticación
-      
+
       const profile = await authService.getProfile(userId);
-      
+
       res.json({
         success: true,
-        data: profile
+        data: profile,
       });
-      
     } catch (error) {
       logger.error('Error al obtener perfil:', error);
       next(error);
     }
   }
-  
+
   /**
    * Actualizar perfil del usuario autenticado
    * PUT /api/auth/profile
@@ -230,24 +224,23 @@ class AuthController {
     try {
       const userId = req.user.id; // Del middleware de autenticación
       const { nombre_completo, email } = req.body;
-      
+
       const updatedProfile = await authService.updateProfile(userId, {
         nombre_completo,
-        email
+        email,
       });
-      
+
       res.json({
         success: true,
         message: 'Perfil actualizado exitosamente',
-        data: updatedProfile
+        data: updatedProfile,
       });
-      
     } catch (error) {
       logger.error('Error al actualizar perfil:', error);
       next(error);
     }
   }
-  
+
   /**
    * Verificar si el token es válido
    * GET /api/auth/verify
@@ -258,9 +251,8 @@ class AuthController {
       res.json({
         success: true,
         message: 'Token válido',
-        user: req.user
+        user: req.user,
       });
-      
     } catch (error) {
       logger.error('Error al verificar token:', error);
       next(error);

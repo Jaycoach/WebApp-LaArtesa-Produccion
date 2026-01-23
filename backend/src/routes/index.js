@@ -4,6 +4,7 @@
  */
 
 const express = require('express');
+
 const router = express.Router();
 
 // Importar rutas
@@ -24,8 +25,8 @@ router.get('/', (req, res) => {
       auth: '/api/auth',
       users: '/api/users',
       health: '/health',
-      docs: '/api-docs'
-    }
+      docs: '/api-docs',
+    },
   });
 });
 

@@ -10,18 +10,18 @@ const { body, validationResult } = require('express-validator');
  */
 const handleValidationErrors = (req, res, next) => {
   const errors = validationResult(req);
-  
+
   if (!errors.isEmpty()) {
     return res.status(400).json({
       success: false,
       message: 'Errores de validación',
-      errors: errors.array().map(err => ({
+      errors: errors.array().map((err) => ({
         field: err.path,
-        message: err.msg
-      }))
+        message: err.msg,
+      })),
     });
   }
-  
+
   next();
 };
 
@@ -35,30 +35,30 @@ const registerValidation = [
     .withMessage('El username debe tener entre 3 y 50 caracteres')
     .matches(/^[a-zA-Z0-9_-]+$/)
     .withMessage('El username solo puede contener letras, números, guiones y guiones bajos'),
-  
+
   body('email')
     .trim()
     .isEmail()
     .withMessage('Email inválido')
     .normalizeEmail(),
-  
+
   body('password')
     .isLength({ min: 8 })
     .withMessage('La contraseña debe tener al menos 8 caracteres')
     .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]/)
     .withMessage('La contraseña debe contener al menos: una mayúscula, una minúscula, un número y un carácter especial (@$!%*?&#)'),
-  
+
   body('nombre_completo')
     .trim()
     .isLength({ min: 3, max: 100 })
     .withMessage('El nombre completo debe tener entre 3 y 100 caracteres'),
-  
+
   body('rol')
     .optional()
     .isIn(['admin', 'supervisor', 'operador', 'visualizador'])
     .withMessage('Rol inválido'),
-  
-  handleValidationErrors
+
+  handleValidationErrors,
 ];
 
 /**
@@ -69,12 +69,12 @@ const loginValidation = [
     .trim()
     .notEmpty()
     .withMessage('Username o email requerido'),
-  
+
   body('password')
     .notEmpty()
     .withMessage('Contraseña requerida'),
-  
-  handleValidationErrors
+
+  handleValidationErrors,
 ];
 
 /**
@@ -86,8 +86,8 @@ const refreshTokenValidation = [
     .withMessage('Refresh token requerido')
     .isString()
     .withMessage('Refresh token debe ser una cadena'),
-  
-  handleValidationErrors
+
+  handleValidationErrors,
 ];
 
 /**
@@ -99,8 +99,8 @@ const forgotPasswordValidation = [
     .isEmail()
     .withMessage('Email inválido')
     .normalizeEmail(),
-  
-  handleValidationErrors
+
+  handleValidationErrors,
 ];
 
 /**
@@ -110,14 +110,14 @@ const resetPasswordValidation = [
   body('resetToken')
     .notEmpty()
     .withMessage('Token de recuperación requerido'),
-  
+
   body('newPassword')
     .isLength({ min: 8 })
     .withMessage('La contraseña debe tener al menos 8 caracteres')
     .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]/)
     .withMessage('La contraseña debe contener al menos: una mayúscula, una minúscula, un número y un carácter especial (@$!%*?&#)'),
-  
-  handleValidationErrors
+
+  handleValidationErrors,
 ];
 
 /**
@@ -127,7 +127,7 @@ const changePasswordValidation = [
   body('currentPassword')
     .notEmpty()
     .withMessage('Contraseña actual requerida'),
-  
+
   body('newPassword')
     .isLength({ min: 8 })
     .withMessage('La nueva contraseña debe tener al menos 8 caracteres')
@@ -139,8 +139,8 @@ const changePasswordValidation = [
       }
       return true;
     }),
-  
-  handleValidationErrors
+
+  handleValidationErrors,
 ];
 
 /**
@@ -152,15 +152,15 @@ const updateProfileValidation = [
     .trim()
     .isLength({ min: 3, max: 100 })
     .withMessage('El nombre completo debe tener entre 3 y 100 caracteres'),
-  
+
   body('email')
     .optional()
     .trim()
     .isEmail()
     .withMessage('Email inválido')
     .normalizeEmail(),
-  
-  handleValidationErrors
+
+  handleValidationErrors,
 ];
 
 module.exports = {
@@ -170,5 +170,5 @@ module.exports = {
   forgotPasswordValidation,
   resetPasswordValidation,
   changePasswordValidation,
-  updateProfileValidation
+  updateProfileValidation,
 };

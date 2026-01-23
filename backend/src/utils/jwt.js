@@ -15,27 +15,26 @@ const generateTokens = (user) => {
       id: user.id,
       username: user.username,
       email: user.email,
-      rol: user.rol
+      rol: user.rol,
     };
-    
+
     const accessToken = jwt.sign(
       payload,
       config.jwt.secret,
-      { expiresIn: config.jwt.expiresIn }
+      { expiresIn: config.jwt.expiresIn },
     );
-    
+
     const refreshToken = jwt.sign(
       { id: user.id },
       config.jwt.refreshSecret,
-      { expiresIn: config.jwt.refreshExpiresIn }
+      { expiresIn: config.jwt.refreshExpiresIn },
     );
-    
+
     return {
       accessToken,
       refreshToken,
-      expiresIn: config.jwt.expiresIn
+      expiresIn: config.jwt.expiresIn,
     };
-    
   } catch (error) {
     logger.error('Error al generar tokens:', error);
     throw new Error('Error al generar tokens de autenticación');
@@ -79,13 +78,11 @@ const verifyRefreshToken = (token) => {
 /**
  * Decodificar token sin verificar (para debugging)
  */
-const decodeToken = (token) => {
-  return jwt.decode(token);
-};
+const decodeToken = (token) => jwt.decode(token);
 
 module.exports = {
   generateTokens,
   verifyAccessToken,
   verifyRefreshToken,
-  decodeToken
+  decodeToken,
 };

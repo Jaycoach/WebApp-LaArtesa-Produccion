@@ -3,6 +3,7 @@
  */
 
 const express = require('express');
+
 const router = express.Router();
 const authController = require('../controllers/auth.controller');
 const { verifyToken } = require('../middleware/auth');
@@ -13,7 +14,7 @@ const {
   forgotPasswordValidation,
   resetPasswordValidation,
   changePasswordValidation,
-  updateProfileValidation
+  updateProfileValidation,
 } = require('../validators/auth.validator');
 
 /**

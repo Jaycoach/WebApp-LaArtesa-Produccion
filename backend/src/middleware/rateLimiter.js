@@ -247,14 +247,14 @@ module.exports = {
   create: createLimiter,
   update: updateLimiter,
   delete: deleteLimiter,
-  
+
   // Limitadores especializados
   sap: sapLimiter,
   query: queryLimiter,
   admin: adminLimiter,
   strict: strictLimiter,
   export: exportLimiter,
-  
+
   // Útiles
   redisClient,
   initializeRedis,

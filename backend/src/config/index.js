@@ -46,8 +46,8 @@ module.exports = {
 
   // Configuración de CORS
   cors: {
-    origin: process.env.CORS_ORIGIN 
-      ? process.env.CORS_ORIGIN.split(',') 
+    origin: process.env.CORS_ORIGIN
+      ? process.env.CORS_ORIGIN.split(',')
       : ['http://localhost:3001'],
     credentials: process.env.CORS_CREDENTIALS === 'true',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
@@ -79,55 +79,55 @@ module.exports = {
       windowMs: parseInt(process.env.RATE_LIMIT_GENERAL_WINDOW, 10) || 15 * 60 * 1000,
       max: parseInt(process.env.RATE_LIMIT_GENERAL_MAX, 10) || 100,
     },
-    
+
     // Authentication - Brute force prevention
     auth: {
       windowMs: parseInt(process.env.RATE_LIMIT_AUTH_WINDOW, 10) || 15 * 60 * 1000,
       max: parseInt(process.env.RATE_LIMIT_AUTH_MAX, 10) || 5,
     },
-    
+
     // Create - Resource creation protection
     create: {
       windowMs: parseInt(process.env.RATE_LIMIT_CREATE_WINDOW, 10) || 60 * 1000,
       max: parseInt(process.env.RATE_LIMIT_CREATE_MAX, 10) || 15,
     },
-    
+
     // Update - Update operations protection
     update: {
       windowMs: parseInt(process.env.RATE_LIMIT_UPDATE_WINDOW, 10) || 60 * 1000,
       max: parseInt(process.env.RATE_LIMIT_UPDATE_MAX, 10) || 30,
     },
-    
+
     // Delete - Delete operations protection (strictest)
     delete: {
       windowMs: parseInt(process.env.RATE_LIMIT_DELETE_WINDOW, 10) || 60 * 1000,
       max: parseInt(process.env.RATE_LIMIT_DELETE_MAX, 10) || 5,
     },
-    
+
     // SAP - SAP B1 integration operations
     sap: {
       windowMs: parseInt(process.env.RATE_LIMIT_SAP_WINDOW, 10) || 60 * 1000,
       max: parseInt(process.env.RATE_LIMIT_SAP_MAX, 10) || 25,
     },
-    
+
     // Query - Complex queries and data retrieval
     query: {
       windowMs: parseInt(process.env.RATE_LIMIT_QUERY_WINDOW, 10) || 60 * 1000,
       max: parseInt(process.env.RATE_LIMIT_QUERY_MAX, 10) || 50,
     },
-    
+
     // Admin - Administrative operations
     admin: {
       windowMs: parseInt(process.env.RATE_LIMIT_ADMIN_WINDOW, 10) || 60 * 1000,
       max: parseInt(process.env.RATE_LIMIT_ADMIN_MAX, 10) || 20,
     },
-    
+
     // Strict - Sensitive operations (password change, config update)
     strict: {
       windowMs: parseInt(process.env.RATE_LIMIT_STRICT_WINDOW, 10) || 60 * 1000,
       max: parseInt(process.env.RATE_LIMIT_STRICT_MAX, 10) || 3,
     },
-    
+
     // Export - Data export operations
     export: {
       windowMs: parseInt(process.env.RATE_LIMIT_EXPORT_WINDOW, 10) || 60 * 60 * 1000, // 1 hour
@@ -148,7 +148,7 @@ module.exports = {
   // Configuración de Logs (simplificada)
   logs: {
     level: process.env.LOG_LEVEL || 'info',
-    format: process.env.LOG_FORMAT || 'json'
+    format: process.env.LOG_FORMAT || 'json',
   },
 
   // Configuración SAP B1
@@ -209,8 +209,8 @@ module.exports = {
     },
     servers: [
       {
-        url: process.env.NODE_ENV === 'production' 
-          ? 'https://api.artesa.com' 
+        url: process.env.NODE_ENV === 'production'
+          ? 'https://api.artesa.com'
           : `http://localhost:${process.env.PORT || 3000}`,
         description: process.env.NODE_ENV === 'production' ? 'Servidor de Producción' : 'Servidor de Desarrollo',
       },

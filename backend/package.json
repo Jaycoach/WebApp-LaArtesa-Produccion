@@ -148,7 +148,19 @@
       "no-console": "warn",
       "func-names": "off",
       "object-shorthand": "off",
-      "class-methods-use-this": "off"
+      "class-methods-use-this": "off",
+      "camelcase": "off",
+      "consistent-return": "warn",
+      "no-unused-vars": ["warn", {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_"
+      }],
+      "no-plusplus": "off",
+      "radix": "off",
+      "global-require": "warn",
+      "no-await-in-loop": "warn",
+      "import/no-unresolved": "off",
+      "import/extensions": "off"
     }
   },
   "prettier": {

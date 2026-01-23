@@ -30,7 +30,7 @@ class Database {
       this.pool.on('connect', () => {
         logger.debug('Nueva conexión establecida con PostgreSQL');
       });
-      
+
       this.pool.on('error', (err) => {
         logger.error('Error inesperado en el pool de conexiones:', err);
         // En entornos de producción un error inesperado en el pool puede
@@ -129,11 +129,11 @@ class Database {
     try {
       const result = await this.pool.query(text, params);
       const duration = Date.now() - start;
-      
+
       if (config.server.env === 'development') {
         logger.debug(`Query ejecutado en ${duration}ms:`, { text, params });
       }
-      
+
       return result;
     } catch (error) {
       logger.error('Error ejecutando query:', { text, params, error: error.message });
@@ -147,14 +147,14 @@ class Database {
   async getClient() {
     try {
       const client = await this.pool.connect();
-      
+
       // Agregar método de release mejorado
       const { release } = client;
       client.release = () => {
         client.release = release;
         return release.apply(client);
       };
-      
+
       return client;
     } catch (error) {
       logger.error('Error obteniendo cliente del pool:', error);
@@ -167,7 +167,7 @@ class Database {
    */
   async transaction(callback) {
     const client = await this.getClient();
-    
+
     try {
       await client.query('BEGIN');
       const result = await callback(client);

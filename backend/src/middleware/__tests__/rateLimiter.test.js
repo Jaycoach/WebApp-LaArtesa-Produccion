@@ -1,8 +1,8 @@
 /**
  * Pruebas unitarias para Rate Limiter
- * 
+ *
  * Ejecutar con: npm test -- --testPathPattern=rateLimiter
- * 
+ *
  * Recomendado: jest o mocha + chai
  */
 
@@ -225,10 +225,10 @@ describe('Rate Limiter Middleware', () => {
       }
 
       // Las 5 primeras creaciones deben pasar
-      expect(createLimitResults.slice(0, 5).every(s => s === 201)).toBe(true);
+      expect(createLimitResults.slice(0, 5).every((s) => s === 201)).toBe(true);
 
       // Las 5 primeras eliminaciones deben pasar
-      expect(deleteLimitResults.slice(0, 5).every(s => s === 200)).toBe(true);
+      expect(deleteLimitResults.slice(0, 5).every((s) => s === 200)).toBe(true);
 
       // La 6ta eliminación debe ser bloqueada
       expect(deleteLimitResults[5]).toBe(429);
@@ -294,7 +294,7 @@ describe('Rate Limiter Middleware', () => {
           ip: expect.any(String),
           path: '/api/login',
           method: 'POST',
-        })
+        }),
       );
     });
   });
@@ -363,7 +363,7 @@ describe('Rate Limiter Middleware', () => {
 
 /**
  * PRUEBAS ADICIONALES PARA ENTORNO DE PRODUCCIÓN
- * 
+ *
  * Considera agregar pruebas para:
  * 1. Comportamiento con Redis habilitado
  * 2. Sincronización entre múltiples instancias

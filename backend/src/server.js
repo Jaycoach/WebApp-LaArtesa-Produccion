@@ -40,13 +40,13 @@ if (config.swagger.enabled) {
     },
     customSiteTitle: 'ARTESA API Documentation',
   }));
-  
+
   // Endpoint alternativo para el JSON de OpenAPI
   app.get('/api-docs/swagger.json', (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.send(specs);
   });
-  
+
   logger.info(`📚 Swagger UI disponible en http://localhost:${config.server.port}/api-docs`);
 }
 
@@ -169,7 +169,7 @@ app.use('/api/', generalLimiter);
 app.get('/health', async (req, res) => {
   try {
     const dbConnected = await db.checkConnection();
-    
+
     res.json({
       status: 'OK',
       timestamp: new Date().toISOString(),
@@ -232,12 +232,12 @@ const startServer = async () => {
   try {
     // Verificar conexión a la base de datos
     const dbConnected = await db.checkConnection();
-    
+
     if (!dbConnected) {
       logger.error('No se pudo conectar a la base de datos. Abortando inicio del servidor.');
       process.exit(1);
     }
-    
+
     // Iniciar servidor
     app.listen(PORT, () => {
       logger.info(`
@@ -256,7 +256,7 @@ const startServer = async () => {
 ║                                                            ║
 ╚════════════════════════════════════════════════════════════╝
       `);
-      
+
       logger.info('Sistema listo para recibir peticiones');
     });
   } catch (error) {
@@ -270,11 +270,11 @@ const startServer = async () => {
  */
 const gracefulShutdown = async (signal) => {
   logger.info(`Señal ${signal} recibida. Cerrando servidor...`);
-  
+
   try {
     await db.closePool();
     logger.info('Pool de base de datos cerrado');
-    
+
     process.exit(0);
   } catch (error) {
     logger.error('Error durante el cierre:', error);

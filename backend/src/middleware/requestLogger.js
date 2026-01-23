@@ -29,7 +29,7 @@ const detailedRequestLogger = (req, res, next) => {
   // Capturar cuando la respuesta finaliza
   res.on('finish', () => {
     const duration = Date.now() - start;
-    
+
     // Construir objeto de datos del log con fallbacks robustos
     const logData = {
       method: req.method,
