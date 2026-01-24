@@ -13,6 +13,9 @@ const userRoutes = require('./user.routes');
 const masasRoutes = require('./masas.routes');
 const fasesRoutes = require('./fases.routes');
 const pesajeRoutes = require('./pesaje.routes');
+const formadoRoutes = require('./formado.routes');
+const fermentacionRoutes = require('./fermentacion.routes');
+const horneadoRoutes = require('./horneado.routes');
 const configRoutes = require('./config.routes');
 const sapRoutes = require('./sap.routes');
 
@@ -32,6 +35,9 @@ router.get('/', (req, res) => {
       masas: '/api/masas',
       fases: '/api/fases',
       pesaje: '/api/pesaje',
+      formado: '/api/formado',
+      fermentacion: '/api/fermentacion',
+      horneado: '/api/horneado',
       config: '/api/config',
       sap: '/api/sap',
       health: '/health',
@@ -48,6 +54,9 @@ router.use('/users', userRoutes);
 router.use('/masas', masasRoutes);
 router.use('/fases', fasesRoutes);
 router.use('/pesaje', pesajeRoutes);
+router.use('/formado', formadoRoutes);
+router.use('/fermentacion', fermentacionRoutes);
+router.use('/horneado', horneadoRoutes);
 router.use('/config', configRoutes);
 router.use('/sap', sapRoutes);
 

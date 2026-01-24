@@ -154,7 +154,7 @@ module.exports = {
   // Configuración SAP B1
   sap: {
     url: process.env.SAP_URL || 'https://sap-server:50000/b1s/v1',
-    company: process.env.SAP_COMPANY || 'ARTESA_SAS',
+    companyDB: process.env.SAP_COMPANY || 'ARTESA_SAS',
     username: process.env.SAP_USER || 'api_user',
     password: process.env.SAP_PASSWORD || '',
     sessionTimeout: parseInt(process.env.SAP_SESSION_TIMEOUT, 10) || 30, // minutos

@@ -27,4 +27,18 @@ router.post('/sincronizar', checkRole(['admin', 'supervisor']), sapController.si
  */
 router.get('/ordenes', sapController.getOrdenes);
 
+/**
+ * @route   GET /api/sap/stock/:masaId
+ * @desc    Verificar disponibilidad de stock para una masa
+ * @access  Private
+ */
+router.get('/stock/:masaId', sapController.verificarStock);
+
+/**
+ * @route   GET /api/sap/historial
+ * @desc    Obtener histórico de sincronizaciones
+ * @access  Private
+ */
+router.get('/historial', sapController.getHistorialSync);
+
 module.exports = router;
