@@ -3,6 +3,7 @@
  */
 
 export { default as apiClient } from './api';
+export { authService } from './authService';
 export { masasService } from './masasService';
 export { checklistService } from './checklistService';
 export { configService } from './configService';

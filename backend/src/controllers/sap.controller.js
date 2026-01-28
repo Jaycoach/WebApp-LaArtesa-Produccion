@@ -13,7 +13,7 @@ const logger = require('../utils/logger');
  * @access  Private (Admin/Supervisor)
  */
 const sincronizarSAP = async (req, res, next) => {
-  const client = await db.pool.connect();
+  const client = await db.getClient();
 
   try {
     const { fecha, forzar } = req.body;
@@ -428,8 +428,239 @@ const getHistorialSync = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Sincronización DEMO (sin SAP real) - Para demos y desarrollo
+ * @route   POST /api/sap/sincronizar-demo
+ * @access  Private (Admin/Supervisor)
+ */
+const sincronizarDemo = async (req, res, next) => {
+  const client = await db.getClient();
+
+  try {
+    const { fecha } = req.body;
+    const fechaProduccion = fecha || new Date().toISOString().split('T')[0];
+
+    logger.info(`Iniciando sincronización DEMO para fecha: ${fechaProduccion}`);
+
+    await client.query('BEGIN');
+
+    // Datos de órdenes simuladas
+    const ordenesSimuladas = [
+      {
+        DocEntry: 1001,
+        DocNum: '1001',
+        ItemCode: 'HAMB-GOLD-6',
+        ProductDescription: 'Hamburguesa Gold x6',
+        PlannedQuantity: 50,
+        Status: 'R'
+      },
+      {
+        DocEntry: 1002,
+        DocNum: '1002',
+        ItemCode: 'HAMB-GOLD-12',
+        ProductDescription: 'Hamburguesa Gold x12',
+        PlannedQuantity: 30,
+        Status: 'R'
+      },
+      {
+        DocEntry: 1003,
+        DocNum: '1003',
+        ItemCode: 'PAN-ARABE-6',
+        ProductDescription: 'Pan Árabe x6',
+        PlannedQuantity: 100,
+        Status: 'R'
+      }
+    ];
+
+    logger.info(`Se simularon ${ordenesSimuladas.length} órdenes`);
+
+    // Obtener factor de absorción actual
+    const factorQuery = `
+      SELECT valor FROM configuracion_sistema WHERE clave = 'factor_absorcion_harina'
+    `;
+    const factorResult = await client.query(factorQuery);
+    const factorAbsorcion = parseFloat(factorResult.rows[0]?.valor || 60);
+
+    // Mapeo simulado de tipos de masa
+    const tiposMasaMap = {
+      'HAMB-GOLD-6': { tipo: 'GOLD', nombre: 'Hamburguesa Gold' },
+      'HAMB-GOLD-12': { tipo: 'GOLD', nombre: 'Hamburguesa Gold' },
+      'PAN-ARABE-6': { tipo: 'ARABE', nombre: 'Pan Árabe' }
+    };
+
+    // Agrupar órdenes por tipo de masa
+    const masasAgrupadas = {};
+
+    for (const orden of ordenesSimuladas) {
+      const tipoInfo = tiposMasaMap[orden.ItemCode];
+      if (!tipoInfo) continue;
+
+      if (!masasAgrupadas[tipoInfo.tipo]) {
+        masasAgrupadas[tipoInfo.tipo] = {
+          tipo_masa: tipoInfo.tipo,
+          nombre_masa: tipoInfo.nombre,
+          ordenes: [],
+          total_kilos: 0
+        };
+      }
+
+      masasAgrupadas[tipoInfo.tipo].ordenes.push(orden);
+      masasAgrupadas[tipoInfo.tipo].total_kilos += parseFloat(orden.PlannedQuantity);
+    }
+
+    // Crear masas de producción
+    const masasCreadas = [];
+    let ordenCounter = 1;
+
+    for (const tipoMasa in masasAgrupadas) {
+      const grupo = masasAgrupadas[tipoMasa];
+      const codigoMasa = `MASA-${fechaProduccion.replace(/-/g, '')}-${tipoMasa}-${ordenCounter}`;
+
+      const porcentajeMerma = 5.0;
+      const totalKilosConMerma = grupo.total_kilos * (1 + porcentajeMerma / 100);
+
+      // Crear masa de producción
+      const insertMasaQuery = `
+        INSERT INTO masas_produccion (
+          codigo_masa,
+          tipo_masa,
+          nombre_masa,
+          fecha_produccion,
+          total_kilos_base,
+          total_kilos_con_merma,
+          porcentaje_merma,
+          factor_absorcion_usado,
+          estado,
+          fase_actual,
+          created_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'EN_PROCESO', 'PESAJE', $9)
+        RETURNING id, uuid
+      `;
+
+      const masaResult = await client.query(insertMasaQuery, [
+        codigoMasa,
+        grupo.tipo_masa,
+        grupo.nombre_masa,
+        fechaProduccion,
+        grupo.total_kilos,
+        totalKilosConMerma,
+        porcentajeMerma,
+        factorAbsorcion,
+        req.user.id
+      ]);
+
+      const masaId = masaResult.rows[0].id;
+
+      // Insertar productos por masa
+      for (const orden of grupo.ordenes) {
+        await client.query(
+          `INSERT INTO productos_por_masa (
+             masa_id, producto_codigo, producto_nombre, presentacion, gramaje_unitario,
+             unidades_pedidas, unidades_programadas, kilos_pedidos, kilos_programados
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [
+            masaId,
+            orden.ItemCode,
+            orden.ProductDescription,
+            'BOLSA_6',
+            85, // Gramaje estimado
+            parseFloat(orden.PlannedQuantity),
+            parseFloat(orden.PlannedQuantity) * 1.05, // Con merma
+            parseFloat(orden.PlannedQuantity) * 0.085,
+            parseFloat(orden.PlannedQuantity) * 0.085 * 1.05
+          ]
+        );
+      }
+
+      // Insertar ingredientes simulados (básicos)
+      const ingredientesBase = [
+        { nombre: 'Harina Panadera 000', porcentaje: 100, esHarina: true },
+        { nombre: 'Agua', porcentaje: 60, esAgua: true },
+        { nombre: 'Sal', porcentaje: 2, esHarina: false },
+        { nombre: 'Levadura Fresca', porcentaje: 3, esHarina: false },
+        { nombre: 'Azúcar', porcentaje: 8, esHarina: false }
+      ];
+
+      let ordenVisualizacion = 1;
+      for (const ing of ingredientesBase) {
+        const cantidadGramos = (totalKilosConMerma * 1000 * ing.porcentaje) / 100;
+        await client.query(
+          `INSERT INTO ingredientes_masa (
+             masa_id, ingrediente_sap_code, ingrediente_nombre, orden_visualizacion,
+             porcentaje_panadero, es_harina, es_agua, cantidad_gramos, cantidad_kilos
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [
+            masaId,
+            `MP-${ing.nombre.substring(0,3).toUpperCase()}-001`,
+            ing.nombre,
+            ordenVisualizacion++,
+            ing.porcentaje,
+            ing.esHarina || false,
+            ing.esAgua || false,
+            cantidadGramos,
+            cantidadGramos / 1000
+          ]
+        );
+      }
+
+      // Crear registros de progreso
+      const fases = ['PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO'];
+      for (let i = 0; i < fases.length; i++) {
+        const fase = fases[i];
+        const estado = i === 0 ? 'EN_PROGRESO' : 'BLOQUEADA';
+
+        await client.query(
+          `INSERT INTO progreso_fases (masa_id, fase, estado, porcentaje_completado, fecha_inicio)
+           VALUES ($1, $2, $3, 0, $4)`,
+          [masaId, fase, estado, i === 0 ? new Date() : null]
+        );
+      }
+
+      masasCreadas.push({
+        id: masaId,
+        uuid: masaResult.rows[0].uuid,
+        codigo: codigoMasa,
+        tipo_masa: grupo.tipo_masa,
+        nombre: grupo.nombre_masa,
+        ordenes: grupo.ordenes.length,
+        kilos_total: totalKilosConMerma
+      });
+
+      ordenCounter++;
+    }
+
+    await client.query('COMMIT');
+
+    logger.info(`Sincronización DEMO completada: ${masasCreadas.length} masas creadas`);
+
+    res.json({
+      success: true,
+      message: 'Sincronización DEMO completada exitosamente (sin conexión SAP real)',
+      data: {
+        fecha_produccion: fechaProduccion,
+        ordenes_procesadas: ordenesSimuladas.length,
+        masas_creadas: masasCreadas.length,
+        masas: masasCreadas,
+        modo: 'DEMO'
+      }
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    logger.error('Error en sincronización DEMO:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Error al sincronizar en modo DEMO',
+      error: error.message
+    });
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   sincronizarSAP,
+  sincronizarDemo,
   getOrdenes,
   verificarStock,
   getHistorialSync

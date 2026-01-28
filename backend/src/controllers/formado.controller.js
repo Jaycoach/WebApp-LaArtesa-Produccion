@@ -145,7 +145,7 @@ exports.getFormadoInfo = async (req, res) => {
  * POST /api/formado/:masaId/iniciar
  */
 exports.iniciarFormado = async (req, res) => {
-  const client = await db.pool.connect();
+  const client = await db.getClient();
 
   try {
     const { masaId } = req.params;
@@ -260,7 +260,7 @@ exports.iniciarFormado = async (req, res) => {
  * POST /api/formado/:masaId/completar
  */
 exports.completarFormado = async (req, res) => {
-  const client = await db.pool.connect();
+  const client = await db.getClient();
 
   try {
     const { masaId } = req.params;

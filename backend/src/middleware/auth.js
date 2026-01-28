@@ -37,7 +37,7 @@ const verifyToken = async (req, res, next) => {
       `SELECT id, uuid, username, email, nombre_completo, rol, activo, bloqueado_hasta, ultimo_cambio_password
        FROM usuarios 
        WHERE id = $1`,
-      [decoded.userId],
+      [decoded.id],
     );
 
     if (!result.rows.length) {
@@ -147,7 +147,7 @@ const optionalAuth = async (req, res, next) => {
       `SELECT id, uuid, username, email, nombre_completo, rol, activo
        FROM usuarios 
        WHERE id = $1 AND activo = true`,
-      [decoded.userId],
+      [decoded.id],
     );
 
     if (result.rows.length > 0) {

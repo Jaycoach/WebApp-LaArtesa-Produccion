@@ -34,7 +34,7 @@ export const ListaMasas: React.FC = () => {
    * Ver detalle de una masa
    */
   const handleVerDetalle = (masaId: number) => {
-    navigate(`/produccion/masas/${masaId}`);
+    navigate(`/planificacion/masas/${masaId}`);
   };
 
   /**

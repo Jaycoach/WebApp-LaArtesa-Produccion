@@ -18,12 +18,12 @@ class UserService {
       search = '',
       rol = null,
       activo = null,
-      sortBy = 'created_at',
+      sortBy = 'fecha_creacion',
       sortOrder = 'DESC',
     } = filters;
 
     const offset = (page - 1) * limit;
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       const whereConditions = [];
@@ -60,8 +60,8 @@ class UserService {
         : '';
 
       // Validar campo de ordenamiento
-      const validSortFields = ['username', 'email', 'nombre_completo', 'rol', 'created_at', 'ultimo_login'];
-      const sortField = validSortFields.includes(sortBy) ? sortBy : 'created_at';
+      const validSortFields = ['username', 'email', 'nombre_completo', 'rol', 'fecha_creacion', 'ultimo_acceso'];
+      const sortField = validSortFields.includes(sortBy) ? sortBy : 'fecha_creacion';
       const sortDirection = sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
       // Contar total de usuarios
@@ -78,7 +78,7 @@ class UserService {
         `SELECT 
           id, username, email, nombre_completo, rol, activo, 
           intentos_fallidos, bloqueado_hasta, 
-          created_at, updated_at, ultimo_login
+          fecha_creacion, fecha_actualizacion, ultimo_acceso
          FROM usuarios 
          ${whereClause}
          ORDER BY ${sortField} ${sortDirection}
@@ -107,14 +107,14 @@ class UserService {
    * Obtener usuario por ID
    */
   async getUserById(userId) {
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       const result = await client.query(
         `SELECT 
           id, username, email, nombre_completo, rol, activo, 
           intentos_fallidos, bloqueado_hasta, 
-          created_at, updated_at, ultimo_login
+          fecha_creacion, fecha_actualizacion, ultimo_acceso
          FROM usuarios 
          WHERE id = $1`,
         [userId],
@@ -141,7 +141,7 @@ class UserService {
       username, email, password, nombre_completo, rol = 'operador',
     } = userData;
 
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       await client.query('BEGIN');
@@ -163,7 +163,7 @@ class UserService {
       const result = await client.query(
         `INSERT INTO usuarios (username, email, password_hash, nombre_completo, rol, activo)
          VALUES ($1, $2, $3, $4, $5, true)
-         RETURNING id, username, email, nombre_completo, rol, activo, created_at`,
+         RETURNING id, username, email, nombre_completo, rol, activo, fecha_creacion`,
         [username, email, hashedPassword, nombre_completo, rol],
       );
 
@@ -187,7 +187,7 @@ class UserService {
   async updateUser(userId, updates) {
     const { nombre_completo, email, rol } = updates;
 
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       // Verificar si el usuario existe
@@ -217,7 +217,7 @@ class UserService {
          SET nombre_completo = COALESCE($1, nombre_completo),
              email = COALESCE($2, email),
              rol = COALESCE($3, rol),
-             updated_at = NOW()
+             fecha_actualizacion = NOW()
          WHERE id = $4
          RETURNING id, username, email, nombre_completo, rol, activo`,
         [nombre_completo, email, rol, userId],
@@ -238,7 +238,7 @@ class UserService {
    * Eliminar usuario (soft delete)
    */
   async deleteUser(userId) {
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       await client.query('BEGIN');
@@ -255,7 +255,7 @@ class UserService {
 
       // Desactivar usuario en lugar de eliminarlo
       await client.query(
-        'UPDATE usuarios SET activo = false, updated_at = NOW() WHERE id = $1',
+        'UPDATE usuarios SET activo = false, fecha_actualizacion = NOW() WHERE id = $1',
         [userId],
       );
 
@@ -283,12 +283,12 @@ class UserService {
    * Activar usuario
    */
   async activateUser(userId) {
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       const result = await client.query(
         `UPDATE usuarios 
-         SET activo = true, updated_at = NOW() 
+         SET activo = true, fecha_actualizacion = NOW() 
          WHERE id = $1
          RETURNING id, username, activo`,
         [userId],
@@ -313,7 +313,7 @@ class UserService {
    * Desactivar usuario
    */
   async deactivateUser(userId) {
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       await client.query('BEGIN');
@@ -321,7 +321,7 @@ class UserService {
       // Desactivar usuario
       const result = await client.query(
         `UPDATE usuarios 
-         SET activo = false, updated_at = NOW() 
+         SET activo = false, fecha_actualizacion = NOW() 
          WHERE id = $1
          RETURNING id, username, activo`,
         [userId],
@@ -355,7 +355,7 @@ class UserService {
    * Resetear contraseña de usuario (por admin)
    */
   async resetUserPassword(userId, newPassword) {
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       await client.query('BEGIN');
@@ -375,7 +375,7 @@ class UserService {
 
       // Actualizar contraseña
       await client.query(
-        'UPDATE usuarios SET password_hash = $1, updated_at = NOW() WHERE id = $2',
+        'UPDATE usuarios SET password_hash = $1, fecha_actualizacion = NOW() WHERE id = $2',
         [hashedPassword, userId],
       );
 
@@ -411,14 +411,14 @@ class UserService {
    * Desbloquear usuario
    */
   async unlockUser(userId) {
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       const result = await client.query(
         `UPDATE usuarios 
          SET intentos_fallidos = 0, 
              bloqueado_hasta = NULL,
-             updated_at = NOW()
+             fecha_actualizacion = NOW()
          WHERE id = $1
          RETURNING id, username, bloqueado_hasta`,
         [userId],
@@ -443,14 +443,14 @@ class UserService {
    * Obtener actividad del usuario
    */
   async getUserActivity(userId, limit = 20) {
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       const result = await client.query(
-        `SELECT id, accion, tabla, registro_id, detalles, created_at
+        `SELECT id, accion, tabla, registro_id, detalles, fecha_creacion
          FROM auditoria 
          WHERE usuario_id = $1
-         ORDER BY created_at DESC
+         ORDER BY fecha_creacion DESC
          LIMIT $2`,
         [userId, limit],
       );
@@ -468,7 +468,7 @@ class UserService {
    * Obtener estadísticas de usuarios
    */
   async getUserStats() {
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       const result = await client.query(`

@@ -21,6 +21,13 @@ router.use(verifyToken);
 router.post('/sincronizar', checkRole(['admin', 'supervisor']), sapController.sincronizarSAP);
 
 /**
+ * @route   POST /api/sap/sincronizar-demo
+ * @desc    Sincronizar en modo DEMO (sin conexión SAP real)
+ * @access  Private (Admin/Supervisor only)
+ */
+router.post('/sincronizar-demo', checkRole(['admin', 'supervisor']), sapController.sincronizarDemo);
+
+/**
  * @route   GET /api/sap/ordenes
  * @desc    Obtener órdenes de SAP
  * @access  Private

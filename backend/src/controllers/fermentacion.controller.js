@@ -102,7 +102,7 @@ exports.getFermentacionInfo = async (req, res) => {
  * POST /api/fermentacion/:masaId/camara/entrada
  */
 exports.registrarEntradaCamara = async (req, res) => {
-  const client = await db.pool.connect();
+  const client = await db.getClient();
 
   try {
     const { masaId } = req.params;
@@ -241,7 +241,7 @@ exports.registrarEntradaCamara = async (req, res) => {
  * POST /api/fermentacion/:masaId/camara/salida
  */
 exports.registrarSalidaCamara = async (req, res) => {
-  const client = await db.pool.connect();
+  const client = await db.getClient();
 
   try {
     const { masaId } = req.params;
@@ -338,7 +338,7 @@ exports.registrarSalidaCamara = async (req, res) => {
  * POST /api/fermentacion/:masaId/frio/entrada
  */
 exports.registrarEntradaFrio = async (req, res) => {
-  const client = await db.pool.connect();
+  const client = await db.getClient();
 
   try {
     const { masaId } = req.params;
@@ -418,7 +418,7 @@ exports.registrarEntradaFrio = async (req, res) => {
  * POST /api/fermentacion/:masaId/frio/salida
  */
 exports.registrarSalidaFrio = async (req, res) => {
-  const client = await db.pool.connect();
+  const client = await db.getClient();
 
   try {
     const { masaId } = req.params;

@@ -8,18 +8,18 @@
 -- IMPORTANTE: Cambiar en producción
 -- =============================================
 INSERT INTO usuarios (
-    username, 
-    email, 
-    password_hash, 
-    nombre_completo, 
-    rol, 
+    username,
+    email,
+    password_hash,
+    nombre_completo,
+    rol,
     activo,
     email_verificado,
     debe_cambiar_password
 ) VALUES (
     'admin',
     'admin@artesa.com',
-    '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYIeWIgJgGy', -- Admin123!@#
+    '$2b$12$4QHR1TywNQQtGJaDJUWEZez4mh7yARg5/2hHuWn.ATQR3vAvlpjam', -- Admin123!@#
     'Administrador del Sistema',
     'ADMIN',
     true,
@@ -32,10 +32,11 @@ INSERT INTO usuarios (
 -- Todos con password: Test123!@#
 -- =============================================
 INSERT INTO usuarios (username, email, password_hash, nombre_completo, rol, activo, email_verificado) VALUES
-('supervisor1', 'supervisor@artesa.com', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYIeWIgJgGy', 'Juan Supervisor', 'SUPERVISOR', true, true),
-('operario1', 'operario1@artesa.com', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYIeWIgJgGy', 'Pedro Operario', 'OPERARIO', true, true),
-('operario2', 'operario2@artesa.com', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYIeWIgJgGy', 'María González', 'OPERARIO', true, true),
-('calidad1', 'calidad@artesa.com', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYIeWIgJgGy', 'Ana Calidad', 'CALIDAD', true, true)
+('supervisor1', 'supervisor@artesa.com', '$2b$12$8qCtfX4xYl45/DRrd3qJy.W9Teh4VAm2cfFUoUIa0At6C5ZAFLsHy', 'Juan Supervisor', 'SUPERVISOR', true, true),
+('operario1', 'operario1@artesa.com', '$2b$12$vIPhdavDpcJUqrWQ4LqyVeV8N.xvyuHh9FniIw4iZiTmpbaWjWhlK', 'Pedro Operario', 'OPERARIO', true, true),
+('operario2', 'operario2@artesa.com', '$2b$12$.TaigWwlXH/O5O5hfdblx.SiAHt9V8M3uYw3V.iXGYaOBhCUHKKCO', 'María González', 'OPERARIO', true, true),
+('calidad1', 'calidad@artesa.com', '$2b$12$UBEH.lc5CwFMgp8SPoVoY.KKUe45JyuX.3RPHYBIOaavO3io0vwcq', 'Ana Calidad', 'CALIDAD', true, true),
+('demo', 'demo@artesa.com', '$2b$12$IlqNUitrKWbDu8QY/5kgieKSSyqV4wr8uJNE52qAFkMXoYw18ydye', 'Usuario Demo', 'OPERARIO', true, true)
 ON CONFLICT (username) DO NOTHING;
 
 -- =============================================

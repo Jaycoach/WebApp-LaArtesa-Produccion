@@ -51,7 +51,7 @@ El sistema cubre **7 fases del proceso productivo:**
 
 ### 1.4 Fecha Límite Crítica
 
-**28 de Febrero de 2026** - Fecha en que se retira el sistema IM Soft actual.
+**28 de Febrero de 2026** - Fecha en que se retira el sistema AyM Soft actual.
 
 **MVP Prioritario:** Llegar hasta fase de **DIVISION** como mínimo funcional.
 
@@ -1714,7 +1714,7 @@ DELETE /api/users/:id                          - Eliminar usuario (admin)
 **Notas Importantes:**
 - Este manual está basado en las reuniones del 11/12/2025 y 23/01/2026
 - El MVP prioritario debe llegar hasta DIVISION como mínimo
-- El sistema está diseñado para reemplazar IM Soft antes del 28/02/2026
+- El sistema está diseñado para reemplazar AyM Soft antes del 28/02/2026
 - Todas las fases están implementadas en el backend
 - El frontend requiere desarrollo para conexión completa con API
 

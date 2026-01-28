@@ -55,7 +55,7 @@ const registerValidation = [
 
   body('rol')
     .optional()
-    .isIn(['admin', 'supervisor', 'operador', 'visualizador'])
+    .isIn(['ADMIN', 'SUPERVISOR', 'OPERARIO', 'CALIDAD', 'AUDITOR'])
     .withMessage('Rol inválido'),
 
   handleValidationErrors,

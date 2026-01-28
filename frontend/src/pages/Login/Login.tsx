@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/store';
 import { Button, Alert } from '@/components/common';
+import { authService } from '@/services/authService';
 
 export const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -18,23 +19,19 @@ export const Login: React.FC = () => {
     setIsLoading(true);
 
     try {
-      // TODO: Implementar llamada real a la API
-      // Por ahora, login mock
-      const mockUser = {
-        id: '1',
+      // Llamada real a la API de autenticación
+      const result = await authService.login({
         username,
-        nombre: 'Usuario Demo',
-        rol: 'admin' as const,
-        email: 'demo@laartesa.com',
-        activo: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+        password,
+      });
 
-      login(mockUser, 'mock-token-123');
+      // Actualizar el estado de autenticación
+      login(result.user, result.token);
+
+      // Navegar al dashboard
       navigate('/');
     } catch (err: any) {
-      setError(err.message || 'Error al iniciar sesión');
+      setError(err.message || 'Credenciales inválidas. Por favor, intenta nuevamente.');
     } finally {
       setIsLoading(false);
     }

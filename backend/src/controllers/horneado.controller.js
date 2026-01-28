@@ -257,7 +257,7 @@ exports.getProgramas = async (req, res) => {
  * POST /api/horneado/:masaId/iniciar
  */
 exports.iniciarHorneado = async (req, res) => {
-  const client = await db.pool.connect();
+  const client = await db.getClient();
 
   try {
     const { masaId } = req.params;
@@ -554,7 +554,7 @@ exports.actualizarDamper = async (req, res) => {
  * POST /api/horneado/:masaId/completar
  */
 exports.completarHorneado = async (req, res) => {
-  const client = await db.pool.connect();
+  const client = await db.getClient();
 
   try {
     const { masaId } = req.params;

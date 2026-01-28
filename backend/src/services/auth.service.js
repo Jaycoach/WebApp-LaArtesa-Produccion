@@ -18,7 +18,7 @@ class AuthService {
       username, email, password, nombre_completo, rol = 'operador',
     } = userData;
 
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       await client.query('BEGIN');
@@ -38,9 +38,9 @@ class AuthService {
 
       // Insertar usuario
       const result = await client.query(
-        `INSERT INTO usuarios (username, email, password_hash, nombre_completo, rol, activo)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, username, email, nombre_completo, rol, activo, created_at`,
+        `INSERT INTO usuarios (username, email, password_hash, nombre_completo, rol, activo, ultimo_cambio_password)
+         VALUES ($1, $2, $3, $4, $5, $6, NULL)
+         RETURNING id, username, email, nombre_completo, rol, activo, fecha_creacion`,
         [username, email, hashedPassword, nombre_completo, rol, true],
       );
 
@@ -86,7 +86,7 @@ class AuthService {
   async login(credentials) {
     const { username, password } = credentials;
 
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       // Buscar usuario
@@ -135,10 +135,10 @@ class AuthService {
 
       // Reset intentos fallidos y actualizar último login
       await client.query(
-        `UPDATE usuarios 
-         SET intentos_fallidos = 0, 
+        `UPDATE usuarios
+         SET intentos_fallidos = 0,
              bloqueado_hasta = NULL,
-             ultimo_login = NOW()
+             ultimo_acceso = NOW()
          WHERE id = $1`,
         [user.id],
       );
@@ -177,7 +177,7 @@ class AuthService {
    * Refrescar access token
    */
   async refreshToken(refreshToken) {
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       // Verificar refresh token
@@ -248,7 +248,7 @@ class AuthService {
    * Logout - Revocar refresh token
    */
   async logout(refreshToken) {
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       await client.query(
@@ -273,7 +273,7 @@ class AuthService {
    * Solicitar recuperación de contraseña
    */
   async forgotPassword(email) {
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       // Buscar usuario
@@ -321,7 +321,7 @@ class AuthService {
    * Resetear contraseña con token
    */
   async resetPassword(resetToken, newPassword) {
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       await client.query('BEGIN');
@@ -354,7 +354,7 @@ class AuthService {
          SET password_hash = $1,
              reset_token = NULL,
              reset_token_expires = NULL,
-             updated_at = NOW()
+             fecha_actualizacion = NOW()
          WHERE id = $2`,
         [hashedPassword, user.id],
       );
@@ -383,7 +383,7 @@ class AuthService {
    * Cambiar contraseña (estando autenticado)
    */
   async changePassword(userId, currentPassword, newPassword) {
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       await client.query('BEGIN');
@@ -412,7 +412,7 @@ class AuthService {
 
       // Actualizar contraseña
       await client.query(
-        'UPDATE usuarios SET password_hash = $1, updated_at = NOW() WHERE id = $2',
+        'UPDATE usuarios SET password_hash = $1, fecha_actualizacion = NOW() WHERE id = $2',
         [hashedPassword, userId],
       );
 
@@ -434,13 +434,13 @@ class AuthService {
    * Obtener perfil de usuario
    */
   async getProfile(userId) {
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       const result = await client.query(
-        `SELECT id, username, email, nombre_completo, rol, activo, 
-                created_at, updated_at, ultimo_login
-         FROM usuarios 
+        `SELECT id, username, email, nombre_completo, rol, activo,
+                fecha_creacion, fecha_actualizacion, ultimo_acceso as ultimo_login
+         FROM usuarios
          WHERE id = $1`,
         [userId],
       );
@@ -462,7 +462,7 @@ class AuthService {
    * Actualizar perfil de usuario
    */
   async updateProfile(userId, updates) {
-    const client = await pool.connect();
+    const client = await pool.getClient();
 
     try {
       const { nombre_completo, email } = updates;
@@ -483,7 +483,7 @@ class AuthService {
         `UPDATE usuarios 
          SET nombre_completo = COALESCE($1, nombre_completo),
              email = COALESCE($2, email),
-             updated_at = NOW()
+             fecha_actualizacion = NOW()
          WHERE id = $3
          RETURNING id, username, email, nombre_completo, rol`,
         [nombre_completo, email, userId],
