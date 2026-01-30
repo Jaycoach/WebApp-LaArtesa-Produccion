@@ -154,7 +154,9 @@ export const PesajeMasa: React.FC = () => {
                   <div className="flex-1">
                     <h3 className="font-semibold text-gray-900">{ing.ingrediente_nombre}</h3>
                     <p className="text-sm text-gray-600">
-                      {ing.cantidad_kilos.toFixed(2)} kg ({ing.cantidad_gramos}g) - {ing.porcentaje_panadero}% panadero
+                      {typeof ing.cantidad_kilos === 'number'
+                        ? ing.cantidad_kilos.toFixed(2)
+                        : Number(ing.cantidad_kilos).toFixed(2)} kg ({ing.cantidad_gramos}g) - {ing.porcentaje_panadero}% panadero
                     </p>
                   </div>
 

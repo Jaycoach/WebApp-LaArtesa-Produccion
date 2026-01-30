@@ -79,19 +79,27 @@ export const DetalleMasa: React.FC = () => {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
             <div>
               <p className="text-sm text-gray-600">Total Base</p>
-              <p className="text-2xl font-bold text-gray-900">{masa.total_kilos_base.toFixed(2)} kg</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {typeof masa.total_kilos_base === 'number'
+                  ? masa.total_kilos_base.toFixed(2)
+                  : Number(masa.total_kilos_base).toFixed(2)} kg
+              </p>
             </div>
             <div>
-              <p className="text-sm text-gray-600">Con Merma ({masa.porcentaje_merma}%)</p>
-              <p className="text-2xl font-bold text-blue-600">{masa.total_kilos_con_merma.toFixed(2)} kg</p>
+              <p className="text-sm text-gray-600">Con Merma ({masa.porcentaje_merma || 0}%)</p>
+              <p className="text-2xl font-bold text-blue-600">
+                {typeof masa.total_kilos_con_merma === 'number'
+                  ? masa.total_kilos_con_merma.toFixed(2)
+                  : Number(masa.total_kilos_con_merma).toFixed(2)} kg
+              </p>
             </div>
             <div>
               <p className="text-sm text-gray-600">Órdenes</p>
-              <p className="text-2xl font-bold text-gray-900">{masa.total_ordenes}</p>
+              <p className="text-2xl font-bold text-gray-900">{masa.total_ordenes || 0}</p>
             </div>
             <div>
               <p className="text-sm text-gray-600">Productos</p>
-              <p className="text-2xl font-bold text-gray-900">{masa.total_productos}</p>
+              <p className="text-2xl font-bold text-gray-900">{masa.total_productos || 0}</p>
             </div>
           </div>
         </Card>
@@ -155,7 +163,11 @@ export const DetalleMasa: React.FC = () => {
                       <td className="px-4 py-3 text-sm text-gray-600 text-right">{producto.gramaje_unitario}g</td>
                       <td className="px-4 py-3 text-sm text-gray-900 text-right">{producto.unidades_pedidas}</td>
                       <td className="px-4 py-3 text-sm font-semibold text-blue-600 text-right">{producto.unidades_programadas}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900 text-right">{producto.kilos_programados.toFixed(2)} kg</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 text-right">
+                        {typeof producto.kilos_programados === 'number'
+                          ? producto.kilos_programados.toFixed(2)
+                          : Number(producto.kilos_programados).toFixed(2)} kg
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -189,7 +201,11 @@ export const DetalleMasa: React.FC = () => {
                         {ing.es_agua && <span className="ml-2 text-xs text-blue-600">(Agua)</span>}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600 text-right">{ing.porcentaje_panadero}%</td>
-                      <td className="px-4 py-3 text-sm font-semibold text-gray-900 text-right">{ing.cantidad_kilos.toFixed(2)} kg</td>
+                      <td className="px-4 py-3 text-sm font-semibold text-gray-900 text-right">
+                        {typeof ing.cantidad_kilos === 'number'
+                          ? ing.cantidad_kilos.toFixed(2)
+                          : Number(ing.cantidad_kilos).toFixed(2)} kg
+                      </td>
                     </tr>
                   ))}
                 </tbody>

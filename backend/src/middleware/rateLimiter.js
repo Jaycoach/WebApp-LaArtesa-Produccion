@@ -76,13 +76,13 @@ const defaultHandler = (limitType, message) => (req, res) => {
 
 /**
  * Rate Limiter General - Protección global de API
- * - 100 requests cada 15 minutos
+ * - 500 requests cada 15 minutos (más permisivo para desarrollo)
  * - Identificado por IP
  * - Excludes: health checks, swagger docs
  */
 const generalLimiter = rateLimit({
   windowMs: config.rateLimit.windowMs || 15 * 60 * 1000,
-  max: config.rateLimit.max || 100,
+  max: config.rateLimit.max || 500, // Incrementado de 100 a 500 para desarrollo
   standardHeaders: true,
   legacyHeaders: false,
   handler: defaultHandler('GENERAL', 'Demasiadas peticiones desde esta IP. Por favor intenta de nuevo más tarde.'),

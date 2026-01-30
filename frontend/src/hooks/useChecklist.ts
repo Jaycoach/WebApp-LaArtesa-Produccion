@@ -156,12 +156,24 @@ export const useConfirmarPesaje = () => {
   return useMutation({
     mutationFn: (masaId: number) => checklistService.confirmarPesaje(masaId),
     onSuccess: (data, masaId) => {
-      // Invalidar checklist y progreso de fases
+      // Invalidar todas las queries relevantes para refrescar la UI
       queryClient.invalidateQueries({
         queryKey: CHECKLIST_QUERY_KEYS.byMasa(masaId),
       });
+
+      // Invalidar fases con el masaId como string (como lo espera el hook)
       queryClient.invalidateQueries({
-        queryKey: ['fases', 'progreso', masaId],
+        queryKey: ['fases', String(masaId)],
+      });
+
+      // Invalidar detalle de masa
+      queryClient.invalidateQueries({
+        queryKey: ['masas', 'detail', masaId],
+      });
+
+      // Invalidar lista de masas
+      queryClient.invalidateQueries({
+        queryKey: ['masas'],
       });
 
       return {

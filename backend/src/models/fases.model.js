@@ -196,19 +196,25 @@ const getProgresoFases = async (masaId) => {
 };
 
 const updateEstadoFase = async (masaId, fase, estado, porcentaje, userId, datosFase = null) => {
+  // Asegurar que los tipos sean correctos
+  const masaIdNum = Number(masaId);
+  const userIdNum = userId ? Number(userId) : null;
+  const porcentajeNum = Number(porcentaje);
+  const datosFaseJson = datosFase ? JSON.stringify(datosFase) : null;
+
   const result = await db.query(`
     UPDATE progreso_fases
-    SET 
+    SET
       estado = $1,
       porcentaje_completado = $2,
       usuario_responsable = $3,
       fecha_completado = CASE WHEN $1 = 'COMPLETADA' THEN NOW() ELSE fecha_completado END,
       fecha_inicio = CASE WHEN $1 = 'EN_PROGRESO' AND fecha_inicio IS NULL THEN NOW() ELSE fecha_inicio END,
-      datos_fase = COALESCE($4, datos_fase),
+      datos_fase = COALESCE($4::jsonb, datos_fase),
       updated_at = NOW()
     WHERE masa_id = $5 AND fase = $6
     RETURNING *
-  `, [estado, porcentaje, userId, JSON.stringify(datosFase), masaId, fase]);
+  `, [estado, porcentajeNum, userIdNum, datosFaseJson, masaIdNum, fase]);
 
   return result.rows[0];
 };
@@ -226,19 +232,22 @@ const desbloquearSiguienteFase = async (masaId, faseActual) => {
   const siguienteFase = fasesOrden[faseActual];
   if (!siguienteFase) return null;
 
+  const masaIdNum = Number(masaId);
+
+  // Desbloquear la siguiente fase estableciéndola como EN_PROGRESO
   const result = await db.query(`
     UPDATE progreso_fases
-    SET estado = 'BLOQUEADA', updated_at = NOW()
+    SET estado = 'EN_PROGRESO', updated_at = NOW()
     WHERE masa_id = $1 AND fase = $2
     RETURNING *
-  `, [masaId, siguienteFase]);
+  `, [masaIdNum, siguienteFase]);
 
-  // Actualizar masa
+  // Actualizar fase_actual en masas_produccion
   await db.query(`
     UPDATE masas_produccion
     SET fase_actual = $1, updated_at = NOW()
     WHERE id = $2
-  `, [siguienteFase, masaId]);
+  `, [siguienteFase, masaIdNum]);
 
   return result.rows[0];
 };

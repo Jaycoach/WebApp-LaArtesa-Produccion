@@ -68,7 +68,23 @@ export const useCompletarFase = () => {
       data?: CompletarFaseRequest;
     }) => fasesService.completarFase(masaId, fase, data),
     onSuccess: (_, variables) => {
+      // Invalidar todas las queries relevantes para refrescar la UI
       queryClient.invalidateQueries({ queryKey: fasesKeys.byMasa(variables.masaId) });
+
+      // Invalidar detalle de masa
+      queryClient.invalidateQueries({
+        queryKey: ['masas', 'detail', Number(variables.masaId)],
+      });
+
+      // Invalidar lista de masas
+      queryClient.invalidateQueries({
+        queryKey: ['masas'],
+      });
+
+      // Invalidar productos
+      queryClient.invalidateQueries({
+        queryKey: ['masas', 'productos', Number(variables.masaId)],
+      });
     },
   });
 };
