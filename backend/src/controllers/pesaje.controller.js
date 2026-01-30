@@ -126,11 +126,15 @@ const updateIngrediente = async (req, res, next) => {
 const confirmarPesaje = async (req, res, next) => {
   try {
     const { masaId } = req.params;
+    logger.info(`Confirmando pesaje para masa ${masaId}`);
 
     // Verificar que todos los ingredientes estén pesados
+    logger.info(`Verificando ingredientes pesados para masa ${masaId}`);
     const resultado = await fasesModel.checkTodosPesados(masaId);
+    logger.info(`Resultado de verificación: ${JSON.stringify(resultado)}`);
 
     if (!resultado.completo) {
+      logger.warn(`Pesaje incompleto para masa ${masaId}. Faltantes: ${resultado.faltantes.join(', ')}`);
       return res.status(400).json({
         success: false,
         message: 'No se puede confirmar el pesaje. Hay ingredientes pendientes.',
@@ -143,6 +147,7 @@ const confirmarPesaje = async (req, res, next) => {
     }
 
     // Completar la fase de pesaje
+    logger.info(`Actualizando estado de fase PESAJE a COMPLETADA para masa ${masaId}`);
     await fasesModel.updateEstadoFase(
       masaId,
       'PESAJE',
@@ -153,7 +158,9 @@ const confirmarPesaje = async (req, res, next) => {
     );
 
     // Desbloquear la fase de amasado
+    logger.info(`Desbloqueando siguiente fase después de PESAJE para masa ${masaId}`);
     const siguienteFase = await fasesModel.desbloquearSiguienteFase(masaId, 'PESAJE');
+    logger.info(`Fase desbloqueada: ${siguienteFase?.fase || 'AMASADO'}`);
 
     res.json({
       success: true,
@@ -165,6 +172,7 @@ const confirmarPesaje = async (req, res, next) => {
     });
   } catch (error) {
     logger.error('Error al confirmar pesaje:', error);
+    logger.error('Stack trace:', error.stack);
     next(error);
   }
 };

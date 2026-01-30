@@ -185,6 +185,7 @@ export const PesajeMasa: React.FC = () => {
                       <input
                         type="checkbox"
                         checked={ing.pesado}
+                        onChange={() => {}} // Read-only checkbox (pesado se marca mediante el formulario)
                         disabled={!ing.verificado}
                         className="w-5 h-5 disabled:opacity-50"
                       />

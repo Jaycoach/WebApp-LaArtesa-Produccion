@@ -68,9 +68,12 @@ const getMasasByFecha = async (fecha) => {
 };
 
 const getMasaById = async (masaId) => {
+  // Asegurar que masaId sea un número
+  const masaIdNum = Number(masaId);
+
   const result = await db.query(`
     SELECT * FROM masas_produccion WHERE id = $1
-  `, [masaId]);
+  `, [masaIdNum]);
 
   return result.rows[0];
 };
@@ -79,11 +82,14 @@ const getMasaById = async (masaId) => {
  * PRODUCTOS POR MASA
  */
 const getProductosByMasa = async (masaId) => {
+  // Asegurar que masaId sea un número
+  const masaIdNum = Number(masaId);
+
   const result = await db.query(`
-    SELECT * FROM productos_por_masa 
+    SELECT * FROM productos_por_masa
     WHERE masa_id = $1
     ORDER BY producto_nombre, presentacion
-  `, [masaId]);
+  `, [masaIdNum]);
 
   return result.rows;
 };
@@ -106,11 +112,14 @@ const updateUnidadesProgramadas = async (productoId, unidades, userId) => {
  * INGREDIENTES DE MASA
  */
 const getIngredientesByMasa = async (masaId) => {
+  // Asegurar que masaId sea un número
+  const masaIdNum = Number(masaId);
+
   const result = await db.query(`
-    SELECT * FROM ingredientes_masa 
+    SELECT * FROM ingredientes_masa
     WHERE masa_id = $1
     ORDER BY orden_visualizacion
-  `, [masaId]);
+  `, [masaIdNum]);
 
   return result.rows;
 };
@@ -150,19 +159,22 @@ const updateIngredienteChecklist = async (ingredienteId, data) => {
 };
 
 const checkTodosPesados = async (masaId) => {
+  // Asegurar que masaId sea un número
+  const masaIdNum = Number(masaId);
+
   const result = await db.query(`
-    SELECT 
+    SELECT
       COUNT(*) as total,
       SUM(CASE WHEN disponible AND verificado AND pesado THEN 1 ELSE 0 END) as completados,
       ARRAY_AGG(
-        CASE 
+        CASE
           WHEN NOT (disponible AND verificado AND pesado)
-          THEN ingrediente_nombre 
+          THEN ingrediente_nombre
         END
       ) FILTER (WHERE NOT (disponible AND verificado AND pesado)) as faltantes
     FROM ingredientes_masa
     WHERE masa_id = $1
-  `, [masaId]);
+  `, [masaIdNum]);
 
   const { total, completados, faltantes } = result.rows[0];
   return {
@@ -177,10 +189,13 @@ const checkTodosPesados = async (masaId) => {
  * PROGRESO DE FASES
  */
 const getProgresoFases = async (masaId) => {
+  // Asegurar que masaId sea un número
+  const masaIdNum = Number(masaId);
+
   const result = await db.query(`
-    SELECT * FROM progreso_fases 
+    SELECT * FROM progreso_fases
     WHERE masa_id = $1
-    ORDER BY 
+    ORDER BY
       CASE fase
         WHEN 'PLANIFICACION' THEN 1
         WHEN 'PESAJE' THEN 2
@@ -190,7 +205,7 @@ const getProgresoFases = async (masaId) => {
         WHEN 'FERMENTACION' THEN 6
         WHEN 'HORNEADO' THEN 7
       END
-  `, [masaId]);
+  `, [masaIdNum]);
 
   return result.rows;
 };
@@ -200,19 +215,39 @@ const updateEstadoFase = async (masaId, fase, estado, porcentaje, userId, datosF
   const masaIdNum = Number(masaId);
   const userIdNum = userId ? Number(userId) : null;
   const porcentajeNum = Number(porcentaje);
-  const datosFaseJson = datosFase ? JSON.stringify(datosFase) : null;
+
+  // Si datosFase es null, no actualizar ese campo
+  if (!datosFase) {
+    const result = await db.query(`
+      UPDATE progreso_fases
+      SET
+        estado = $1::text,
+        porcentaje_completado = $2::integer,
+        usuario_responsable = $3::integer,
+        fecha_completado = CASE WHEN $1::text = 'COMPLETADA' THEN NOW() ELSE fecha_completado END,
+        fecha_inicio = CASE WHEN $1::text = 'EN_PROGRESO' AND fecha_inicio IS NULL THEN NOW() ELSE fecha_inicio END,
+        updated_at = NOW()
+      WHERE masa_id = $4::integer AND fase = $5::text
+      RETURNING *
+    `, [estado, porcentajeNum, userIdNum, masaIdNum, fase]);
+
+    return result.rows[0];
+  }
+
+  // Si datosFase existe, incluirlo en la actualización
+  const datosFaseJson = JSON.stringify(datosFase);
 
   const result = await db.query(`
     UPDATE progreso_fases
     SET
-      estado = $1,
-      porcentaje_completado = $2,
-      usuario_responsable = $3,
-      fecha_completado = CASE WHEN $1 = 'COMPLETADA' THEN NOW() ELSE fecha_completado END,
-      fecha_inicio = CASE WHEN $1 = 'EN_PROGRESO' AND fecha_inicio IS NULL THEN NOW() ELSE fecha_inicio END,
-      datos_fase = COALESCE($4::jsonb, datos_fase),
+      estado = $1::text,
+      porcentaje_completado = $2::integer,
+      usuario_responsable = $3::integer,
+      fecha_completado = CASE WHEN $1::text = 'COMPLETADA' THEN NOW() ELSE fecha_completado END,
+      fecha_inicio = CASE WHEN $1::text = 'EN_PROGRESO' AND fecha_inicio IS NULL THEN NOW() ELSE fecha_inicio END,
+      datos_fase = $4::jsonb,
       updated_at = NOW()
-    WHERE masa_id = $5 AND fase = $6
+    WHERE masa_id = $5::integer AND fase = $6::text
     RETURNING *
   `, [estado, porcentajeNum, userIdNum, datosFaseJson, masaIdNum, fase]);
 
