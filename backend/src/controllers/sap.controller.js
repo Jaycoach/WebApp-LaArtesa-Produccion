@@ -220,7 +220,8 @@ const sincronizarSAP = async (req, res, next) => {
       const fases = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO'];
       for (let i = 0; i < fases.length; i++) {
         const fase = fases[i];
-        const estado = i === 0 ? 'BLOQUEADA' : 'BLOQUEADA'; // Todas bloqueadas inicialmente
+        // PLANIFICACION inicia EN_PROGRESO, las demás bloqueadas
+        const estado = i === 0 ? 'EN_PROGRESO' : 'BLOQUEADA';
 
         await client.query(
           `INSERT INTO progreso_fases (masa_id, fase, estado, porcentaje_completado)
