@@ -1,0 +1,30 @@
+═══════════════════════════════════════════════════════════
+  BACKEND ARTESA STAGING - DEPLOYMENT COMPLETADO
+═══════════════════════════════════════════════════════════
+
+📋 INFORMACIÓN DEL SERVIDOR
+  EC2 IP: 54.196.194.114
+  Backend URL: http://54.196.194.114:3000
+  SSH: ssh -i produccion-artesa-staging-key.pem ubuntu@54.196.194.114
+
+🗄️ BASE DE DATOS
+  RDS Endpoint: produccion-artesa-staging-db.csbsswgcszct.us-east-1.rds.amazonaws.com
+  Database: artesa_staging
+  Usuario: artesa_admin
+  Password: ol0GCRDi6uXvx3kT7MOphaZmtsAEnwUH
+
+🔑 CREDENCIALES DE ACCESO
+  Usuario admin: admin / Admin123!@#
+  Usuario supervisor: supervisor1 / Test123!@#
+  Usuario operario: operario1 / Test123!@#
+
+✅ ESTADO DEL SISTEMA
+  Backend: ONLINE
+  Base de datos: CONECTADA
+  PM2: RUNNING
+  
+📚 DOCUMENTACIÓN
+  API Docs: http://54.196.194.114:3000/api-docs
+  Health: http://54.196.194.114:3000/health
+
+═══════════════════════════════════════════════════════════

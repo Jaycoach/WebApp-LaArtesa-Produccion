@@ -1,0 +1,50 @@
+═══════════════════════════════════════════════════════════
+  RECURSOS CREADOS - PRODUCCION ARTESA STAGING
+═══════════════════════════════════════════════════════════
+
+📋 INFORMACIÓN GENERAL
+  Proyecto: ProduccionArtesa
+  Ambiente: Staging
+  Region: us-east-1
+  Cuenta AWS: 476114150454
+
+🔐 SECURITY GROUPS
+  EC2 SG ID: sg-0f1e159a3dae10add
+  RDS SG ID: sg-0bab00d862d344344
+
+🖥️ EC2 INSTANCE
+  Instance ID: i-059475a65ab6a8840
+  Public IP: 54.196.194.114
+  SSH Key: produccion-artesa-staging-key.pem
+  Tipo: t2.small
+  OS: Ubuntu 22.04 LTS
+
+🗄️ RDS POSTGRESQL
+  Instance ID: produccion-artesa-staging-db
+  Status: 
+  Database: artesa_staging
+  Usuario: artesa_admin
+  Password: [Ver DB_PASSWORD_TEMP.txt]
+  
+🔑 SSH CONNECTION
+  ssh -i produccion-artesa-staging-key.pem ubuntu@54.196.194.114
+
+🔐 CREDENCIALES IMPORTANTES
+  DB Password: ol0GCRDi6uXvx3kT7MOphaZmtsAEnwUH
+
+═══════════════════════════════════════════════════════════
+
+⚠️  PRÓXIMOS PASOS:
+  1. Conectarse al EC2 por SSH
+  2. Esperar a que RDS esté disponible
+  3. Obtener RDS Endpoint cuando esté listo
+  4. Continuar con FASE 3
+
+COMANDOS ÚTILES:
+  # Verificar RDS
+  aws rds describe-db-instances --db-instance-identifier "produccion-artesa-staging-db"
+  
+  # Obtener RDS Endpoint (cuando esté available)
+  aws rds describe-db-instances --db-instance-identifier "produccion-artesa-staging-db" --query "DBInstances[0].Endpoint.Address" --output text
+
+═══════════════════════════════════════════════════════════
