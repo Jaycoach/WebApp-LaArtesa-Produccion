@@ -13,6 +13,7 @@ dist
 dist-ssr
 *.local
 
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -29,12 +30,27 @@ dist-ssr
 .env.local
 .env.development.local
 .env.test.local
+.env.production
 .env.production.local
+.env.staging
+.env.staging.local
 
 # Build outputs
 build
 coverage
 .cache
+dist.zip
+build/
+*.tsbuildinfo
 
 # OS files
 Thumbs.db
+.DS_Store
+
+# IDE
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
