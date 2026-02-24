@@ -30,7 +30,7 @@ const checkRole = (allowedRoles) => (req, res, next) => {
       });
     }
 
-    const userRole = req.user.rol;
+    const userRole = (req.user.rol || '').toLowerCase();
 
     // Verificar si el rol del usuario está en los roles permitidos
     if (!allowedRoles.includes(userRole)) {
@@ -66,7 +66,7 @@ const checkMinimumRole = (minimumRole) => (req, res, next) => {
       });
     }
 
-    const userRole = req.user.rol;
+    const userRole = (req.user.rol || '').toLowerCase();
     const userRoleLevel = roleHierarchy[userRole] || 0;
     const minimumRoleLevel = roleHierarchy[minimumRole] || 0;
 
@@ -105,7 +105,7 @@ const isAdminOrSupervisor = checkRole(['admin', 'supervisor']);
  */
 const canModifyResource = (req, res, next) => {
   try {
-    const userRole = req.user.rol;
+    const userRole = (req.user.rol || '').toLowerCase();
     const userId = req.user.id;
     const resourceUserId = parseInt(req.params.id) || parseInt(req.body.usuario_id);
 

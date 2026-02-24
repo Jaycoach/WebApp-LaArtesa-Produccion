@@ -82,7 +82,7 @@ const verifyToken = async (req, res, next) => {
       username: user.username,
       email: user.email,
       nombreCompleto: user.nombre_completo,
-      rol: user.rol,
+      rol: (user.rol || '').toLowerCase(),
     };
 
     // 8. Actualizar último acceso (sin bloquear)
@@ -158,7 +158,7 @@ const optionalAuth = async (req, res, next) => {
         username: user.username,
         email: user.email,
         nombreCompleto: user.nombre_completo,
-        rol: user.rol,
+        rol: (user.rol || '').toLowerCase(),
       };
     }
 
@@ -181,7 +181,7 @@ const requireOwnerOrAdmin = (userIdParam = 'userId') => (req, res, next) => {
 
   const resourceUserId = parseInt(req.params[userIdParam], 10);
   const isOwner = req.user.id === resourceUserId;
-  const isAdmin = req.user.rol === 'ADMIN';
+  const isAdmin = req.user.rol === 'admin';
 
   if (!isOwner && !isAdmin) {
     logger.logSecurity('UNAUTHORIZED_RESOURCE_ACCESS', {
