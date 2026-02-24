@@ -47,7 +47,7 @@ const sincronizarSAP = async (req, res, next) => {
     // 2. Obtener órdenes de fabricación desde SAP
     const ordenesSAP = await sapService.getOrdenesProduccion({
       fecha: fechaProduccion,
-      estado: 'R' // Solo órdenes liberadas (Released)
+      estado: 'boposReleased' // Solo órdenes liberadas (Released)
     });
 
     if (ordenesSAP.length === 0) {
@@ -82,16 +82,16 @@ const sincronizarSAP = async (req, res, next) => {
         FROM catalogo_tipos_masa
         WHERE codigo_sap = $1 AND activo = TRUE
       `;
-      const tipoMasaResult = await client.query(tipoMasaQuery, [orden.ItemCode]);
+      const tipoMasaResult = await client.query(tipoMasaQuery, [orden.ItemNo]);
 
       if (tipoMasaResult.rows.length === 0) {
         ordenesNoMapeadas.push({
-          docEntry: orden.DocEntry,
-          docNum: orden.DocNum,
-          itemCode: orden.ItemCode,
-          descripcion: orden.ProductDescription
+          docEntry: orden.AbsoluteEntry,
+          docNum: orden.DocumentNumber,
+          itemCode: orden.ItemNo,
+          descripcion: orden.ItemNo
         });
-        logger.warn(`Orden ${orden.DocNum} (${orden.ItemCode}) no tiene tipo de masa mapeado`);
+        logger.warn(`Orden ${orden.DocumentNumber} (${orden.ItemNo}) no tiene tipo de masa mapeado`);
         continue;
       }
 
@@ -162,7 +162,7 @@ const sincronizarSAP = async (req, res, next) => {
         await client.query(
           `INSERT INTO orden_masa_relacion (masa_id, orden_sap_docentry, orden_sap_docnum)
            VALUES ($1, $2, $3)`,
-          [masaId, orden.DocEntry, orden.DocNum]
+          [masaId, orden.AbsoluteEntry, orden.DocumentNumber]
         );
 
         // Insertar productos por masa
@@ -173,8 +173,8 @@ const sincronizarSAP = async (req, res, next) => {
            ) VALUES ($1, $2, $3, $4, $5, $5, $6, $6)`,
           [
             masaId,
-            orden.ItemCode,
-            orden.ProductDescription,
+            orden.ItemNo,
+            orden.ItemNo,
             'Por definir',
             parseFloat(orden.PlannedQuantity || 0),
             parseFloat(orden.PlannedQuantity || 0)
@@ -184,7 +184,7 @@ const sincronizarSAP = async (req, res, next) => {
 
       // Obtener ingredientes de la primera orden (todas deberían tener la misma receta)
       const primeraOrden = grupo.ordenes[0];
-      const ingredientes = await sapService.getListaMateriales(primeraOrden.DocEntry);
+      const ingredientes = await sapService.getListaMateriales(primeraOrden.AbsoluteEntry);
 
       // Insertar ingredientes escalados al total de la masa
       let ordenVisualizacion = 1;
@@ -448,28 +448,25 @@ const sincronizarDemo = async (req, res, next) => {
     // Datos de órdenes simuladas
     const ordenesSimuladas = [
       {
-        DocEntry: 1001,
-        DocNum: '1001',
-        ItemCode: 'HAMB-GOLD-6',
-        ProductDescription: 'Hamburguesa Gold x6',
+        AbsoluteEntry: 1001,
+        DocumentNumber: '1001',
+        ItemNo: 'HAMB-GOLD-6',
         PlannedQuantity: 50,
-        Status: 'R'
+        ProductionOrderStatus: 'boposReleased'
       },
       {
-        DocEntry: 1002,
-        DocNum: '1002',
-        ItemCode: 'HAMB-GOLD-12',
-        ProductDescription: 'Hamburguesa Gold x12',
+        AbsoluteEntry: 1002,
+        DocumentNumber: '1002',
+        ItemNo: 'HAMB-GOLD-12',
         PlannedQuantity: 30,
-        Status: 'R'
+        ProductionOrderStatus: 'boposReleased'
       },
       {
-        DocEntry: 1003,
-        DocNum: '1003',
-        ItemCode: 'PAN-ARABE-6',
-        ProductDescription: 'Pan Árabe x6',
+        AbsoluteEntry: 1003,
+        DocumentNumber: '1003',
+        ItemNo: 'PAN-ARABE-6',
         PlannedQuantity: 100,
-        Status: 'R'
+        ProductionOrderStatus: 'boposReleased'
       }
     ];
 
@@ -493,7 +490,7 @@ const sincronizarDemo = async (req, res, next) => {
     const masasAgrupadas = {};
 
     for (const orden of ordenesSimuladas) {
-      const tipoInfo = tiposMasaMap[orden.ItemCode];
+      const tipoInfo = tiposMasaMap[orden.ItemNo];
       if (!tipoInfo) continue;
 
       if (!masasAgrupadas[tipoInfo.tipo]) {
@@ -561,8 +558,8 @@ const sincronizarDemo = async (req, res, next) => {
            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
           [
             masaId,
-            orden.ItemCode,
-            orden.ProductDescription,
+            orden.ItemNo,
+            orden.ItemNo,
             'BOLSA_6',
             85, // Gramaje estimado
             parseFloat(orden.PlannedQuantity),

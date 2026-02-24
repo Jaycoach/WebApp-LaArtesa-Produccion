@@ -113,31 +113,25 @@ class SAPService {
       await this.ensureSession();
 
       const { fecha, estado } = filters;
-
-      // Construir filtro ODATA
-      let filter = '';
       const conditions = [];
 
       if (fecha) {
-        // Filtrar por fecha de producción
         conditions.push(`PostingDate eq '${fecha}'`);
       }
 
+      // Campo correcto: ProductionOrderStatus
+      // Valores: boposPlanned, boposReleased, boposClosed, boposCancelled
       if (estado) {
-        // Filtrar por estado (P=Planned, R=Released, C=Closed, L=Canceled)
-        conditions.push(`Status eq '${estado}'`);
+        conditions.push(`ProductionOrderStatus eq '${estado}'`);
       } else {
-        // Por defecto, solo órdenes planeadas y liberadas
-        conditions.push(`(Status eq 'P' or Status eq 'R')`);
+        conditions.push(`(ProductionOrderStatus eq 'boposPlanned' or ProductionOrderStatus eq 'boposReleased')`);
       }
 
-      if (conditions.length > 0) {
-        filter = `$filter=${conditions.join(' and ')}`;
-      }
+      const filter = conditions.length > 0 ? `$filter=${conditions.join(' and ')}` : '';
 
-      // Consultar órdenes de fabricación (tabla OWOR)
+      // Campos correctos según metadata
       const response = await this.client.get(
-        `/ProductionOrders?${filter}&$select=DocEntry,DocNum,ItemCode,ProductDescription,PlannedQuantity,PostingDate,Status,U_TipoMasa`
+        `/ProductionOrders?${filter}&$select=AbsoluteEntry,DocumentNumber,ItemNo,PlannedQuantity,PostingDate,ProductionOrderStatus`
       );
 
       logger.info(`Se obtuvieron ${response.data.value.length} órdenes de SAP`);
@@ -153,21 +147,19 @@ class SAPService {
    * @param {Number} docEntry - DocEntry de la orden de fabricación
    * @returns {Array} Lista de materiales
    */
-  async getListaMateriales(docEntry) {
+  async getListaMateriales(absEntry) {
     try {
       await this.ensureSession();
 
-      // Obtener líneas de la orden de fabricación
       const response = await this.client.get(
-        `/ProductionOrders(${docEntry})?$select=ProductionOrderLines`
+        `/ProductionOrders(${absEntry})?$select=ProductionOrderLines`
       );
 
       const lines = response.data.ProductionOrderLines || [];
-
-      logger.info(`Se obtuvieron ${lines.length} materiales para orden ${docEntry}`);
+      logger.info(`Se obtuvieron ${lines.length} materiales para orden ${absEntry}`);
       return lines;
     } catch (error) {
-      logger.error(`Error al obtener lista de materiales de orden ${docEntry}:`, error.message);
+      logger.error(`Error al obtener lista de materiales:`, error.message);
       throw new Error(`Error al obtener lista de materiales: ${error.message}`);
     }
   }
