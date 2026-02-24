@@ -15,7 +15,7 @@ module.exports = {
     name: process.env.DB_NAME || 'artesa_db',
     user: process.env.DB_USER || 'artesa_user',
     password: process.env.DB_PASSWORD || 'artesa_secure_password_2025',
-    ssl: process.env.DB_SSL === 'true',
+    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : false,
     pool: {
       min: parseInt(process.env.DB_POOL_MIN, 10) || 2,
       max: parseInt(process.env.DB_POOL_MAX, 10) || 10,
