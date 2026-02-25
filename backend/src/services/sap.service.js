@@ -301,6 +301,20 @@ class SAPService {
     for (const orden of todasLasOrdenes) {
       for (const linea of (orden.DocumentLines || [])) {
         if (linea.LineStatus !== 'bost_Open') continue;
+
+        // Excluir líneas de costo de envío
+        if (linea.ItemDescription && linea.ItemDescription.toUpperCase().includes('COSTO DE ENVIO')) {
+          continue;
+        }
+        // También por ItemCode por si acaso
+        if (linea.ItemCode && linea.ItemCode.toUpperCase().includes('ENVIO')) {
+          continue;
+        }
+
+        // Excluir artículos que no son de producción
+        const ITEMS_EXCLUIDOS = ['PASPT12'];
+        if (ITEMS_EXCLUIDOS.includes(linea.ItemCode)) continue;
+
         lineas.push({
           docEntry: orden.DocEntry,
           docNum: orden.DocNum,

@@ -673,6 +673,15 @@ const sincronizarDesdeOV = async (req, res, next) => {
 
     await client.query('BEGIN');
 
+    // Si forzar=true, eliminar masas existentes para esta fecha
+    if (forzar) {
+      await client.query(
+        `DELETE FROM masas_produccion WHERE DATE(fecha_produccion) = $1`,
+        [fechaProduccion]
+      );
+      logger.info(`Masas existentes eliminadas para fecha ${fechaProduccion} (forzar=true)`);
+    }
+
     // 1. Verificar si ya existen masas para esta fecha
     if (!forzar) {
       const existenResult = await client.query(
