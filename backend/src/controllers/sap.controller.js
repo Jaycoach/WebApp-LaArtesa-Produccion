@@ -755,23 +755,28 @@ const sincronizarDesdeOV = async (req, res, next) => {
         await client.query(
           `INSERT INTO productos_por_masa (
              masa_id, producto_codigo, producto_nombre, presentacion,
+             gramaje_unitario,
              unidades_pedidas, unidades_programadas, kilos_pedidos, kilos_programados,
              sap_item_code, unidades_por_paquete, cantidad_paquetes, sap_doc_entry, sap_doc_num
-           ) VALUES ($1, $2, $3, 'Por definir', $4, $4, 0, 0, $5, $6, $7, $8, $9)
+           ) VALUES ($1, $2, $3, 'Por definir', $4, $5, $5, $6, $6, $7, $8, $9, $10, $11)
            ON CONFLICT (masa_id, sap_item_code) DO UPDATE SET
              unidades_pedidas     = productos_por_masa.unidades_pedidas     + EXCLUDED.unidades_pedidas,
              unidades_programadas = productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas,
-             cantidad_paquetes    = productos_por_masa.cantidad_paquetes    + EXCLUDED.cantidad_paquetes`,
+             cantidad_paquetes    = productos_por_masa.cantidad_paquetes    + EXCLUDED.cantidad_paquetes,
+             kilos_pedidos        = productos_por_masa.kilos_pedidos        + EXCLUDED.kilos_pedidos,
+             kilos_programados    = productos_por_masa.kilos_programados    + EXCLUDED.kilos_programados`,
           [
             masaId,
-            prod.itemCode,
-            prod.descripcion,
-            prod.unidadesPedidas,
-            prod.itemCode,
-            prod.unidadesPorPaquete,
-            prod.cantidadPaquetes,
-            prod.docEntry,
-            String(prod.docNum)
+            prod.itemCode,          // $2 producto_codigo
+            prod.descripcion,       // $3 producto_nombre
+            prod.gramaje,           // $4 gramaje_unitario
+            prod.unidadesPedidas,   // $5 unidades_pedidas / unidades_programadas
+            prod.kilosPedidos,      // $6 kilos_pedidos / kilos_programados
+            prod.itemCode,          // $7 sap_item_code
+            prod.unidadesPorPaquete, // $8
+            prod.cantidadPaquetes,  // $9
+            prod.docEntry,          // $10
+            String(prod.docNum)     // $11
           ]
         );
       }
@@ -878,10 +883,11 @@ const getOrdenesVenta = async (req, res, next) => {
 
     const agrupado = productos.reduce((acc, p) => {
       if (!acc[p.tipoMasa]) {
-        acc[p.tipoMasa] = { tipoMasa: p.tipoMasa, productos: [], totalUnidades: 0 };
+        acc[p.tipoMasa] = { tipoMasa: p.tipoMasa, productos: [], totalUnidades: 0, totalKilos: 0 };
       }
       acc[p.tipoMasa].productos.push(p);
       acc[p.tipoMasa].totalUnidades += p.cantidadPaquetes;
+      acc[p.tipoMasa].totalKilos += p.kilosPedidos;
       return acc;
     }, {});
 
