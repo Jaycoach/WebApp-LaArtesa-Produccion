@@ -40,7 +40,13 @@ npx vite build
 echo ""
 echo "📦 [4/4] Desplegando frontend a nginx..."
 sudo cp -r dist/* /var/www/artesa-frontend/dist/
-sudo nginx -s reload
+# Forzar que index.html no sea cacheado por el navegador
+sudo chmod 644 /var/www/artesa-frontend/dist/index.html
+sudo touch /var/www/artesa-frontend/dist/index.html
+
+# Actualizar config de nginx desde el repositorio
+sudo cp ~/LaArtesa/deployment/nginx-artesa.conf /etc/nginx/sites-enabled/artesa
+sudo nginx -t && sudo nginx -s reload
 
 echo ""
 echo "============================================"
