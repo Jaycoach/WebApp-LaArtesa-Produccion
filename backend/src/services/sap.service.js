@@ -263,6 +263,148 @@ class SAPService {
     }
   }
 
+  // ─── ÓRDENES DE VENTA ─────────────────────────────────────────────
+
+  /**
+   * Obtiene todas las OV abiertas de una fecha con sus líneas.
+   * Maneja paginación automáticamente.
+   * @param {string} fecha - formato 'YYYY-MM-DD'
+   * @returns {Array} líneas aplanadas con campos del artículo y OV
+   */
+  async getOrdenesVenta(fecha) {
+    await this.ensureSession();
+
+    const todasLasOrdenes = [];
+    let skip = 0;
+    const top = 20;
+
+    while (true) {
+      const response = await this.client.get('/Orders', {
+        params: {
+          $filter: `DocDate eq '${fecha}' and DocumentStatus eq 'bost_Open'`,
+          $select: 'DocEntry,DocNum,DocDate,DocumentLines',
+          $top: top,
+          $skip: skip,
+        },
+      });
+
+      const ordenes = response.data.value || [];
+      todasLasOrdenes.push(...ordenes);
+
+      if (ordenes.length < top) break;
+      skip += top;
+    }
+
+    logger.info(`SAP: ${todasLasOrdenes.length} OV encontradas para ${fecha}`);
+
+    const lineas = [];
+    for (const orden of todasLasOrdenes) {
+      for (const linea of (orden.DocumentLines || [])) {
+        if (linea.LineStatus !== 'bost_Open') continue;
+        lineas.push({
+          docEntry: orden.DocEntry,
+          docNum: orden.DocNum,
+          itemCode: linea.ItemCode,
+          itemDescription: linea.ItemDescription,
+          quantity: linea.Quantity,
+        });
+      }
+    }
+
+    return lineas;
+  }
+
+  /**
+   * Obtiene info de múltiples artículos en lote (SalesQtyPerPackUnit, U_JZ_Tipos_Masa).
+   * @param {string[]} itemCodes - array de códigos únicos
+   * @returns {Object} mapa { itemCode: { itemName, salesQtyPerPackUnit, tipoMasa } }
+   */
+  async getArticulosInfo(itemCodes) {
+    await this.ensureSession();
+
+    if (!itemCodes || itemCodes.length === 0) return {};
+
+    const BATCH = 30;
+    const resultado = {};
+
+    for (let i = 0; i < itemCodes.length; i += BATCH) {
+      const lote = itemCodes.slice(i, i + BATCH);
+      const filterParts = lote.map(code => `ItemCode eq '${code}'`).join(' or ');
+
+      const response = await this.client.get('/Items', {
+        params: {
+          $filter: filterParts,
+          $select: 'ItemCode,ItemName,SalesQtyPerPackUnit,U_JZ_Tipos_Masa',
+          $top: BATCH,
+        },
+      });
+
+      for (const item of (response.data.value || [])) {
+        resultado[item.ItemCode] = {
+          itemName: item.ItemName,
+          salesQtyPerPackUnit: item.SalesQtyPerPackUnit || 1,
+          tipoMasa: item.U_JZ_Tipos_Masa || 'SIN_CLASIFICAR',
+        };
+      }
+    }
+
+    logger.info(`SAP: info obtenida para ${Object.keys(resultado).length} artículos`);
+    return resultado;
+  }
+
+  /**
+   * Combina OV + artículos listos para sincronización.
+   * Equivale al JOIN OV × Items con el cálculo Quantity × SalesQtyPerPackUnit.
+   * @param {string} fecha - formato 'YYYY-MM-DD'
+   * @returns {Array} productos agrupables por tipoMasa
+   */
+  async getDatosParaSincronizacion(fecha) {
+    await this.ensureSession();
+
+    const lineas = await this.getOrdenesVenta(fecha);
+
+    if (lineas.length === 0) {
+      logger.warn(`SAP: No hay OV abiertas para ${fecha}`);
+      return [];
+    }
+
+    const itemCodesUnicos = [...new Set(lineas.map(l => l.itemCode))];
+    const articulos = await this.getArticulosInfo(itemCodesUnicos);
+
+    const resultado = lineas.map(linea => {
+      const art = articulos[linea.itemCode] || {
+        itemName: linea.itemDescription,
+        salesQtyPerPackUnit: 1,
+        tipoMasa: 'SIN_CLASIFICAR',
+      };
+
+      const unidadesPedidas = linea.quantity;
+      const unidadesPorPaquete = art.salesQtyPerPackUnit;
+      const cantidadPaquetes = unidadesPedidas * unidadesPorPaquete;
+
+      return {
+        docEntry: linea.docEntry,
+        docNum: linea.docNum,
+        itemCode: linea.itemCode,
+        descripcion: art.itemName || linea.itemDescription,
+        tipoMasa: art.tipoMasa,
+        unidadesPedidas,
+        unidadesPorPaquete,
+        cantidadPaquetes,
+      };
+    });
+
+    const resumen = resultado.reduce((acc, p) => {
+      acc[p.tipoMasa] = (acc[p.tipoMasa] || 0) + p.cantidadPaquetes;
+      return acc;
+    }, {});
+    logger.info(`SAP sync OV ${fecha} - Resumen por masa:`, resumen);
+
+    return resultado;
+  }
+
+  // ─── STOCK ────────────────────────────────────────────────────────
+
   /**
    * Verificar disponibilidad de stock
    * @param {String} itemCode - Código del artículo

@@ -656,10 +656,260 @@ const sincronizarDemo = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Sincronizar desde Órdenes de Venta SAP (OV → Empaque)
+ *          Agrupa por U_JZ_Tipos_Masa y calcula Quantity × SalesQtyPerPackUnit
+ * @route   POST /api/sap/sincronizar-ov
+ * @access  Private (Admin/Supervisor)
+ */
+const sincronizarDesdeOV = async (req, res, next) => {
+  const client = await db.getClient();
+
+  try {
+    const { fecha, forzar } = req.body;
+    const fechaProduccion = fecha || new Date().toISOString().split('T')[0];
+
+    logger.info(`Iniciando sincronización OV SAP para fecha: ${fechaProduccion}`);
+
+    await client.query('BEGIN');
+
+    // 1. Verificar si ya existen masas para esta fecha
+    if (!forzar) {
+      const existenResult = await client.query(
+        `SELECT COUNT(*) as count FROM masas_produccion WHERE DATE(fecha_produccion) = $1`,
+        [fechaProduccion]
+      );
+      if (parseInt(existenResult.rows[0].count) > 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          message: 'Ya existen masas para esta fecha. Use forzar=true para sobrescribir.',
+          data: { masas_existentes: parseInt(existenResult.rows[0].count) }
+        });
+      }
+    }
+
+    // 2. Obtener datos combinados OV + artículos desde SAP
+    const productos = await sapService.getDatosParaSincronizacion(fechaProduccion);
+
+    if (productos.length === 0) {
+      await client.query('ROLLBACK');
+      return res.json({
+        success: true,
+        message: 'No se encontraron OV abiertas en SAP para esta fecha',
+        data: { productos_procesados: 0, masas_creadas: 0 }
+      });
+    }
+
+    // 3. Obtener factor de absorción
+    const factorResult = await client.query(
+      `SELECT valor FROM configuracion_sistema WHERE clave = 'factor_absorcion_harina'`
+    );
+    const factorAbsorcion = parseFloat(factorResult.rows[0]?.valor || 60);
+
+    // 4. Agrupar productos por tipoMasa
+    const masasAgrupadas = {};
+    for (const prod of productos) {
+      if (!masasAgrupadas[prod.tipoMasa]) {
+        masasAgrupadas[prod.tipoMasa] = { tipo_masa: prod.tipoMasa, productos: [] };
+      }
+      masasAgrupadas[prod.tipoMasa].productos.push(prod);
+    }
+
+    // 5. Crear masas de producción
+    const masasCreadas = [];
+    let ordenCounter = 1;
+
+    for (const tipoMasa in masasAgrupadas) {
+      const grupo = masasAgrupadas[tipoMasa];
+      const codigoMasa = `MASA-OV-${fechaProduccion.replace(/-/g, '')}-${String(ordenCounter).padStart(3, '0')}`;
+      const porcentajeMerma = 5.0;
+
+      const docEntriesUnicos = [...new Set(grupo.productos.map(p => p.docEntry))];
+
+      const masaResult = await client.query(
+        `INSERT INTO masas_produccion (
+           codigo_masa, tipo_masa, nombre_masa, fecha_produccion,
+           total_kilos_base, total_kilos_con_merma, porcentaje_merma, factor_absorcion_usado,
+           estado, fase_actual,
+           fecha_sap_referencia, total_ordenes, total_productos
+         ) VALUES ($1, $2, $3, $4, 0, 0, $5, $6, 'PLANIFICACION', 'PLANIFICACION', $7, $8, $9)
+         RETURNING id, uuid`,
+        [
+          codigoMasa,
+          tipoMasa,
+          tipoMasa,
+          fechaProduccion,
+          porcentajeMerma,
+          factorAbsorcion,
+          fechaProduccion,
+          docEntriesUnicos.length,
+          grupo.productos.length
+        ]
+      );
+
+      const masaId = masaResult.rows[0].id;
+
+      // Insertar productos; ON CONFLICT acumula si el mismo ItemCode aparece en varias OV
+      for (const prod of grupo.productos) {
+        await client.query(
+          `INSERT INTO productos_por_masa (
+             masa_id, producto_codigo, producto_nombre, presentacion,
+             unidades_pedidas, unidades_programadas, kilos_pedidos, kilos_programados,
+             sap_item_code, unidades_por_paquete, cantidad_paquetes, sap_doc_entry, sap_doc_num
+           ) VALUES ($1, $2, $3, 'Por definir', $4, $4, 0, 0, $5, $6, $7, $8, $9)
+           ON CONFLICT (masa_id, sap_item_code) DO UPDATE SET
+             unidades_pedidas     = productos_por_masa.unidades_pedidas     + EXCLUDED.unidades_pedidas,
+             unidades_programadas = productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas,
+             cantidad_paquetes    = productos_por_masa.cantidad_paquetes    + EXCLUDED.cantidad_paquetes`,
+          [
+            masaId,
+            prod.itemCode,
+            prod.descripcion,
+            prod.unidadesPedidas,
+            prod.itemCode,
+            prod.unidadesPorPaquete,
+            prod.cantidadPaquetes,
+            prod.docEntry,
+            String(prod.docNum)
+          ]
+        );
+      }
+
+      // Crear registros de progreso para todas las fases
+      const fases = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO'];
+      for (let i = 0; i < fases.length; i++) {
+        await client.query(
+          `INSERT INTO progreso_fases (masa_id, fase, estado, porcentaje_completado)
+           VALUES ($1, $2, $3, 0)`,
+          [masaId, fases[i], i === 0 ? 'EN_PROGRESO' : 'BLOQUEADA']
+        );
+      }
+
+      masasCreadas.push({
+        id: masaId,
+        uuid: masaResult.rows[0].uuid,
+        codigo: codigoMasa,
+        tipo_masa: tipoMasa,
+        ordenes: docEntriesUnicos.length,
+        productos: grupo.productos.length
+      });
+
+      ordenCounter++;
+    }
+
+    await client.query('COMMIT');
+
+    await db.query(
+      `INSERT INTO sap_sync_log (tipo_sync, registros_procesados, estado, detalles)
+       VALUES ('ORDENES_VENTA', $1, 'SUCCESS', $2)`,
+      [
+        productos.length,
+        JSON.stringify({ fecha: fechaProduccion, masas_creadas: masasCreadas.length })
+      ]
+    );
+
+    logger.info(`Sync OV completada: ${masasCreadas.length} masas creadas`);
+
+    res.json({
+      success: true,
+      message: 'Sincronización desde OV completada exitosamente',
+      data: {
+        fecha_produccion: fechaProduccion,
+        productos_procesados: productos.length,
+        masas_creadas: masasCreadas.length,
+        masas: masasCreadas
+      }
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    logger.error('Error en sincronización OV:', error);
+
+    await db.query(
+      `INSERT INTO sap_sync_log (tipo_sync, estado, mensaje_error)
+       VALUES ('ORDENES_VENTA', 'ERROR', $1)`,
+      [error.message]
+    ).catch(err => logger.error('Error al guardar log:', err));
+
+    res.status(500).json({
+      success: false,
+      message: 'Error al sincronizar desde OV SAP',
+      error: error.message
+    });
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * @desc    Test de conexión con SAP Service Layer
+ * @route   GET /api/sap/test
+ * @access  Private (Admin/Supervisor)
+ */
+const testConexionSAP = async (req, res, next) => {
+  try {
+    await sapService.login();
+    logger.info(`Test SAP exitoso. Usuario: ${req.user.username}`);
+    return res.json({
+      success: true,
+      message: 'Conexión con SAP Service Layer exitosa',
+    });
+  } catch (error) {
+    logger.error('Error de conexión SAP:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'No se pudo conectar con SAP Service Layer',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * @desc    Preview de OV SAP sin sincronizar (solo lectura, sin tocar BD)
+ * @route   GET /api/sap/ordenes-ov
+ * @access  Private
+ */
+const getOrdenesVenta = async (req, res, next) => {
+  const { fecha } = req.query;
+  const fechaConsulta = fecha || new Date().toISOString().split('T')[0];
+
+  try {
+    const productos = await sapService.getDatosParaSincronizacion(fechaConsulta);
+
+    const agrupado = productos.reduce((acc, p) => {
+      if (!acc[p.tipoMasa]) {
+        acc[p.tipoMasa] = { tipoMasa: p.tipoMasa, productos: [], totalUnidades: 0 };
+      }
+      acc[p.tipoMasa].productos.push(p);
+      acc[p.tipoMasa].totalUnidades += p.cantidadPaquetes;
+      return acc;
+    }, {});
+
+    return res.json({
+      success: true,
+      data: {
+        fecha: fechaConsulta,
+        total_productos: productos.length,
+        masas: Object.values(agrupado),
+      },
+    });
+  } catch (error) {
+    logger.error('Error obteniendo OV de SAP:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error consultando SAP',
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   sincronizarSAP,
   sincronizarDemo,
+  sincronizarDesdeOV,
   getOrdenes,
+  getOrdenesVenta,
   verificarStock,
-  getHistorialSync
+  getHistorialSync,
+  testConexionSAP,
 };
