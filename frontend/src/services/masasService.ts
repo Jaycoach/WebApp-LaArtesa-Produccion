@@ -9,6 +9,7 @@ import {
   IngredienteMasa,
   UpdateUnidadesProgramadasRequest,
   SincronizacionSAPResponse,
+  SincronizacionBOMResponse,
 } from '../types/api';
 
 /**
@@ -21,6 +22,16 @@ export const masasService = {
   sincronizarSAP: async (): Promise<SincronizacionSAPResponse> => {
     const response = await apiService.post<SincronizacionSAPResponse>(
       API_CONFIG.ENDPOINTS.SAP.SINCRONIZAR
+    );
+    return response.data!;
+  },
+
+  /**
+   * Sincronizar Listas de Materiales (BOM) desde SAP
+   */
+  sincronizarBOM: async (): Promise<SincronizacionBOMResponse> => {
+    const response = await apiService.post<SincronizacionBOMResponse>(
+      API_CONFIG.ENDPOINTS.SAP.SINCRONIZAR_BOM
     );
     return response.data!;
   },

@@ -453,6 +453,74 @@ class SAPService {
     return todos.map(item => ({ code: item.Code, name: item.Name }));
   }
 
+  // ─── BOM ──────────────────────────────────────────────────────────
+
+  /**
+   * Obtiene todos los artículos con U_JZ_Tipos_Masa configurado (paginado automático).
+   * @returns {Array} [{ itemCode, itemName, tipoMasa, salesQtyPerPack, gramaje }]
+   */
+  async getArticulosConTipoMasa() {
+    await this.ensureSession();
+
+    const todos = [];
+    let skip = 0;
+    const top = 50;
+
+    while (true) {
+      const response = await this.client.get('/Items', {
+        params: {
+          $filter: "U_JZ_Tipos_Masa ne null and U_JZ_Tipos_Masa ne ''",
+          $select: 'ItemCode,ItemName,U_JZ_Tipos_Masa,SalesQtyPerPackUnit,SalesUnitWeight1',
+          $top: top,
+          $skip: skip,
+        },
+      });
+
+      const items = response.data.value || [];
+      todos.push(...items);
+      if (items.length < top) break;
+      skip += top;
+    }
+
+    logger.info(`SAP BOM: ${todos.length} artículos con tipo de masa encontrados`);
+
+    return todos.map(item => ({
+      itemCode:        item.ItemCode,
+      itemName:        item.ItemName,
+      tipoMasa:        item.U_JZ_Tipos_Masa,
+      salesQtyPerPack: item.SalesQtyPerPackUnit || 1,
+      gramaje:         item.SalesUnitWeight1 || 0,
+    }));
+  }
+
+  /**
+   * Obtiene el BOM (ProductTrees) de un artículo específico.
+   * Retorna null si el artículo no tiene lista de materiales en SAP.
+   * @param {string} itemCode
+   * @returns {Array|null} líneas del BOM o null
+   */
+  async getBOM(itemCode) {
+    try {
+      await this.ensureSession();
+
+      const response = await this.client.get(
+        `/ProductTrees('${itemCode}')?$select=TreeCode,TreeType,Quantity,ProductTreeLines`
+      );
+
+      const lines = response.data.ProductTreeLines || [];
+      logger.info(`SAP BOM: ${lines.length} componentes para ${itemCode}`);
+      return lines;
+
+    } catch (error) {
+      // Código -2028 = No matching records found → artículo sin BOM, no es error crítico
+      if (error.response?.data?.error?.code === '-2028') {
+        logger.warn(`SAP BOM: ${itemCode} no tiene lista de materiales`);
+        return null;
+      }
+      throw error;
+    }
+  }
+
   // ─── STOCK ────────────────────────────────────────────────────────
 
   /**

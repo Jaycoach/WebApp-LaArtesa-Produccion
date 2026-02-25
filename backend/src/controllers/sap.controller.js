@@ -1034,11 +1034,144 @@ const sincronizarTiposMasa = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Sincronizar Listas de Materiales (BOM) desde SAP
+ *          Trae artículos con U_JZ_Tipos_Masa + sus ProductTrees y los guarda en
+ *          sap_articulos y sap_bom_componentes.
+ * @route   POST /api/sap/sincronizar-bom
+ * @access  Private (Admin/Supervisor)
+ */
+const sincronizarBOM = async (req, res, next) => {
+  try {
+    logger.info('Iniciando sincronización de BOM desde SAP...');
+
+    // 1. Traer todos los artículos con tipo de masa desde SAP
+    const articulos = await sapService.getArticulosConTipoMasa();
+
+    if (articulos.length === 0) {
+      return res.json({
+        success: true,
+        message: 'SAP no retornó artículos con tipo de masa configurado',
+        data: { articulos_procesados: 0, bom_sincronizados: 0, sin_bom: 0 },
+      });
+    }
+
+    let articulosUpserted = 0;
+    let bomSincronizados = 0;
+    let sinBOM = 0;
+    const errores = [];
+
+    for (const articulo of articulos) {
+      try {
+        // 2. Upsert en sap_articulos (clave: item_code)
+        await db.query(
+          `INSERT INTO sap_articulos
+             (item_code, item_name, tipo_masa, sales_qty_per_pack, gramaje, activo, synced_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+           ON CONFLICT (item_code) DO UPDATE SET
+             item_name          = EXCLUDED.item_name,
+             tipo_masa          = EXCLUDED.tipo_masa,
+             sales_qty_per_pack = EXCLUDED.sales_qty_per_pack,
+             gramaje            = EXCLUDED.gramaje,
+             activo             = true,
+             synced_at          = CURRENT_TIMESTAMP,
+             updated_at         = CURRENT_TIMESTAMP`,
+          [
+            articulo.itemCode,
+            articulo.itemName,
+            articulo.tipoMasa,
+            articulo.salesQtyPerPack,
+            articulo.gramaje,
+          ]
+        );
+        articulosUpserted++;
+
+        // 3. Obtener BOM del artículo desde SAP
+        const bomLines = await sapService.getBOM(articulo.itemCode);
+
+        if (!bomLines || bomLines.length === 0) {
+          sinBOM++;
+          continue;
+        }
+
+        // 4. Upsert de cada componente en sap_bom_componentes
+        for (const line of bomLines) {
+          await db.query(
+            `INSERT INTO sap_bom_componentes
+               (item_code_padre, item_code_comp, item_name_comp, cantidad, warehouse, issue_method, visual_order, synced_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+             ON CONFLICT (item_code_padre, item_code_comp) DO UPDATE SET
+               item_name_comp = EXCLUDED.item_name_comp,
+               cantidad       = EXCLUDED.cantidad,
+               warehouse      = EXCLUDED.warehouse,
+               issue_method   = EXCLUDED.issue_method,
+               visual_order   = EXCLUDED.visual_order,
+               synced_at      = CURRENT_TIMESTAMP`,
+            [
+              articulo.itemCode,
+              line.ItemCode,
+              line.ItemName,
+              line.Quantity,
+              line.Warehouse,
+              line.IssueMethod,
+              line.VisualOrder || 0,
+            ]
+          );
+        }
+        bomSincronizados++;
+
+      } catch (err) {
+        logger.error(`Error procesando BOM de ${articulo.itemCode}:`, err.message);
+        errores.push({ itemCode: articulo.itemCode, error: err.message });
+      }
+    }
+
+    // 5. Registrar en log de sincronización
+    await db.query(
+      `INSERT INTO sap_sync_log (tipo_operacion, estado, request_payload, response_payload)
+       VALUES ('BOM', 'SUCCESS', $1, $2)`,
+      [
+        JSON.stringify({}),
+        JSON.stringify({ articulos_procesados: articulosUpserted, bom_sincronizados: bomSincronizados, sin_bom: sinBOM, errores: errores.length }),
+      ]
+    );
+
+    logger.info(`Sync BOM completada: ${articulosUpserted} artículos, ${bomSincronizados} con BOM, ${sinBOM} sin BOM`);
+
+    return res.json({
+      success: true,
+      message: `BOM sincronizado: ${bomSincronizados} artículos con lista de materiales`,
+      data: {
+        articulos_procesados: articulosUpserted,
+        bom_sincronizados:    bomSincronizados,
+        sin_bom:              sinBOM,
+        errores:              errores.length > 0 ? errores : undefined,
+      },
+    });
+
+  } catch (error) {
+    logger.error('Error en sincronización BOM:', error);
+
+    await db.query(
+      `INSERT INTO sap_sync_log (tipo_operacion, estado, error_message)
+       VALUES ('BOM', 'ERROR', $1)`,
+      [error.message]
+    ).catch(err => logger.error('Error al guardar log:', err));
+
+    return res.status(500).json({
+      success: false,
+      message: 'Error al sincronizar BOM desde SAP',
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   sincronizarSAP,
   sincronizarDemo,
   sincronizarDesdeOV,
   sincronizarTiposMasa,
+  sincronizarBOM,
   getOrdenes,
   getOrdenesVenta,
   verificarStock,

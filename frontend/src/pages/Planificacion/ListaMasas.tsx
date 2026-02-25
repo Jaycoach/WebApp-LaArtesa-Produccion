@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useMasasByFecha, useSincronizarSAP } from '../../hooks/useMasas';
+import { useMasasByFecha, useSincronizarSAP, useSincronizarBOM } from '../../hooks/useMasas';
 import { MasaProduccionResumen } from '../../types/api';
 
 /**
@@ -17,6 +17,7 @@ export const ListaMasas: React.FC = () => {
   // Queries
   const { data: masas, isLoading, error, refetch } = useMasasByFecha(fecha);
   const sincronizarMutation = useSincronizarSAP();
+  const sincronizarBOMMutation = useSincronizarBOM();
 
   /**
    * Sincronizar con SAP
@@ -27,6 +28,17 @@ export const ListaMasas: React.FC = () => {
       refetch();
     } catch (error) {
       console.error('Error sincronizando:', error);
+    }
+  };
+
+  /**
+   * Sincronizar BOM desde SAP
+   */
+  const handleSincronizarBOM = async () => {
+    try {
+      await sincronizarBOMMutation.mutateAsync();
+    } catch (error) {
+      console.error('Error sincronizando BOM:', error);
     }
   };
 
@@ -69,7 +81,7 @@ export const ListaMasas: React.FC = () => {
               </p>
             </div>
             
-            <div className="flex gap-4">
+            <div className="flex gap-3 items-center">
               {/* Selector de fecha */}
               <input
                 type="date"
@@ -77,30 +89,43 @@ export const ListaMasas: React.FC = () => {
                 onChange={(e) => setFecha(e.target.value)}
                 className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
-              
-              {/* Botón sincronizar */}
+
+              {/* Botón sincronizar BOM */}
+              <button
+                onClick={handleSincronizarBOM}
+                disabled={sincronizarBOMMutation.isPending || sincronizarMutation.isPending}
+                title="Sincronizar listas de materiales (BOM) desde SAP. Ejecutar antes de completar Planificación."
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2 text-sm"
+              >
+                {sincronizarBOMMutation.isPending ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Sync BOM...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                    Sync BOM
+                  </>
+                )}
+              </button>
+
+              {/* Botón sincronizar OV */}
               <button
                 onClick={handleSincronizar}
-                disabled={sincronizarMutation.isPending}
+                disabled={sincronizarMutation.isPending || sincronizarBOMMutation.isPending}
                 className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
               >
                 {sincronizarMutation.isPending ? (
                   <>
                     <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                        fill="none"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      />
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                     </svg>
                     Sincronizando...
                   </>
@@ -116,21 +141,37 @@ export const ListaMasas: React.FC = () => {
             </div>
           </div>
           
-          {/* Mensaje de éxito de sincronización */}
+          {/* Mensajes de sincronización OV */}
           {sincronizarMutation.isSuccess && (
             <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-              <p className="text-green-800">
-                ✓ Sincronización completada exitosamente
-              </p>
+              <p className="text-green-800">✓ Sincronización completada exitosamente</p>
             </div>
           )}
-          
-          {/* Mensaje de error */}
           {sincronizarMutation.isError && (
             <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-red-800">
-                ✗ Error en la sincronización. Intenta nuevamente.
+              <p className="text-red-800">✗ Error en la sincronización. Intenta nuevamente.</p>
+            </div>
+          )}
+
+          {/* Mensajes de sincronización BOM */}
+          {sincronizarBOMMutation.isSuccess && sincronizarBOMMutation.data && (
+            <div className="mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-lg">
+              <p className="text-emerald-800 font-medium">✓ BOM sincronizado</p>
+              <p className="text-emerald-700 text-sm mt-1">
+                {sincronizarBOMMutation.data.bom_sincronizados} artículos con receta
+                · {sincronizarBOMMutation.data.sin_bom} sin BOM
+                · {sincronizarBOMMutation.data.articulos_procesados} total procesados
               </p>
+              {sincronizarBOMMutation.data.errores && sincronizarBOMMutation.data.errores.length > 0 && (
+                <p className="text-amber-700 text-sm mt-1">
+                  ⚠ {sincronizarBOMMutation.data.errores.length} artículo(s) con error
+                </p>
+              )}
+            </div>
+          )}
+          {sincronizarBOMMutation.isError && (
+            <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-red-800">✗ Error al sincronizar BOM. Intenta nuevamente.</p>
             </div>
           )}
         </div>
