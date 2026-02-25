@@ -423,6 +423,36 @@ class SAPService {
     return resultado;
   }
 
+  // ─── TIPOS DE MASA ────────────────────────────────────────────────
+
+  /**
+   * Obtiene todos los tipos de masa desde la tabla de usuario @JZ_TIPOMASA en SAP.
+   * Maneja paginación automáticamente.
+   * @returns {Array} [{ code, name }]
+   */
+  async getTiposMasa() {
+    await this.ensureSession();
+
+    const todos = [];
+    let skip = 0;
+    const top = 20;
+
+    while (true) {
+      const response = await this.client.get('/U_JZ_TIPOMASA', {
+        params: { $top: top, $skip: skip },
+      });
+
+      const items = response.data.value || [];
+      todos.push(...items);
+
+      if (items.length < top) break;
+      skip += top;
+    }
+
+    logger.info(`SAP: ${todos.length} tipos de masa obtenidos de U_JZ_TIPOMASA`);
+    return todos.map(item => ({ code: item.Code, name: item.Name }));
+  }
+
   // ─── STOCK ────────────────────────────────────────────────────────
 
   /**

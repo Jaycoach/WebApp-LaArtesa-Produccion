@@ -918,10 +918,85 @@ const getOrdenesVenta = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Sincronizar tipos de masa desde SAP (@JZ_TIPOMASA → catalogo_tipos_masa)
+ *          Solo inserta registros nuevos (upsert por codigo_sap). No elimina existentes.
+ * @route   POST /api/sap/sincronizar-tipos-masa
+ * @access  Private (Admin/Supervisor)
+ */
+const sincronizarTiposMasa = async (req, res, next) => {
+  try {
+    logger.info('Iniciando sincronización de tipos de masa desde SAP...');
+
+    const tiposSAP = await sapService.getTiposMasa();
+
+    if (tiposSAP.length === 0) {
+      return res.json({
+        success: true,
+        message: 'SAP no retornó tipos de masa',
+        data: { total_sap: 0, insertados: 0, ya_existian: 0 },
+      });
+    }
+
+    let insertados = 0;
+    let yaExistian = 0;
+
+    for (const tipo of tiposSAP) {
+      if (!tipo.code || !tipo.name) continue;
+
+      const result = await db.query(
+        `INSERT INTO catalogo_tipos_masa (codigo_sap, tipo_masa, nombre_masa)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (codigo_sap) DO NOTHING`,
+        [tipo.code, tipo.code, tipo.name]
+      );
+
+      if (result.rowCount > 0) {
+        insertados++;
+        logger.info(`Tipo de masa insertado: ${tipo.code} - ${tipo.name}`);
+      } else {
+        yaExistian++;
+      }
+    }
+
+    await db.query(
+      `INSERT INTO sap_sync_log (tipo_operacion, estado, request_payload, response_payload)
+       VALUES ('TIPOS_MASA', 'SUCCESS', $1, $2)`,
+      [
+        JSON.stringify({}),
+        JSON.stringify({ total_sap: tiposSAP.length, insertados, ya_existian: yaExistian }),
+      ]
+    );
+
+    logger.info(`Sync tipos de masa: ${insertados} nuevos, ${yaExistian} ya existían`);
+
+    return res.json({
+      success: true,
+      message: `Sincronización completada: ${insertados} tipos nuevos, ${yaExistian} ya existían`,
+      data: { total_sap: tiposSAP.length, insertados, ya_existian: yaExistian },
+    });
+  } catch (error) {
+    logger.error('Error sincronizando tipos de masa:', error);
+
+    await db.query(
+      `INSERT INTO sap_sync_log (tipo_operacion, estado, error_message)
+       VALUES ('TIPOS_MASA', 'ERROR', $1)`,
+      [error.message]
+    ).catch(err => logger.error('Error al guardar log:', err));
+
+    return res.status(500).json({
+      success: false,
+      message: 'Error al sincronizar tipos de masa',
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   sincronizarSAP,
   sincronizarDemo,
   sincronizarDesdeOV,
+  sincronizarTiposMasa,
   getOrdenes,
   getOrdenesVenta,
   verificarStock,
