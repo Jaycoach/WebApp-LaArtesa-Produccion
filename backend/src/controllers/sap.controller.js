@@ -673,17 +673,46 @@ const sincronizarDesdeOV = async (req, res, next) => {
 
     await client.query('BEGIN');
 
-    // Si forzar=true, eliminar masas existentes para esta fecha
+    // ─────────────────────────────────────────────────────────────────
+    // LÓGICA NO-DESTRUCTIVA:
+    // - forzar=true + masa en PLANIFICACION  → eliminar y recrear
+    // - forzar=true + masa en otra fase      → PRESERVAR (no tocar)
+    // - forzar=false                         → error si ya existen masas
+    // ─────────────────────────────────────────────────────────────────
+    let tiposMasaEnProceso = []; // tipos que ya avanzaron → no recrear
+    let masasEliminadas = 0;
+
     if (forzar) {
-      await client.query(
-        `DELETE FROM masas_produccion WHERE DATE(fecha_produccion) = $1`,
+      const masasExistentes = await client.query(
+        `SELECT id, codigo_masa, tipo_masa, fase_actual, estado
+         FROM masas_produccion
+         WHERE DATE(fecha_produccion) = $1`,
         [fechaProduccion]
       );
-      logger.info(`Masas existentes eliminadas para fecha ${fechaProduccion} (forzar=true)`);
-    }
 
-    // 1. Verificar si ya existen masas para esta fecha
-    if (!forzar) {
+      for (const masa of masasExistentes.rows) {
+        const esPlanificacion =
+          masa.fase_actual === 'PLANIFICACION' && masa.estado === 'PLANIFICACION';
+
+        if (esPlanificacion) {
+          await client.query(
+            `DELETE FROM masas_produccion WHERE id = $1`,
+            [masa.id]
+          );
+          masasEliminadas++;
+          logger.info(`Masa eliminada (PLANIFICACION): ${masa.codigo_masa}`);
+        } else {
+          tiposMasaEnProceso.push(masa.tipo_masa);
+          logger.info(`Masa PRESERVADA (${masa.fase_actual}): ${masa.codigo_masa}`);
+        }
+      }
+
+      if (masasEliminadas > 0)
+        logger.info(`${masasEliminadas} masas en PLANIFICACION eliminadas para ${fechaProduccion}`);
+      if (tiposMasaEnProceso.length > 0)
+        logger.info(`${tiposMasaEnProceso.length} masas preservadas (en producción): [${tiposMasaEnProceso.join(', ')}]`);
+
+    } else {
       const existenResult = await client.query(
         `SELECT COUNT(*) as count FROM masas_produccion WHERE DATE(fecha_produccion) = $1`,
         [fechaProduccion]
@@ -692,7 +721,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
         await client.query('ROLLBACK');
         return res.status(400).json({
           success: false,
-          message: 'Ya existen masas para esta fecha. Use forzar=true para sobrescribir.',
+          message: 'Ya existen masas para esta fecha. Use forzar=true para re-sincronizar las que están en PLANIFICACION.',
           data: { masas_existentes: parseInt(existenResult.rows[0].count) }
         });
       }
@@ -727,9 +756,18 @@ const sincronizarDesdeOV = async (req, res, next) => {
 
     // 5. Crear masas de producción
     const masasCreadas = [];
+    const masasOmitidas = [];
     let ordenCounter = 1;
 
     for (const tipoMasa in masasAgrupadas) {
+      // Omitir tipos de masa que ya están en producción
+      if (tiposMasaEnProceso.includes(tipoMasa)) {
+        masasOmitidas.push(tipoMasa);
+        logger.info(`Tipo de masa OMITIDO (ya en producción): ${tipoMasa}`);
+        ordenCounter++;
+        continue;
+      }
+
       const grupo = masasAgrupadas[tipoMasa];
       const codigoMasa = `MASA-OV-${fechaProduccion.replace(/-/g, '')}-${String(ordenCounter).padStart(3, '0')}`;
       const porcentajeMerma = 5.0;
@@ -832,7 +870,11 @@ const sincronizarDesdeOV = async (req, res, next) => {
         fecha_produccion: fechaProduccion,
         productos_procesados: productos.length,
         masas_creadas: masasCreadas.length,
-        masas: masasCreadas
+        masas_preservadas: tiposMasaEnProceso.length,
+        masas: masasCreadas,
+        advertencia: masasOmitidas.length > 0
+          ? `Los siguientes tipos ya están en producción y NO fueron re-sincronizados: ${masasOmitidas.join(', ')}`
+          : null
       }
     });
   } catch (error) {
