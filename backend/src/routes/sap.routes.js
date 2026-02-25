@@ -13,6 +13,7 @@ const {
   sincronizarSAP,
   sincronizarDemo,
   sincronizarDesdeOV,
+  sincronizarTiposMasa,
   getOrdenes,
   getOrdenesVenta,
   verificarStock,
@@ -80,5 +81,12 @@ router.get('/ordenes-ov', getOrdenesVenta);
  * @access  Private (Admin/Supervisor only)
  */
 router.get('/test', checkRole(['admin', 'supervisor']), testConexionSAP);
+
+/**
+ * @route   POST /api/sap/sincronizar-tipos-masa
+ * @desc    Sincronizar tipos de masa desde SAP (U_JZ_TIPOMASA → catalogo_tipos_masa)
+ * @access  Private (Admin/Supervisor only)
+ */
+router.post('/sincronizar-tipos-masa', checkRole(['admin', 'supervisor']), sapController.sincronizarTiposMasa);
 
 module.exports = router;
