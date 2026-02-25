@@ -338,7 +338,7 @@ class SAPService {
 
     if (!itemCodes || itemCodes.length === 0) return {};
 
-    const BATCH = 30;
+    const BATCH = 20;
     const resultado = {};
 
     for (let i = 0; i < itemCodes.length; i += BATCH) {
