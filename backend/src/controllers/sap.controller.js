@@ -247,12 +247,12 @@ const sincronizarSAP = async (req, res, next) => {
 
     // Registrar en log de sincronización
     await db.query(
-      `INSERT INTO sap_sync_log (tipo_sync, registros_procesados, estado, detalles)
-       VALUES ('ORDENES_PRODUCCION', $1, 'SUCCESS', $2)`,
+      `INSERT INTO sap_sync_log (tipo_operacion, estado, request_payload, response_payload)
+       VALUES ('ORDENES_PRODUCCION', 'SUCCESS', $1, $2)`,
       [
-        ordenesSAP.length,
+        JSON.stringify({ fecha: fechaProduccion }),
         JSON.stringify({
-          fecha: fechaProduccion,
+          ordenes_procesadas: ordenesSAP.length,
           masas_creadas: masasCreadas.length,
           ordenes_no_mapeadas: ordenesNoMapeadas.length
         })
@@ -282,7 +282,7 @@ const sincronizarSAP = async (req, res, next) => {
 
     // Registrar error en log
     await db.query(
-      `INSERT INTO sap_sync_log (tipo_sync, estado, mensaje_error)
+      `INSERT INTO sap_sync_log (tipo_operacion, estado, error_message)
        VALUES ('ORDENES_PRODUCCION', 'ERROR', $1)`,
       [error.message]
     ).catch(err => logger.error('Error al guardar log:', err));
@@ -402,14 +402,14 @@ const getHistorialSync = async (req, res, next) => {
     const query = `
       SELECT
         id,
-        tipo_sync,
-        registros_procesados,
+        tipo_operacion,
         estado,
-        mensaje_error,
-        detalles,
-        fecha_sync
+        error_message,
+        request_payload,
+        response_payload,
+        fecha_operacion
       FROM sap_sync_log
-      ORDER BY fecha_sync DESC
+      ORDER BY fecha_operacion DESC
       LIMIT $1
     `;
 
@@ -815,11 +815,11 @@ const sincronizarDesdeOV = async (req, res, next) => {
     await client.query('COMMIT');
 
     await db.query(
-      `INSERT INTO sap_sync_log (tipo_sync, registros_procesados, estado, detalles)
-       VALUES ('ORDENES_VENTA', $1, 'SUCCESS', $2)`,
+      `INSERT INTO sap_sync_log (tipo_operacion, estado, request_payload, response_payload)
+       VALUES ('ORDENES_VENTA', 'SUCCESS', $1, $2)`,
       [
-        productos.length,
-        JSON.stringify({ fecha: fechaProduccion, masas_creadas: masasCreadas.length })
+        JSON.stringify({ fecha: fechaProduccion }),
+        JSON.stringify({ productos_procesados: productos.length, masas_creadas: masasCreadas.length })
       ]
     );
 
@@ -840,7 +840,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
     logger.error('Error en sincronización OV:', error);
 
     await db.query(
-      `INSERT INTO sap_sync_log (tipo_sync, estado, mensaje_error)
+      `INSERT INTO sap_sync_log (tipo_operacion, estado, error_message)
        VALUES ('ORDENES_VENTA', 'ERROR', $1)`,
       [error.message]
     ).catch(err => logger.error('Error al guardar log:', err));
