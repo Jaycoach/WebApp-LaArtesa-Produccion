@@ -334,7 +334,7 @@ class SAPService {
       const response = await this.client.get('/Items', {
         params: {
           $filter: filterParts,
-          $select: 'ItemCode,ItemName,SalesQtyPerPackUnit,U_JZ_Tipos_Masa',
+          $select: 'ItemCode,ItemName,SalesQtyPerPackUnit,U_JZ_Tipos_Masa,SalesUnitWeight1',
           $top: BATCH,
         },
       });
@@ -344,6 +344,7 @@ class SAPService {
           itemName: item.ItemName,
           salesQtyPerPackUnit: item.SalesQtyPerPackUnit || 1,
           tipoMasa: item.U_JZ_Tipos_Masa || 'SIN_CLASIFICAR',
+          gramaje: item.SalesUnitWeight1 || 0,
         };
       }
     }
@@ -382,6 +383,9 @@ class SAPService {
       const unidadesPorPaquete = art.salesQtyPerPackUnit;
       const cantidadPaquetes = unidadesPedidas * unidadesPorPaquete;
 
+      const gramaje = art.gramaje || 0;
+      const kilosPedidos = gramaje * unidadesPedidas;
+
       return {
         docEntry: linea.docEntry,
         docNum: linea.docNum,
@@ -391,6 +395,8 @@ class SAPService {
         unidadesPedidas,
         unidadesPorPaquete,
         cantidadPaquetes,
+        gramaje,
+        kilosPedidos,
       };
     });
 
