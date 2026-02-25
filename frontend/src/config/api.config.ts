@@ -60,6 +60,7 @@ export const API_CONFIG = {
     SAP: {
       SINCRONIZAR: '/sap/sincronizar',
       ORDENES: '/sap/ordenes',
+      SINCRONIZAR_BOM: '/sap/sincronizar-bom',
     },
   },
 

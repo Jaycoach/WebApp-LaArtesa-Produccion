@@ -14,6 +14,7 @@ const {
   sincronizarDemo,
   sincronizarDesdeOV,
   sincronizarTiposMasa,
+  sincronizarBOM,
   getOrdenes,
   getOrdenesVenta,
   verificarStock,
@@ -88,5 +89,12 @@ router.get('/test', checkRole(['admin', 'supervisor']), testConexionSAP);
  * @access  Private (Admin/Supervisor only)
  */
 router.post('/sincronizar-tipos-masa', checkRole(['admin', 'supervisor']), sapController.sincronizarTiposMasa);
+
+/**
+ * @route   POST /api/sap/sincronizar-bom
+ * @desc    Sincronizar Listas de Materiales (BOM) desde SAP → sap_articulos + sap_bom_componentes
+ * @access  Private (Admin/Supervisor only)
+ */
+router.post('/sincronizar-bom', checkRole(['admin', 'supervisor']), sincronizarBOM);
 
 module.exports = router;

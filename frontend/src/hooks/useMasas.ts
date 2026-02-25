@@ -71,7 +71,7 @@ export const useSincronizarSAP = () => {
     onSuccess: (data) => {
       // Invalidar todas las queries de masas
       queryClient.invalidateQueries({ queryKey: MASAS_QUERY_KEYS.all });
-      
+
       return {
         success: true,
         message: `${data.masas_creadas} masas creadas, ${data.ordenes_procesadas} órdenes procesadas`,
@@ -81,6 +81,21 @@ export const useSincronizarSAP = () => {
       return {
         success: false,
         message: error.message || 'Error al sincronizar con SAP',
+      };
+    },
+  });
+};
+
+/**
+ * Hook para sincronizar BOM (listas de materiales) desde SAP
+ */
+export const useSincronizarBOM = () => {
+  return useMutation({
+    mutationFn: () => masasService.sincronizarBOM(),
+    onError: (error: any) => {
+      return {
+        success: false,
+        message: error.message || 'Error al sincronizar BOM',
       };
     },
   });

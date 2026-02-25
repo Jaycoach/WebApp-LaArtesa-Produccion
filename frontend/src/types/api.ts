@@ -161,6 +161,14 @@ export interface SincronizacionSAPResponse {
   message: string;
 }
 
+// Response de sincronización BOM (listas de materiales)
+export interface SincronizacionBOMResponse {
+  articulos_procesados: number;
+  bom_sincronizados: number;
+  sin_bom: number;
+  errores?: Array<{ itemCode: string; error: string }>;
+}
+
 // Response de envío de correo
 export interface EnvioCorreoResponse {
   enviado: boolean;
