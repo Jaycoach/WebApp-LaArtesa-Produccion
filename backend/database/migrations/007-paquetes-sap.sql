@@ -37,9 +37,17 @@ CREATE INDEX IF NOT EXISTS idx_productos_sap_item_code
 
 -- Restricción única: un artículo SAP no puede repetirse en la misma masa
 -- (permite ON CONFLICT en el sincronizador)
-ALTER TABLE productos_por_masa
-  ADD CONSTRAINT IF NOT EXISTS uq_masa_sap_item_code
-  UNIQUE (masa_id, sap_item_code);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint 
+    WHERE conname = 'uq_masa_sap_item_code'
+  ) THEN
+    ALTER TABLE productos_por_masa
+      ADD CONSTRAINT uq_masa_sap_item_code
+      UNIQUE (masa_id, sap_item_code);
+  END IF;
+END $$;
 
 -- =============================================
 -- 2. TABLA: masas_produccion
