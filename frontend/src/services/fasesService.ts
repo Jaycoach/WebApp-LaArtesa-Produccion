@@ -56,7 +56,7 @@ export const fasesService = {
    */
   completarFase: async (
     masaId: string,
-    fase: 'pesaje' | 'amasado' | 'division' | 'formado' | 'fermentacion' | 'horneado',
+    fase: 'planificacion' | 'pesaje' | 'amasado' | 'division' | 'formado' | 'fermentacion' | 'horneado',
     data?: CompletarFaseRequest
   ): Promise<ProgresoFases> => {
     const response = await apiClient.put<ApiResponse<ProgresoFases>>(

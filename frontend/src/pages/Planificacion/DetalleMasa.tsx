@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card } from '@/components/common';
 import { useMasaDetail, useProductos, useComposicion } from '../../hooks/useMasas';
 import { useFases } from '../../hooks/useFases';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { fasesService } from '../../services/fasesService';
 
 export const DetalleMasa: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -13,6 +15,27 @@ export const DetalleMasa: React.FC = () => {
   const { data: productos, isLoading: loadingProductos } = useProductos(masaId);
   const { data: composicion, isLoading: loadingComposicion } = useComposicion(masaId);
   const { data: fases } = useFases(id!);
+
+  const queryClient = useQueryClient();
+  const [iniciandoPesaje, setIniciandoPesaje] = useState(false);
+
+  const iniciarPesajeMutation = useMutation({
+    mutationFn: () => fasesService.completarFase(id!, 'planificacion'),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['masa', masaId] });
+      queryClient.invalidateQueries({ queryKey: ['fases', id] });
+      navigate(`/pesaje/${masaId}`);
+    },
+    onError: (error: any) => {
+      setIniciandoPesaje(false);
+      alert(`Error al iniciar pesaje: ${error?.message || 'Error desconocido'}`);
+    },
+  });
+
+  const handleIniciarPesaje = () => {
+    setIniciandoPesaje(true);
+    iniciarPesajeMutation.mutate();
+  };
 
   const getFaseColor = (estado: string) => {
     const colors: Record<string, string> = {
@@ -70,6 +93,22 @@ export const DetalleMasa: React.FC = () => {
                 {masa.fase_actual}
               </span>
               <p className="text-sm text-gray-500 mt-2">{masa.fecha_produccion}</p>
+              {masa.fase_actual === 'PLANIFICACION' && (
+                <button
+                  onClick={handleIniciarPesaje}
+                  disabled={iniciandoPesaje}
+                  className="mt-3 px-5 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white rounded-lg font-medium transition-colors flex items-center gap-2 ml-auto"
+                >
+                  {iniciandoPesaje ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Iniciando...
+                    </>
+                  ) : (
+                    <>&#x2696;&#xFE0F; Iniciar Pesaje</>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>
