@@ -3,7 +3,16 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fasesService } from '@/services';
-import type { ProgresoFases, UpdateProgresoFaseRequest, CompletarFaseRequest } from '@/types';
+import type {
+  ProgresoFases,
+  UpdateProgresoFaseRequest,
+  CompletarFaseRequest,
+  CompletarFaseResponse,
+  SubMasaInfo,
+  SubdivisionInfo,
+} from '@/types';
+
+export type { CompletarFaseResponse, SubMasaInfo, SubdivisionInfo };
 
 // Query keys
 export const fasesKeys = {
@@ -56,7 +65,9 @@ export const useIniciarFase = () => {
 };
 
 /**
- * Hook para completar una fase
+ * Hook para completar una fase.
+ * Cuando hay subdivisión automática, `onSuccess` recibe un `CompletarFaseResponse`
+ * con `subdivision.realizada = true` y los IDs de las dos sub-masas creadas.
  */
 export const useCompletarFase = () => {
   const queryClient = useQueryClient();
@@ -64,27 +75,24 @@ export const useCompletarFase = () => {
   return useMutation({
     mutationFn: ({ masaId, fase, data }: {
       masaId: string;
-      fase: 'pesaje' | 'amasado' | 'division' | 'formado' | 'fermentacion' | 'horneado';
+      fase: 'planificacion' | 'pesaje' | 'amasado' | 'division' | 'formado' | 'fermentacion' | 'horneado';
       data?: CompletarFaseRequest;
     }) => fasesService.completarFase(masaId, fase, data),
-    onSuccess: (_, variables) => {
-      // Invalidar todas las queries relevantes para refrescar la UI
+
+    onSuccess: (response, variables) => {
+      // Invalidar queries de la masa original siempre
       queryClient.invalidateQueries({ queryKey: fasesKeys.byMasa(variables.masaId) });
+      queryClient.invalidateQueries({ queryKey: ['masas', 'detail', Number(variables.masaId)] });
+      queryClient.invalidateQueries({ queryKey: ['masas'] });
+      queryClient.invalidateQueries({ queryKey: ['masas', 'productos', Number(variables.masaId)] });
 
-      // Invalidar detalle de masa
-      queryClient.invalidateQueries({
-        queryKey: ['masas', 'detail', Number(variables.masaId)],
-      });
-
-      // Invalidar lista de masas
-      queryClient.invalidateQueries({
-        queryKey: ['masas'],
-      });
-
-      // Invalidar productos
-      queryClient.invalidateQueries({
-        queryKey: ['masas', 'productos', Number(variables.masaId)],
-      });
+      // Si hubo subdivisión, invalidar también las sub-masas creadas
+      if (response?.subdivision?.realizada) {
+        for (const subMasa of response.subdivision.sub_masas) {
+          queryClient.invalidateQueries({ queryKey: fasesKeys.byMasa(String(subMasa.id)) });
+          queryClient.invalidateQueries({ queryKey: ['masas', 'detail', subMasa.id] });
+        }
+      }
     },
   });
 };
