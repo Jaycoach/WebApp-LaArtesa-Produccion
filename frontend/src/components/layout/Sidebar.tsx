@@ -52,7 +52,7 @@ export const Sidebar: React.FC = () => {
   const location = useLocation();
 
   return (
-    <aside className="w-64 bg-white border-r border-gray-200 min-h-screen">
+    <aside className="w-64 border-r border-gray-200 min-h-screen" style={{ backgroundColor: '#F5F0E4' }}>
       <nav className="mt-8 px-4">
         <ul className="space-y-2">
           {navItems.map((item) => {
