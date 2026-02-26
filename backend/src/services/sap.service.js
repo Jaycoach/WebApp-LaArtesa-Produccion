@@ -464,7 +464,7 @@ class SAPService {
 
     const todos = [];
     let skip = 0;
-    const top = 50;
+    const top = 20; // SAP limita a 20 registros por página en este ambiente
 
     while (true) {
       const response = await this.client.get('/Items', {
