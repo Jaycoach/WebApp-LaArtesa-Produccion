@@ -12,7 +12,7 @@ export const Header: React.FC = () => {
           {/* Logo */}
           <div className="flex items-center">
             <Link to="/" className="flex items-center">
-              <span className="text-2xl font-bold text-primary-600">La Artesa</span>
+              <img src="/Logo_Artesa.png" alt="La Artesa" className="h-10 w-auto" />
               <span className="ml-2 text-sm text-gray-500">Control de Producción</span>
             </Link>
           </div>
