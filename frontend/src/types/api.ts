@@ -199,3 +199,32 @@ export interface UpdateConfiguracionRequest {
   humedadMin?: number;
   humedadMax?: number;
 }
+
+// ─────────────────────────────────────────────
+// Respuesta de completar fase (con subdivisión)
+// ─────────────────────────────────────────────
+
+export interface SubMasaInfo {
+  id: number;
+  codigo: string;
+  letra: 'A' | 'B';
+}
+
+export interface SubdivisionInfo {
+  realizada: boolean;
+  motivo: string;
+  limite_kg: number;
+  total_kg: number;
+  kg_por_tanda: number;
+  masa_padre_id: number;
+  sub_masas: SubMasaInfo[];
+}
+
+export interface CompletarFaseResponse {
+  success: boolean;
+  message: string;
+  data?: unknown;
+  siguiente_fase?: unknown;
+  subdivision: SubdivisionInfo | null;
+  ingredientes_generados?: number;
+}

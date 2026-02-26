@@ -7,6 +7,7 @@ import type {
   ProgresoFases,
   UpdateProgresoFaseRequest,
   CompletarFaseRequest,
+  CompletarFaseResponse,
   ApiResponse,
 } from '@/types';
 
@@ -52,18 +53,24 @@ export const fasesService = {
   },
 
   /**
-   * Completar una fase
+   * Completar una fase.
+   * Cuando fase = planificacion y la masa supera el límite de kg,
+   * el backend retorna una respuesta de subdivisión sin campo `data`,
+   * por lo que no se usa handleApiResponse en este endpoint.
    */
   completarFase: async (
     masaId: string,
     fase: 'planificacion' | 'pesaje' | 'amasado' | 'division' | 'formado' | 'fermentacion' | 'horneado',
     data?: CompletarFaseRequest
-  ): Promise<ProgresoFases> => {
-    const response = await apiClient.put<ApiResponse<ProgresoFases>>(
+  ): Promise<CompletarFaseResponse> => {
+    const response = await apiClient.put(
       API_CONFIG.ENDPOINTS.FASES.COMPLETAR_FASE(masaId, fase),
       data
     );
-    return handleApiResponse(response);
+    if (!response.success) {
+      throw new Error(response.message || 'Error al completar fase');
+    }
+    return response as CompletarFaseResponse;
   },
 
   /**
