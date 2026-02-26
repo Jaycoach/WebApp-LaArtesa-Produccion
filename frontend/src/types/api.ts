@@ -215,6 +215,7 @@ export interface SubdivisionInfo {
   motivo: string;
   limite_kg: number;
   total_kg: number;
+  n_tandas: number;
   kg_por_tanda: number;
   masa_padre_id: number;
   sub_masas: SubMasaInfo[];
