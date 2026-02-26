@@ -3,7 +3,7 @@ import { Card, Button } from '@/components/common';
 import { useSincronizarBOM, useSincronizarSAP } from '@/hooks/useMasas';
 
 export const SincronizarSAP: React.FC = () => {
-  const [_fecha, _setFecha] = useState<string>(
+  const [fecha, setFecha] = useState<string>(
     new Date().toISOString().split('T')[0]
   );
 
@@ -20,7 +20,7 @@ export const SincronizarSAP: React.FC = () => {
 
   const handleSyncOV = async () => {
     try {
-      await sincronizarOVMutation.mutateAsync();
+      await sincronizarOVMutation.mutateAsync({ fecha });
     } catch {
       // error manejado por el estado de la mutation
     }
@@ -92,8 +92,8 @@ export const SincronizarSAP: React.FC = () => {
             </label>
             <input
               type="date"
-              value={_fecha}
-              onChange={(e) => _setFecha(e.target.value)}
+              value={fecha}
+              onChange={(e) => setFecha(e.target.value)}
               className="border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>

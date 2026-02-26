@@ -24,7 +24,7 @@ export const ListaMasas: React.FC = () => {
    */
   const handleSincronizar = async () => {
     try {
-      await sincronizarMutation.mutateAsync();
+      await sincronizarMutation.mutateAsync({ fecha });
       refetch();
     } catch (error) {
       console.error('Error sincronizando:', error);
