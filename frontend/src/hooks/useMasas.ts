@@ -67,7 +67,7 @@ export const useSincronizarSAP = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: () => masasService.sincronizarSAP(),
+    mutationFn: (params?: { fecha?: string; forzar?: boolean }) => masasService.sincronizarSAP(params?.fecha, params?.forzar),
     onSuccess: (data) => {
       // Invalidar todas las queries de masas
       queryClient.invalidateQueries({ queryKey: MASAS_QUERY_KEYS.all });

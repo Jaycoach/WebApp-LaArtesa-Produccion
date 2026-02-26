@@ -19,9 +19,10 @@ export const masasService = {
   /**
    * Sincronizar órdenes desde SAP
    */
-  sincronizarSAP: async (): Promise<SincronizacionSAPResponse> => {
+  sincronizarSAP: async (fecha?: string, forzar?: boolean): Promise<SincronizacionSAPResponse> => {
     const response = await apiService.post<SincronizacionSAPResponse>(
-      API_CONFIG.ENDPOINTS.SAP.SINCRONIZAR
+      API_CONFIG.ENDPOINTS.SAP.SINCRONIZAR,
+      { fecha, forzar }
     );
     return response.data!;
   },
