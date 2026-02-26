@@ -35,9 +35,9 @@ async function inicializarFasesMasa(masaId, userId) {
       INSERT INTO progreso_fases
         (masa_id, fase, estado, porcentaje_completado, usuario_responsable,
          fecha_inicio, fecha_completado)
-      VALUES ($1, $2, $3, $4, $5,
-        CASE WHEN $3 IN ('EN_PROGRESO','COMPLETADA') THEN NOW() ELSE NULL END,
-        CASE WHEN $3 = 'COMPLETADA' THEN NOW() ELSE NULL END)
+      VALUES ($1, $2, $3::TEXT, $4, $5,
+        CASE WHEN $3::TEXT IN ('EN_PROGRESO','COMPLETADA') THEN NOW() ELSE NULL END,
+        CASE WHEN $3::TEXT = 'COMPLETADA' THEN NOW() ELSE NULL END)
       ON CONFLICT (masa_id, fase) DO NOTHING
     `, [masaId, fase, estado, porcentaje, userId]);
   }
