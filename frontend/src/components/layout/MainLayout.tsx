@@ -5,7 +5,7 @@ import Sidebar from './Sidebar';
 
 export const MainLayout: React.FC = () => {
   return (
-    <div className="min-h-screen" style={{ backgroundColor: '#F5F0E4' }}>
+    <div className="min-h-screen bg-gray-50">
       <Header />
       <div className="flex">
         <Sidebar />
