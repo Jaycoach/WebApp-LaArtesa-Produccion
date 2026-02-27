@@ -521,6 +521,49 @@ class SAPService {
     }
   }
 
+  // ─── UOM ──────────────────────────────────────────────────────────
+  /**
+   * Obtiene InventoryUOM e ItemsGroupCode de una lista de artículos en lote.
+   * SAP no expone UoM en ProductTreeLines, hay que consultarla desde Items.
+   *
+   * @param {string[]} itemCodes - Array de códigos de artículo
+   * @returns {Object} mapa { itemCode: { uom, grupoSap } }
+   */
+  async getItemsUoM(itemCodes) {
+    if (!itemCodes || itemCodes.length === 0) return {};
+
+    await this.ensureSession();
+
+    const resultado = {};
+
+    // SAP Service Layer no soporta bien $filter con OR para muchos items,
+    // consultamos en lotes de 10 para evitar URLs largas
+    const BATCH_SIZE = 10;
+
+    for (let i = 0; i < itemCodes.length; i += BATCH_SIZE) {
+      const lote = itemCodes.slice(i, i + BATCH_SIZE);
+
+      for (const itemCode of lote) {
+        try {
+          const response = await this.client.get(
+            `/Items('${itemCode}')?$select=ItemCode,InventoryUOM,ItemsGroupCode`
+          );
+          resultado[itemCode] = {
+            uom:      response.data.InventoryUOM || null,
+            grupoSap: response.data.ItemsGroupCode || null,
+          };
+        } catch (error) {
+          // Si el artículo no existe en SAP, lo marcamos sin uom
+          logger.warn(`getItemsUoM: no se encontró ${itemCode} en SAP`);
+          resultado[itemCode] = { uom: null, grupoSap: null };
+        }
+      }
+    }
+
+    logger.info(`getItemsUoM: ${Object.keys(resultado).length} artículos consultados`);
+    return resultado;
+  }
+
   // ─── STOCK ────────────────────────────────────────────────────────
 
   /**

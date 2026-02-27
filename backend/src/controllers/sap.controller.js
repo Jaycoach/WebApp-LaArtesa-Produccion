@@ -1038,6 +1038,7 @@ const sincronizarTiposMasa = async (req, res, next) => {
  * @desc    Sincronizar Listas de Materiales (BOM) desde SAP
  *          Trae artículos con U_JZ_Tipos_Masa + sus ProductTrees y los guarda en
  *          sap_articulos y sap_bom_componentes.
+ *          v2: guarda uom, grupo_sap y es_empaque en sap_bom_componentes.
  * @route   POST /api/sap/sincronizar-bom
  * @access  Private (Admin/Supervisor)
  */
@@ -1057,13 +1058,13 @@ const sincronizarBOM = async (req, res, next) => {
     }
 
     let articulosUpserted = 0;
-    let bomSincronizados = 0;
-    let sinBOM = 0;
-    const errores = [];
+    let bomSincronizados  = 0;
+    let sinBOM            = 0;
+    const errores         = [];
 
     for (const articulo of articulos) {
       try {
-        // 2. Upsert en sap_articulos (clave: item_code)
+        // 2. Upsert en sap_articulos
         await db.query(
           `INSERT INTO sap_articulos
              (item_code, item_name, tipo_masa, sales_qty_per_pack, gramaje, activo, synced_at, updated_at)
@@ -1094,18 +1095,31 @@ const sincronizarBOM = async (req, res, next) => {
           continue;
         }
 
-        // 4. Upsert de cada componente en sap_bom_componentes
+        // 4. Obtener UoM e ItemsGroupCode de todos los componentes en lote
+        const itemCodeComp = bomLines.map(l => l.ItemCode);
+        const uomMap       = await sapService.getItemsUoM(itemCodeComp);
+
+        // 5. Upsert de cada componente con uom y grupo_sap
         for (const line of bomLines) {
+          const uomInfo  = uomMap[line.ItemCode] || { uom: null, grupoSap: null };
+          const esEmpaque = uomInfo.grupoSap === 182;
+
           await db.query(
             `INSERT INTO sap_bom_componentes
-               (item_code_padre, item_code_comp, item_name_comp, cantidad, warehouse, issue_method, visual_order, synced_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+               (item_code_padre, item_code_comp, item_name_comp,
+                cantidad, warehouse, issue_method, visual_order,
+                uom, grupo_sap, es_empaque,
+                synced_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,CURRENT_TIMESTAMP)
              ON CONFLICT (item_code_padre, item_code_comp) DO UPDATE SET
                item_name_comp = EXCLUDED.item_name_comp,
                cantidad       = EXCLUDED.cantidad,
                warehouse      = EXCLUDED.warehouse,
                issue_method   = EXCLUDED.issue_method,
                visual_order   = EXCLUDED.visual_order,
+               uom            = EXCLUDED.uom,
+               grupo_sap      = EXCLUDED.grupo_sap,
+               es_empaque     = EXCLUDED.es_empaque,
                synced_at      = CURRENT_TIMESTAMP`,
             [
               articulo.itemCode,
@@ -1115,6 +1129,9 @@ const sincronizarBOM = async (req, res, next) => {
               line.Warehouse,
               line.IssueMethod,
               line.VisualOrder || 0,
+              uomInfo.uom,
+              uomInfo.grupoSap,
+              esEmpaque,
             ]
           );
         }
@@ -1126,13 +1143,18 @@ const sincronizarBOM = async (req, res, next) => {
       }
     }
 
-    // 5. Registrar en log de sincronización
+    // 6. Registrar en log de sincronización
     await db.query(
       `INSERT INTO sap_sync_log (tipo_operacion, estado, request_payload, response_payload)
        VALUES ('BOM', 'SUCCESS', $1, $2)`,
       [
         JSON.stringify({}),
-        JSON.stringify({ articulos_procesados: articulosUpserted, bom_sincronizados: bomSincronizados, sin_bom: sinBOM, errores: errores.length }),
+        JSON.stringify({
+          articulos_procesados: articulosUpserted,
+          bom_sincronizados:    bomSincronizados,
+          sin_bom:              sinBOM,
+          errores:              errores.length,
+        }),
       ]
     );
 
