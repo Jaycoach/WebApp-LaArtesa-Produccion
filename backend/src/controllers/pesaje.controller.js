@@ -93,7 +93,7 @@ const updateIngrediente = async (req, res, next) => {
       pesado,
       peso_real,
       lote,
-      fecha_vencimiento,
+      fecha_vencimiento: fecha_vencimiento && fecha_vencimiento.trim() !== '' ? fecha_vencimiento : null,
       observaciones,
       usuarioId: req.user.id,
     };

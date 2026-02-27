@@ -13,10 +13,58 @@ export const PesajeMasa: React.FC = () => {
   const confirmarMutation = useConfirmarPesaje();
 
   const [editando, setEditando] = useState<number | null>(null);
-  const [formData, setFormData] = useState({
+
+  const parseFechaVencimiento = (raw: string): string | null => {
+    const s = raw.replace(/[^0-9]/g, ''); // solo dígitos
+    const hoy = new Date();
+    const yy = hoy.getFullYear(); // 2026
+    const mm = String(hoy.getMonth() + 1).padStart(2, '0');
+
+    let dia = '', mes = '', anio = '';
+
+    if (s.length === 0) return null;
+    if (s.length <= 2) {
+      // "27" → 27/mes_actual/año_actual
+      dia = s.padStart(2, '0');
+      mes = mm;
+      anio = String(yy);
+    } else if (s.length === 4) {
+      // "2702" → 27/02/año_actual
+      dia = s.substring(0, 2);
+      mes = s.substring(2, 4);
+      anio = String(yy);
+    } else if (s.length === 6) {
+      // "270226" → 27/02/2026
+      dia = s.substring(0, 2);
+      mes = s.substring(2, 4);
+      anio = '20' + s.substring(4, 6);
+    } else if (s.length === 8) {
+      // "27022026" → 27/02/2026
+      dia = s.substring(0, 2);
+      mes = s.substring(2, 4);
+      anio = s.substring(4, 8);
+    } else {
+      return null;
+    }
+
+    const diaNum = parseInt(dia), mesNum = parseInt(mes), anioNum = parseInt(anio);
+    if (diaNum < 1 || diaNum > 31) return null;
+    if (mesNum < 1 || mesNum > 12) return null;
+    if (anioNum < 2024 || anioNum > 2099) return null;
+
+    return `${anio}-${mes.padStart(2, '0')}-${dia.padStart(2, '0')}`;
+  };
+
+  const [formData, setFormData] = useState<{
+    peso_real: string;
+    lote: string;
+    fecha_vencimiento: string;
+    fecha_vencimiento_display?: string;
+  }>({
     peso_real: '',
     lote: '',
     fecha_vencimiento: '',
+    fecha_vencimiento_display: undefined,
   });
 
   const handleMarcar = async (ingredienteId: number, field: 'disponible' | 'verificado' | 'pesado', value: boolean) => {
@@ -216,12 +264,44 @@ export const PesajeMasa: React.FC = () => {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Vencimiento</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Vencimiento
+                        {formData.fecha_vencimiento_display && (
+                          <span className="ml-2 text-xs text-green-600 font-normal">
+                            → {new Date(formData.fecha_vencimiento + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                          </span>
+                        )}
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="27, 2702, 270226, 27/02/26..."
+                        value={formData.fecha_vencimiento_display ?? formData.fecha_vencimiento}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          const parsed = parseFechaVencimiento(raw);
+                          setFormData({
+                            ...formData,
+                            fecha_vencimiento_display: raw,
+                            fecha_vencimiento: parsed ?? formData.fecha_vencimiento
+                          });
+                        }}
+                        onBlur={(e) => {
+                          const parsed = parseFechaVencimiento(e.target.value);
+                          if (parsed) {
+                            setFormData({
+                              ...formData,
+                              fecha_vencimiento: parsed,
+                              fecha_vencimiento_display: undefined
+                            });
+                          }
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                      />
                       <input
                         type="date"
                         value={formData.fecha_vencimiento}
-                        onChange={(e) => setFormData({ ...formData, fecha_vencimiento: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                        onChange={(e) => setFormData({ ...formData, fecha_vencimiento: e.target.value, fecha_vencimiento_display: undefined })}
+                        className="w-full mt-1 px-3 py-2 border border-gray-200 rounded text-xs text-gray-500"
                       />
                     </div>
                     <div className="col-span-3 flex gap-2">
