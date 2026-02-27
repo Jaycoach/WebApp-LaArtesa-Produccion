@@ -40,6 +40,37 @@ class SAPService {
       },
       (error) => Promise.reject(error)
     );
+
+    // Interceptor de RESPUESTA — re-login automático en 401
+    this.client.interceptors.response.use(
+      (response) => response,
+      async (error) => {
+        const status = error.response?.status;
+        // SAP retorna 401 cuando la sesión expiró
+        if (status === 401 && !error.config._retry) {
+          error.config._retry = true;
+          logger.warn('Sesión SAP expirada (401). Re-autenticando...');
+          try {
+            await this.login();
+            // Reintentar el request original con la nueva sesión
+            error.config.headers['Cookie'] = `B1SESSION=${this.sessionId}`;
+            return this.client(error.config);
+          } catch (loginError) {
+            logger.error('Re-login SAP fallido:', loginError.message);
+            return Promise.reject(loginError);
+          }
+        }
+        // Para otros errores, loguear el detalle que SAP retorna
+        if (error.response) {
+          logger.warn('SAP HTTP Error:', {
+            status: error.response.status,
+            url: error.config?.url,
+            message: error.response.data?.error?.message?.value || error.response.statusText,
+          });
+        }
+        return Promise.reject(error);
+      }
+    );
   }
 
   /**
