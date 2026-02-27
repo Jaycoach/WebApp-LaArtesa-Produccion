@@ -6,6 +6,7 @@ export const SincronizarSAP: React.FC = () => {
   const [fecha, setFecha] = useState<string>(
     new Date().toISOString().split('T')[0]
   );
+  const [forzar, setForzar] = useState<boolean>(false);
 
   const sincronizarBOMMutation = useSincronizarBOM();
   const sincronizarOVMutation = useSincronizarSAP();
@@ -20,7 +21,7 @@ export const SincronizarSAP: React.FC = () => {
 
   const handleSyncOV = async () => {
     try {
-      await sincronizarOVMutation.mutateAsync({ fecha });
+      await sincronizarOVMutation.mutateAsync({ fecha, forzar });
     } catch {
       // error manejado por el estado de la mutation
     }
@@ -97,6 +98,19 @@ export const SincronizarSAP: React.FC = () => {
               className="border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
+
+          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={forzar}
+              onChange={(e) => setForzar(e.target.checked)}
+              className="w-4 h-4 rounded border-gray-300 text-blue-600"
+            />
+            <span>
+              Forzar re-sincronización{' '}
+              <span className="text-gray-500">(re-crea masas en Planificación, preserva las que están en producción)</span>
+            </span>
+          </label>
 
           <Button
             variant="primary"
