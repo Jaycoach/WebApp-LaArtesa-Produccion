@@ -560,7 +560,7 @@ const completarFase = async (req, res, next) => {
         // 5a. Marcar masa original
         await db.query(`
           UPDATE masas_produccion
-          SET fue_subdividida = TRUE, estado = 'CANCELADA', updated_at = NOW()
+          SET fue_subdividida = TRUE, estado = 'SUBDIVIDIDA', updated_at = NOW()
           WHERE id = $1
         `, [masaId]);
 
