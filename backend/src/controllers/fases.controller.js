@@ -20,7 +20,6 @@ const db         = require('../database/connection');
 // ─────────────────────────────────────────────
 const LIMITE_KG_TOSCANO  = 130;
 const LIMITE_KG_DEFAULT  = 90;
-const LETRAS_TANDA       = ['A', 'B', 'C', 'D', 'E'];
 const GRUPO_SAP_EMPAQUE  = 182;   // ItemsGroupCode de materiales de empaque en SAP
 
 // UoM que tienen peso real y deben sumarse al límite de amasadora
@@ -550,12 +549,13 @@ const completarFase = async (req, res, next) => {
         const nTandas = calcularNTandas(totalKgIngredientes, limiteKg);
         logger.info(`Masa ${masaId} supera el límite. Subdividiendo en ${nTandas} tandas.`);
 
-        if (nTandas > LETRAS_TANDA.length) {
-          return res.status(400).json({
-            success: false,
-            message: `La masa requiere ${nTandas} tandas, superando el máximo de ${LETRAS_TANDA.length}. Revise la consolidación de órdenes.`,
-          });
-        }
+        // Generar letras dinámicamente según las tandas necesarias (A, B, C, ... Z, AA, AB, ...)
+        const LETRAS_TANDA = Array.from({ length: nTandas }, (_, i) => {
+          if (i < 26) return String.fromCharCode(65 + i); // A-Z
+          const first = String.fromCharCode(65 + Math.floor(i / 26) - 1);
+          const second = String.fromCharCode(65 + (i % 26));
+          return first + second; // AA, AB, AC...
+        });
 
         // 5a. Marcar masa original
         await db.query(`
