@@ -684,26 +684,40 @@ const sincronizarDesdeOV = async (req, res, next) => {
 
     if (forzar) {
       const masasExistentes = await client.query(
-        `SELECT id, codigo_masa, tipo_masa, fase_actual, estado
+        `SELECT id, codigo_masa, tipo_masa, fase_actual, estado, masa_padre_id
          FROM masas_produccion
          WHERE DATE(fecha_produccion) = $1`,
         [fechaProduccion]
       );
 
       for (const masa of masasExistentes.rows) {
-        const esPlanificacion =
-          masa.fase_actual === 'PLANIFICACION' && masa.estado === 'PLANIFICACION';
+        const estaEnPlanificacion = masa.fase_actual === 'PLANIFICACION';
+        const estadoEliminable = ['PLANIFICACION', 'CANCELADA', 'SUBDIVIDIDA'].includes(masa.estado);
 
-        if (esPlanificacion) {
+        // Si es sub-masa, verificar que su padre no esté en producción
+        let padreEnProduccion = false;
+        if (masa.masa_padre_id) {
+          const padreResult = await client.query(
+            `SELECT estado, fase_actual FROM masas_produccion WHERE id = $1`,
+            [masa.masa_padre_id]
+          );
+          if (padreResult.rows.length > 0) {
+            const padre = padreResult.rows[0];
+            padreEnProduccion = padre.fase_actual !== 'PLANIFICACION' ||
+                                !['PLANIFICACION', 'CANCELADA', 'SUBDIVIDIDA'].includes(padre.estado);
+          }
+        }
+
+        if (estaEnPlanificacion && estadoEliminable && !padreEnProduccion) {
           await client.query(
             `DELETE FROM masas_produccion WHERE id = $1`,
             [masa.id]
           );
           masasEliminadas++;
-          logger.info(`Masa eliminada (PLANIFICACION): ${masa.codigo_masa}`);
+          logger.info(`Masa eliminada (${masa.estado}): ${masa.codigo_masa}`);
         } else {
           tiposMasaEnProceso.push(masa.tipo_masa);
-          logger.info(`Masa PRESERVADA (${masa.fase_actual}): ${masa.codigo_masa}`);
+          logger.info(`Masa PRESERVADA (${masa.fase_actual}/${masa.estado}): ${masa.codigo_masa}`);
         }
       }
 
