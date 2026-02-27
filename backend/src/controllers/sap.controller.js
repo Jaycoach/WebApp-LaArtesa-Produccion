@@ -797,6 +797,19 @@ const sincronizarDesdeOV = async (req, res, next) => {
 
       const masaId = masaResult.rows[0].id;
 
+      // Calcular kilos por producto desde BOM local (grupo_sap=181, excluyendo empaque)
+      const kiloPorItemCode = {};
+      const itemCodes = [...new Set(grupo.productos.map(p => p.itemCode))];
+      for (const itemCode of itemCodes) {
+        const bomResult = await client.query(
+          `SELECT COALESCE(SUM(cantidad), 0) as kg_por_unidad
+           FROM sap_bom_componentes
+           WHERE item_code_padre = $1 AND grupo_sap = 181`,
+          [itemCode]
+        );
+        kiloPorItemCode[itemCode] = parseFloat(bomResult.rows[0].kg_por_unidad || 0);
+      }
+
       // Insertar productos; ON CONFLICT acumula si el mismo ItemCode aparece en varias OV
       for (const prod of grupo.productos) {
         await client.query(
@@ -816,9 +829,9 @@ const sincronizarDesdeOV = async (req, res, next) => {
             masaId,
             prod.itemCode,          // $2 producto_codigo
             prod.descripcion,       // $3 producto_nombre
-            prod.gramaje,           // $4 gramaje_unitario
-            prod.unidadesPedidas,   // $5 unidades_pedidas / unidades_programadas
-            prod.kilosPedidos,      // $6 kilos_pedidos / kilos_programados
+            kiloPorItemCode[prod.itemCode] * 1000,  // $4 gramaje_unitario (en gramos)
+            prod.unidadesPedidas,                    // $5 unidades_pedidas / unidades_programadas
+            kiloPorItemCode[prod.itemCode] * prod.cantidadPaquetes, // $6 kilos_pedidos / kilos_programados
             prod.itemCode,          // $7 sap_item_code
             prod.unidadesPorPaquete, // $8
             prod.cantidadPaquetes,  // $9
@@ -827,6 +840,23 @@ const sincronizarDesdeOV = async (req, res, next) => {
           ]
         );
       }
+
+      // Calcular total_kilos_base sumando kilos de todos los productos
+      const totalKilosBase = grupo.productos.reduce((sum, prod) => {
+        const unidades = prod.cantidadPaquetes || prod.unidadesPedidas || 0;
+        return sum + (kiloPorItemCode[prod.itemCode] || 0) * unidades;
+      }, 0);
+      const totalKilosConMerma = totalKilosBase * (1 + porcentajeMerma / 100);
+
+      // Actualizar masas_produccion con los kilos reales calculados desde BOM
+      await client.query(
+        `UPDATE masas_produccion
+         SET total_kilos_base = $1, total_kilos_con_merma = $2
+         WHERE id = $3`,
+        [totalKilosBase, totalKilosConMerma, masaId]
+      );
+
+      logger.info(`Masa ${masaId} (${tipoMasa}): ${totalKilosBase.toFixed(2)} kg base calculados desde BOM`);
 
       // Crear registros de progreso para todas las fases
       const fases = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO'];
