@@ -30,7 +30,7 @@ export const PesajeMasa: React.FC = () => {
   const handleEditar = (ingrediente: any) => {
     setEditando(ingrediente.id);
     setFormData({
-      peso_real: ingrediente.peso_real || '',
+      peso_real: ingrediente.peso_real != null ? String(ingrediente.peso_real) : (ingrediente.cantidad_gramos != null ? String(ingrediente.cantidad_gramos) : ''),
       lote: ingrediente.lote || '',
       fecha_vencimiento: ingrediente.fecha_vencimiento || '',
     });
