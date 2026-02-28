@@ -22,10 +22,21 @@ const getMasasByFecha = async (req, res, next) => {
     }
 
     const masas = await fasesModel.getMasasByFecha(fecha);
+    const masasParseadas = masas.map(m => ({
+      ...m,
+      total_kilos_base:           parseFloat(m.total_kilos_base)           || 0,
+      total_kilos_con_merma:      parseFloat(m.total_kilos_con_merma)      || 0,
+      porcentaje_merma:           parseFloat(m.porcentaje_merma)           || 0,
+      factor_absorcion_usado:     parseFloat(m.factor_absorcion_usado)     || 0,
+      total_ordenes:              parseInt(m.total_ordenes)                || 0,
+      total_productos:            parseInt(m.total_productos)              || 0,
+      total_unidades_pedidas:     parseInt(m.total_unidades_pedidas)       || 0,
+      total_unidades_programadas: parseInt(m.total_unidades_programadas)   || 0,
+    }));
 
     res.json({
       success: true,
-      data: masas,
+      data: masasParseadas,
     });
   } catch (error) {
     logger.error('Error al obtener masas por fecha:', error);
