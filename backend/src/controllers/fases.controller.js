@@ -9,6 +9,13 @@
  *  - Al consolidar PLANIFICACION se insertan ingredientes en ingredientes_masa
  *    y materiales de empaque en empaque_por_masa (tabla separada)
  *  - totalKgIngredientes solo suma componentes con peso real
+ *
+ * CAMBIOS v4 (2026-02-27):
+ *  - La subdivisión de masas se mueve al confirmarPesaje (pesaje.controller.js)
+ *  - Al completar PLANIFICACION solo se consolidan BOM e ingredientes,
+ *    pero NO se subdivide. La subdivisión ocurre después del pesaje para que
+ *    las sub-masas hereden los pesos reales registrados por el operario.
+ *  - Se exporta ejecutarSubdivision() para uso desde pesaje.controller.js
  */
 
 const fasesModel = require('../models/fases.model');
@@ -34,11 +41,9 @@ const UOM_SIN_PESO = ['und', 'unidad', 'unidades', 'r', 'rollo', 'rollos', 'paq'
  * Retorna: 'peso' | 'liquido' | 'empaque'
  */
 function clasificarComponente(uom, grupoSap) {
-  // Grupo SAP 182 = empaque, sin importar UoM
   if (grupoSap === GRUPO_SAP_EMPAQUE) return 'empaque';
 
   if (!uom) {
-    // Sin UoM → generalmente prefermento (PRODPROC), tratamos como peso
     return 'peso';
   }
 
@@ -48,8 +53,6 @@ function clasificarComponente(uom, grupoSap) {
   if (UOM_LIQUIDO.includes(uomNorm))   return 'liquido';
   if (UOM_SIN_PESO.includes(uomNorm))  return 'empaque';
 
-  // Por defecto: si no reconocemos la UoM y no es empaque, tratamos como peso
-  // y logueamos para revisión
   logger.warn(`clasificarComponente: UoM desconocida "${uom}" para grupo ${grupoSap}. Tratando como peso.`);
   return 'peso';
 }
@@ -64,18 +67,26 @@ function getLimiteKg(tipo_masa) {
 
 /**
  * Calcula el número mínimo de tandas para no superar el límite.
- * Ejemplo: 250 kg / 90 kg → CEIL(2.77) = 3 tandas de ~83.3 kg cada una.
  */
 function calcularNTandas(totalKg, limiteKg) {
   return Math.ceil(totalKg / limiteKg);
 }
 
 /**
+ * Genera las letras de tanda: A, B, C... Z, AA, AB...
+ */
+function generarLetrasTanda(n) {
+  return Array.from({ length: n }, (_, i) => {
+    if (i < 26) return String.fromCharCode(65 + i);
+    const first  = String.fromCharCode(65 + Math.floor(i / 26) - 1);
+    const second = String.fromCharCode(65 + (i % 26));
+    return first + second;
+  });
+}
+
+/**
  * Inicializa las fases de una masa recién creada.
  * PLANIFICACION → COMPLETADA, PESAJE → EN_PROGRESO, resto → BLOQUEADA.
- *
- * FIX v2: fechas como parámetros $6/$7 independientes — elimina CASE WHEN con $3
- * que causaba "inconsistent types deduced for parameter $3" en PostgreSQL.
  */
 async function inicializarFasesMasa(masaId, userId) {
   const fases = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO'];
@@ -99,24 +110,42 @@ async function inicializarFasesMasa(masaId, userId) {
 }
 
 /**
+ * Inicializa las fases de una sub-masa que ya tiene el pesaje completo.
+ * PLANIFICACION → COMPLETADA, PESAJE → COMPLETADA, AMASADO → EN_PROGRESO, resto → BLOQUEADA.
+ */
+async function inicializarFasesMasaConPesaje(masaId, userId) {
+  const fases = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO'];
+
+  for (const fase of fases) {
+    const estado = fase === 'PLANIFICACION' ? 'COMPLETADA'
+                 : fase === 'PESAJE'        ? 'COMPLETADA'
+                 : fase === 'AMASADO'       ? 'EN_PROGRESO'
+                 : 'BLOQUEADA';
+    const porcentaje  = (estado === 'COMPLETADA') ? 100 : 0;
+    const fechaInicio = (estado === 'EN_PROGRESO' || estado === 'COMPLETADA') ? new Date() : null;
+    const fechaFin    = estado === 'COMPLETADA' ? new Date() : null;
+
+    await db.query(`
+      INSERT INTO progreso_fases
+        (masa_id, fase, estado, porcentaje_completado, usuario_responsable,
+         fecha_inicio, fecha_completado)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      ON CONFLICT (masa_id, fase) DO NOTHING
+    `, [masaId, fase, estado, porcentaje, userId, fechaInicio, fechaFin]);
+  }
+}
+
+/**
  * Distribuye ingredientes en N partes iguales entre las sub-masas.
+ * Copia los datos de pesaje real (peso_real, lote, fecha_vencimiento, disponible, verificado, pesado).
  * La última tanda absorbe el sobrante de redondeo.
  *
- * @param {Array}    ingredientes - Filas de ingredientes_masa de la masa original
- * @param {number[]} subMasaIds   - IDs de las sub-masas [A, B, C, ...]
+ * @param {Array}    ingredientes     - Filas de ingredientes_masa de la masa original
+ * @param {number[]} subMasaIds       - IDs de las sub-masas [A, B, C, ...]
+ * @param {boolean}  copiarPesaje     - Si true copia los campos de pesaje real proporcionalmente
  */
-async function distribuirIngredientes(ingredientes, subMasaIds) {
+async function distribuirIngredientes(ingredientes, subMasaIds, copiarPesaje = false) {
   const n = subMasaIds.length;
-
-  const insertSQL = `
-    INSERT INTO ingredientes_masa
-      (masa_id, ingrediente_sap_code, ingrediente_nombre, orden_visualizacion,
-       porcentaje_panadero, es_harina, es_agua, es_prefermento,
-       uom, es_empaque,
-       cantidad_gramos, cantidad_kilos,
-       disponible, verificado, pesado)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,false,false,false)
-  `;
 
   for (const ing of ingredientes) {
     const kgTotal = parseFloat(ing.cantidad_kilos);
@@ -124,24 +153,55 @@ async function distribuirIngredientes(ingredientes, subMasaIds) {
     const kgBase  = parseFloat((kgTotal / n).toFixed(3));
     const gBase   = parseFloat((gTotal  / n).toFixed(2));
 
-    let kgAcum = 0;
-    let gAcum  = 0;
+    // Si hay peso real registrado, distribuirlo también
+    const pesoRealTotal = ing.peso_real != null ? parseFloat(ing.peso_real) : null;
+    const pesoRealBase  = pesoRealTotal != null
+      ? parseFloat((pesoRealTotal / n).toFixed(3))
+      : null;
+
+    let kgAcum       = 0;
+    let gAcum        = 0;
+    let pesoRealAcum = 0;
 
     for (let i = 0; i < n; i++) {
-      let kgTanda, gTanda;
+      let kgTanda, gTanda, pesoRealTanda;
 
       if (i === n - 1) {
         kgTanda = parseFloat((kgTotal - kgAcum).toFixed(3));
         gTanda  = parseFloat((gTotal  - gAcum).toFixed(2));
+        pesoRealTanda = pesoRealTotal != null
+          ? parseFloat((pesoRealTotal - pesoRealAcum).toFixed(3))
+          : null;
       } else {
         kgTanda = kgBase;
         gTanda  = gBase;
+        pesoRealTanda = pesoRealBase;
       }
 
-      kgAcum = parseFloat((kgAcum + kgTanda).toFixed(3));
-      gAcum  = parseFloat((gAcum  + gTanda).toFixed(2));
+      kgAcum       = parseFloat((kgAcum + kgTanda).toFixed(3));
+      gAcum        = parseFloat((gAcum  + gTanda).toFixed(2));
+      if (pesoRealTanda != null) {
+        pesoRealAcum = parseFloat((pesoRealAcum + pesoRealTanda).toFixed(3));
+      }
 
-      await db.query(insertSQL, [
+      // Si copiamos pesaje: los campos de checklist se marcan completos
+      const disponible = copiarPesaje ? (ing.disponible || false) : false;
+      const verificado = copiarPesaje ? (ing.verificado || false) : false;
+      const pesado     = copiarPesaje ? (ing.pesado     || false) : false;
+      const pesoFinal  = copiarPesaje ? pesoRealTanda : null;
+      const lote       = copiarPesaje ? (ing.lote       || null) : null;
+      const fechaVenc  = copiarPesaje ? (ing.fecha_vencimiento || null) : null;
+
+      await db.query(`
+        INSERT INTO ingredientes_masa
+          (masa_id, ingrediente_sap_code, ingrediente_nombre, orden_visualizacion,
+           porcentaje_panadero, es_harina, es_agua, es_prefermento,
+           uom, es_empaque,
+           cantidad_gramos, cantidad_kilos,
+           disponible, verificado, pesado,
+           peso_real, lote, fecha_vencimiento)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+      `, [
         subMasaIds[i],
         ing.ingrediente_sap_code,
         ing.ingrediente_nombre,
@@ -150,10 +210,16 @@ async function distribuirIngredientes(ingredientes, subMasaIds) {
         ing.es_harina,
         ing.es_agua,
         ing.es_prefermento,
-        ing.uom     || null,
-        ing.es_empaque || false,
+        ing.uom         || null,
+        ing.es_empaque  || false,
         gTanda,
         kgTanda,
+        disponible,
+        verificado,
+        pesado,
+        pesoFinal,
+        lote,
+        fechaVenc,
       ]);
     }
   }
@@ -161,10 +227,6 @@ async function distribuirIngredientes(ingredientes, subMasaIds) {
 
 /**
  * Distribuye materiales de empaque en N copias iguales (una por sub-masa).
- * La cantidad de unidades se divide proporcionalmente entre las tandas.
- *
- * @param {Array}    empaques    - Filas de empaque_por_masa de la masa original
- * @param {number[]} subMasaIds  - IDs de las sub-masas [A, B, C, ...]
  */
 async function distribuirEmpaque(empaques, subMasaIds) {
   const n = subMasaIds.length;
@@ -206,11 +268,6 @@ async function distribuirEmpaque(empaques, subMasaIds) {
 
 /**
  * Distribuye productos entre N sub-masas.
- * Se llena cada tanda hasta el límite en orden A→B→C...
- *
- * @param {Array}    productos   - Filas de productos_por_masa de la masa original
- * @param {number}   limiteKg    - Límite máximo de kg por tanda
- * @param {number[]} subMasaIds  - IDs de las sub-masas [A, B, C, ...]
  */
 async function distribuirProductos(productos, limiteKg, subMasaIds) {
   const n        = subMasaIds.length;
@@ -287,6 +344,172 @@ async function insertarProductoEnMasa(masaId, prod, unidadesProg, unidadesPedida
   ]);
 }
 
+/**
+ * Ejecuta la subdivisión de una masa en N tandas.
+ * Llamado desde pesaje.controller.js al confirmar el pesaje si la masa supera el límite.
+ *
+ * @param {number}  masaId    - ID de la masa original
+ * @param {object}  userId    - ID del usuario autenticado
+ * @param {boolean} conPesaje - Si true, las sub-masas heredan el pesaje completo
+ * @returns {object|null}     - Información de la subdivisión, o null si no aplica
+ */
+async function ejecutarSubdivision(masaId, userId, conPesaje = false) {
+  const masaResult = await db.query(
+    `SELECT id, codigo_masa, tipo_masa, nombre_masa, fecha_produccion,
+            total_kilos_base, total_kilos_con_merma, porcentaje_merma,
+            factor_absorcion_usado, created_by,
+            fue_subdividida, es_subdivision
+     FROM masas_produccion WHERE id = $1`,
+    [masaId]
+  );
+
+  if (masaResult.rows.length === 0) {
+    throw new Error(`Masa ${masaId} no encontrada`);
+  }
+  const masa = masaResult.rows[0];
+
+  if (masa.fue_subdividida) {
+    logger.warn(`Masa ${masaId} ya fue subdividida, omitiendo.`);
+    return null;
+  }
+
+  // Calcular total kg de ingredientes
+  const ingResult = await db.query(
+    `SELECT SUM(cantidad_kilos) AS total_kg FROM ingredientes_masa WHERE masa_id = $1`,
+    [masaId]
+  );
+  const totalKgIngredientes = parseFloat(ingResult.rows[0].total_kg || 0);
+  const limiteKg = getLimiteKg(masa.tipo_masa);
+
+  if (totalKgIngredientes <= limiteKg) {
+    logger.info(`Masa ${masaId}: ${totalKgIngredientes.toFixed(2)} kg ≤ ${limiteKg} kg, sin subdivisión.`);
+    return null;
+  }
+
+  const nTandas      = calcularNTandas(totalKgIngredientes, limiteKg);
+  const LETRAS_TANDA = generarLetrasTanda(nTandas);
+
+  logger.info(`Masa ${masaId} supera el límite (${totalKgIngredientes.toFixed(2)} kg > ${limiteKg} kg). Subdividiendo en ${nTandas} tandas.`);
+
+  // Marcar masa original como subdividida
+  await db.query(`
+    UPDATE masas_produccion
+    SET fue_subdividida = TRUE, estado = 'SUBDIVIDIDA', updated_at = NOW()
+    WHERE id = $1
+  `, [masaId]);
+
+  const kgPorTanda     = parseFloat((totalKgIngredientes / nTandas).toFixed(3));
+  const baseKilosBase  = parseFloat((parseFloat(masa.total_kilos_base)      / nTandas).toFixed(3));
+  const baseKilosMerma = parseFloat((parseFloat(masa.total_kilos_con_merma) / nTandas).toFixed(3));
+  const fechaStr       = masa.fecha_produccion instanceof Date
+    ? masa.fecha_produccion.toISOString().split('T')[0]
+    : masa.fecha_produccion;
+
+  // El estado de la sub-masa depende de si ya viene con pesaje.
+  // Cuando conPesaje=true: PESAJE ya está completado, la sub-masa arranca en AMASADO.
+  // Valores válidos según constraint check_estado_masa de la BD.
+  const estadoSubMasa     = conPesaje ? 'AMASADO'      : 'PLANIFICACION';
+  const faseActualSubMasa = conPesaje ? 'AMASADO'      : 'PLANIFICACION';
+
+  // Crear sub-masas
+  const subMasas   = [];
+  const subMasaIds = [];
+
+  for (let i = 0; i < nTandas; i++) {
+    const letra  = LETRAS_TANDA[i];
+    const result = await db.query(`
+      INSERT INTO masas_produccion
+        (codigo_masa, tipo_masa, nombre_masa, fecha_produccion,
+         total_kilos_base, total_kilos_con_merma, porcentaje_merma,
+         factor_absorcion_usado, estado, fase_actual,
+         masa_padre_id, es_subdivision, subdivision_letra, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,TRUE,$12,$13)
+      RETURNING *
+    `, [
+      `${masa.codigo_masa}-${letra}`,
+      masa.tipo_masa,
+      `${masa.nombre_masa} (Tanda ${letra})`,
+      fechaStr,
+      baseKilosBase,
+      baseKilosMerma,
+      masa.porcentaje_merma,
+      masa.factor_absorcion_usado,
+      estadoSubMasa,
+      faseActualSubMasa,
+      masaId,
+      letra,
+      masa.created_by,
+    ]);
+
+    const subMasa = result.rows[0];
+    subMasas.push(subMasa);
+    subMasaIds.push(subMasa.id);
+    logger.info(`Sub-masa creada: ${subMasa.codigo_masa} (id=${subMasa.id})`);
+  }
+
+  // Inicializar fases de las sub-masas
+  for (const subMasa of subMasas) {
+    if (conPesaje) {
+      await inicializarFasesMasaConPesaje(subMasa.id, userId);
+    } else {
+      await inicializarFasesMasa(subMasa.id, userId);
+    }
+  }
+
+  // Distribuir ingredientes (con o sin datos de pesaje)
+  const ingredientesResult = await db.query(
+    `SELECT * FROM ingredientes_masa WHERE masa_id = $1 ORDER BY orden_visualizacion`,
+    [masaId]
+  );
+  await distribuirIngredientes(ingredientesResult.rows, subMasaIds, conPesaje);
+
+  // Distribuir empaque
+  const empaqueResult = await db.query(
+    `SELECT * FROM empaque_por_masa WHERE masa_id = $1 ORDER BY orden_visualizacion`,
+    [masaId]
+  );
+  await distribuirEmpaque(empaqueResult.rows, subMasaIds);
+
+  // Distribuir productos
+  const todosProductos = await db.query(
+    `SELECT * FROM productos_por_masa WHERE masa_id = $1`,
+    [masaId]
+  );
+  await distribuirProductos(todosProductos.rows, limiteKg, subMasaIds);
+
+  // Copiar relaciones orden-masa
+  const ordenesResult = await db.query(
+    `SELECT orden_sap_docentry, orden_sap_docnum FROM orden_masa_relacion WHERE masa_id = $1`,
+    [masaId]
+  );
+  for (const orden of ordenesResult.rows) {
+    for (const subMasaId of subMasaIds) {
+      await db.query(
+        `INSERT INTO orden_masa_relacion (masa_id, orden_sap_docentry, orden_sap_docnum)
+         VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+        [subMasaId, orden.orden_sap_docentry, orden.orden_sap_docnum]
+      );
+    }
+  }
+
+  logger.info(`Subdivisión completada (conPesaje=${conPesaje}): Masa ${masaId} → ${subMasas.map(s => s.codigo_masa).join(', ')}`);
+
+  return {
+    realizada:     true,
+    motivo:        `Masa supera el límite de ${limiteKg} kg para tipo ${masa.tipo_masa} (total ingredientes: ${totalKgIngredientes.toFixed(2)} kg)`,
+    limite_kg:     limiteKg,
+    total_kg:      parseFloat(totalKgIngredientes.toFixed(3)),
+    n_tandas:      nTandas,
+    kg_por_tanda:  kgPorTanda,
+    masa_padre_id: parseInt(masaId),
+    sub_masas:     subMasas.map((s, i) => ({
+      id:     s.id,
+      codigo: s.codigo_masa,
+      letra:  LETRAS_TANDA[i],
+    })),
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CONTROLADORES
 // ─────────────────────────────────────────────────────────────────────────────
@@ -321,7 +544,7 @@ const updateProgreso = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Fase y acción son requeridas' });
     }
 
-    const fasesValidas   = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO'];
+    const fasesValidas    = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO'];
     const accionesValidas = ['iniciar', 'actualizar', 'completar'];
 
     if (!fasesValidas.includes(fase.toUpperCase()))
@@ -357,27 +580,22 @@ const updateProgreso = async (req, res, next) => {
  * @access  Private
  *
  * Cuando fase = PLANIFICACION:
- *   1. Guarda anti-doble-ejecución (fue_subdividida / es_subdivision)
- *   2. Consolida BOM → clasifica cada componente por UoM y grupo SAP:
- *        - Kg / null(prefermento) → ingredientes_masa, suma al total amasadora
- *        - L (litros)             → ingredientes_masa, 1L = 1Kg para el límite
- *        - Und/R/grupo 182        → empaque_por_masa, NO suma al límite
- *   3. Calcula totalKgIngredientes (solo componentes con peso)
- *   4. Si supera límite → divide en CEIL(total/límite) tandas iguales
+ *   1. Consolida BOM → clasifica cada componente por UoM y grupo SAP
+ *   2. Calcula totalKgIngredientes
+ *   3. Si supera límite → la subdivisión YA NO ocurre aquí.
+ *      Solo se generan los ingredientes. La subdivisión ocurre al confirmar el PESAJE.
  */
 const completarFase = async (req, res, next) => {
   try {
     const { masaId, fase } = req.params;
     const datos = req.body;
 
-    let acumuladoPeso   = {};   // componentes que pesan → ingredientes_masa
-    let acumuladoEmpaque = {};  // componentes sin peso  → empaque_por_masa
-    let subdivision      = null;
+    let acumuladoPeso    = {};
+    let acumuladoEmpaque = {};
 
     // ── Caso especial: PLANIFICACION ───────────────────────────────
     if (fase.toUpperCase() === 'PLANIFICACION') {
 
-      // 1. Obtener datos de la masa
       const masaResult = await db.query(
         `SELECT id, codigo_masa, tipo_masa, nombre_masa, fecha_produccion,
                 total_kilos_base, total_kilos_con_merma, porcentaje_merma,
@@ -392,7 +610,7 @@ const completarFase = async (req, res, next) => {
       }
       const masa = masaResult.rows[0];
 
-      // ── GUARDA: no re-subdividir ───────────────────────────────────
+      // Guarda: no re-subdividir
       if (masa.fue_subdividida) {
         return res.status(409).json({
           success: false,
@@ -401,7 +619,7 @@ const completarFase = async (req, res, next) => {
         });
       }
 
-      // ── GUARDA: sub-masas flujo directo ───────────────────────────
+      // Guarda: sub-masas flujo directo (ya vienen con pesaje, van directo a completar planificación)
       if (masa.es_subdivision) {
         const faseActualizada = await fasesModel.updateEstadoFase(
           masaId, 'PLANIFICACION', 'COMPLETADA', 100, req.user.id, datos
@@ -415,7 +633,7 @@ const completarFase = async (req, res, next) => {
         });
       }
 
-      // 2. Obtener productos con sap_item_code
+      // Obtener productos con sap_item_code
       const productosResult = await db.query(
         `SELECT sap_item_code, producto_nombre, unidades_programadas,
                 producto_codigo, presentacion, gramaje_unitario,
@@ -432,7 +650,7 @@ const completarFase = async (req, res, next) => {
         });
       }
 
-      // 3. Consolidar BOM clasificando por UoM
+      // Consolidar BOM clasificando por UoM
       for (const prod of productosResult.rows) {
         const bomResult = await db.query(
           `SELECT item_code_comp, item_name_comp, cantidad,
@@ -450,11 +668,10 @@ const completarFase = async (req, res, next) => {
         }
 
         for (const comp of bomResult.rows) {
-          const cantTotal  = parseFloat(comp.cantidad) * parseFloat(prod.unidades_programadas);
-          const tipo       = clasificarComponente(comp.uom, comp.grupo_sap);
+          const cantTotal = parseFloat(comp.cantidad) * parseFloat(prod.unidades_programadas);
+          const tipo      = clasificarComponente(comp.uom, comp.grupo_sap);
 
           if (tipo === 'empaque') {
-            // Acumular en empaque
             if (acumuladoEmpaque[comp.item_code_comp]) {
               acumuladoEmpaque[comp.item_code_comp].cantidad += cantTotal;
             } else {
@@ -466,10 +683,7 @@ const completarFase = async (req, res, next) => {
               };
             }
           } else {
-            // tipo 'peso' o 'liquido' → acumular en ingredientes de masa
-            // Para líquidos (agua): 1L = 1Kg
-            const kgEquivalente = cantTotal; // cantidad ya viene en kg o L (1:1 para agua)
-
+            const kgEquivalente = cantTotal;
             if (acumuladoPeso[comp.item_code_comp]) {
               acumuladoPeso[comp.item_code_comp].cantidad += kgEquivalente;
             } else {
@@ -487,20 +701,18 @@ const completarFase = async (req, res, next) => {
         }
       }
 
-      // 4. Limpiar e insertar ingredientes consolidados (solo los que pesan)
-      const componentesPeso   = Object.entries(acumuladoPeso);
+      // Limpiar e insertar ingredientes consolidados
+      const componentesPeso    = Object.entries(acumuladoPeso);
       const componentesEmpaque = Object.entries(acumuladoEmpaque);
 
-      // Limpiar tablas previas
       await db.query(`DELETE FROM ingredientes_masa WHERE masa_id = $1`, [masaId]);
       await db.query(`DELETE FROM empaque_por_masa  WHERE masa_id = $1`, [masaId]);
 
-      // Insertar ingredientes de masa
       for (const [itemCode, comp] of componentesPeso) {
-        const nombreLower   = comp.nombre.toLowerCase();
-        const esHarina      = nombreLower.includes('harina');
-        const esAgua        = comp.esLiquido || nombreLower.includes('agua');
-        const esPrefermento = comp.warehouse === 'PRODPROC';
+        const nombreLower    = comp.nombre.toLowerCase();
+        const esHarina       = nombreLower.includes('harina');
+        const esAgua         = comp.esLiquido || nombreLower.includes('agua');
+        const esPrefermento  = comp.warehouse === 'PRODPROC';
         const cantidadKilos  = comp.cantidad;
         const cantidadGramos = cantidadKilos * 1000;
 
@@ -520,7 +732,6 @@ const completarFase = async (req, res, next) => {
         ]);
       }
 
-      // Insertar materiales de empaque
       for (const [itemCode, emp] of componentesEmpaque) {
         await db.query(`
           INSERT INTO empaque_por_masa
@@ -537,146 +748,36 @@ const completarFase = async (req, res, next) => {
 
       logger.info(`Masa ${masaId}: ${componentesPeso.length} ingredientes de masa + ${componentesEmpaque.length} materiales de empaque consolidados`);
 
-      // ── 5. VALIDACIÓN DE LÍMITE (solo ingredientes con peso) ──────
-      const totalKgIngredientes = componentesPeso.reduce(
-        (sum, [, comp]) => sum + comp.cantidad, 0
-      );
+      const totalKgIngredientes = componentesPeso.reduce((sum, [, comp]) => sum + comp.cantidad, 0);
       const limiteKg = getLimiteKg(masa.tipo_masa);
 
       logger.info(`Masa ${masaId} (${masa.tipo_masa}): ${totalKgIngredientes.toFixed(2)} kg de masa | Límite: ${limiteKg} kg`);
 
-      if (totalKgIngredientes > limiteKg) {
-        const nTandas = calcularNTandas(totalKgIngredientes, limiteKg);
-        logger.info(`Masa ${masaId} supera el límite. Subdividiendo en ${nTandas} tandas.`);
+      // ── CAMBIO v4: Ya NO subdividimos aquí. Solo informamos que habrá subdivisión al confirmar pesaje.
+      const necesitaSubdivision = totalKgIngredientes > limiteKg;
+      const nTandas = necesitaSubdivision ? calcularNTandas(totalKgIngredientes, limiteKg) : 0;
 
-        // Generar letras dinámicamente según las tandas necesarias (A, B, C, ... Z, AA, AB, ...)
-        const LETRAS_TANDA = Array.from({ length: nTandas }, (_, i) => {
-          if (i < 26) return String.fromCharCode(65 + i); // A-Z
-          const first = String.fromCharCode(65 + Math.floor(i / 26) - 1);
-          const second = String.fromCharCode(65 + (i % 26));
-          return first + second; // AA, AB, AC...
-        });
+      // Completar fase PLANIFICACION y desbloquear PESAJE
+      const faseActualizada = await fasesModel.updateEstadoFase(
+        masaId, 'PLANIFICACION', 'COMPLETADA', 100, req.user.id, datos
+      );
+      await fasesModel.desbloquearSiguienteFase(masaId, 'PLANIFICACION');
 
-        // 5a. Marcar masa original
-        await db.query(`
-          UPDATE masas_produccion
-          SET fue_subdividida = TRUE, estado = 'SUBDIVIDIDA', updated_at = NOW()
-          WHERE id = $1
-        `, [masaId]);
-
-        await fasesModel.updateEstadoFase(masaId, 'PLANIFICACION', 'COMPLETADA', 100, req.user.id, datos);
-
-        const kgPorTanda     = parseFloat((totalKgIngredientes / nTandas).toFixed(3));
-        const baseKilosBase  = parseFloat((parseFloat(masa.total_kilos_base)      / nTandas).toFixed(3));
-        const baseKilosMerma = parseFloat((parseFloat(masa.total_kilos_con_merma) / nTandas).toFixed(3));
-        const fechaStr       = masa.fecha_produccion instanceof Date
-          ? masa.fecha_produccion.toISOString().split('T')[0]
-          : masa.fecha_produccion;
-
-        // 5b. Crear N sub-masas
-        const subMasas   = [];
-        const subMasaIds = [];
-
-        for (let i = 0; i < nTandas; i++) {
-          const letra  = LETRAS_TANDA[i];
-          const result = await db.query(`
-            INSERT INTO masas_produccion
-              (codigo_masa, tipo_masa, nombre_masa, fecha_produccion,
-               total_kilos_base, total_kilos_con_merma, porcentaje_merma,
-               factor_absorcion_usado, estado, fase_actual,
-               masa_padre_id, es_subdivision, subdivision_letra, created_by)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'PLANIFICACION','PLANIFICACION',$9,TRUE,$10,$11)
-            RETURNING *
-          `, [
-            `${masa.codigo_masa}-${letra}`,
-            masa.tipo_masa,
-            `${masa.nombre_masa} (Tanda ${letra})`,
-            fechaStr,
-            baseKilosBase,
-            baseKilosMerma,
-            masa.porcentaje_merma,
-            masa.factor_absorcion_usado,
-            masaId,
-            letra,
-            masa.created_by,
-          ]);
-
-          const subMasa = result.rows[0];
-          subMasas.push(subMasa);
-          subMasaIds.push(subMasa.id);
-          logger.info(`Sub-masa creada: ${subMasa.codigo_masa} (id=${subMasa.id})`);
-        }
-
-        // 5c. Inicializar fases
-        for (const subMasa of subMasas) {
-          await inicializarFasesMasa(subMasa.id, req.user.id);
-        }
-
-        // 5d. Distribuir ingredientes de masa (solo los que pesan)
-        const ingredientesResult = await db.query(
-          `SELECT * FROM ingredientes_masa WHERE masa_id = $1 ORDER BY orden_visualizacion`,
-          [masaId]
-        );
-        await distribuirIngredientes(ingredientesResult.rows, subMasaIds);
-
-        // 5e. Distribuir empaque proporcionalmente
-        const empaqueResult = await db.query(
-          `SELECT * FROM empaque_por_masa WHERE masa_id = $1 ORDER BY orden_visualizacion`,
-          [masaId]
-        );
-        await distribuirEmpaque(empaqueResult.rows, subMasaIds);
-
-        // 5f. Distribuir productos
-        const todosProductos = await db.query(
-          `SELECT * FROM productos_por_masa WHERE masa_id = $1`,
-          [masaId]
-        );
-        await distribuirProductos(todosProductos.rows, limiteKg, subMasaIds);
-
-        // 5g. Copiar relaciones orden-masa
-        const ordenesResult = await db.query(
-          `SELECT orden_sap_docentry, orden_sap_docnum FROM orden_masa_relacion WHERE masa_id = $1`,
-          [masaId]
-        );
-        for (const orden of ordenesResult.rows) {
-          for (const subMasaId of subMasaIds) {
-            await db.query(
-              `INSERT INTO orden_masa_relacion (masa_id, orden_sap_docentry, orden_sap_docnum)
-               VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
-              [subMasaId, orden.orden_sap_docentry, orden.orden_sap_docnum]
-            );
-          }
-        }
-
-        logger.info(`Subdivisión completada: Masa ${masaId} → ${subMasas.map(s => s.codigo_masa).join(', ')}`);
-
-        subdivision = {
-          realizada:     true,
-          motivo:        `Masa supera el límite de ${limiteKg} kg para tipo ${masa.tipo_masa} (total ingredientes: ${totalKgIngredientes.toFixed(2)} kg)`,
-          limite_kg:     limiteKg,
-          total_kg:      parseFloat(totalKgIngredientes.toFixed(3)),
-          n_tandas:      nTandas,
-          kg_por_tanda:  kgPorTanda,
-          masa_padre_id: parseInt(masaId),
-          sub_masas:     subMasas.map((s, i) => ({
-            id:     s.id,
-            codigo: s.codigo_masa,
-            letra:  LETRAS_TANDA[i],
-          })),
-        };
-
-        return res.json({
-          success: true,
-          message: `La masa superaba el límite de ${limiteKg} kg. Se dividió en ${nTandas} tandas de ~${kgPorTanda.toFixed(2)} kg cada una.`,
-          subdivision,
-          ingredientes_generados: componentesPeso.length,
-          empaque_separado:       componentesEmpaque.length,
-        });
-      }
-      // ── Fin validación límite ─────────────────────────────────────
+      return res.json({
+        success: true,
+        data: faseActualizada,
+        message: necesitaSubdivision
+          ? `Planificación completada. La masa supera ${limiteKg} kg (${totalKgIngredientes.toFixed(2)} kg). Se dividirá en ${nTandas} tandas al confirmar el pesaje.`
+          : 'Planificación completada exitosamente.',
+        subdivision: null,
+        necesita_subdivision: necesitaSubdivision,
+        n_tandas_previstas: nTandas,
+        ingredientes_generados: componentesPeso.length,
+        empaque_separado:       componentesEmpaque.length,
+      });
     }
 
-    // ── Flujo estándar (sin subdivisión) ───────────────────────────
+    // ── Flujo estándar (otras fases) ───────────────────────────────
     const faseActualizada = await fasesModel.updateEstadoFase(
       masaId, fase.toUpperCase(), 'COMPLETADA', 100, req.user.id, datos
     );
@@ -689,12 +790,6 @@ const completarFase = async (req, res, next) => {
       siguiente_fase: siguienteFase,
       message: 'Fase completada exitosamente',
       subdivision: null,
-      ingredientes_generados: fase.toUpperCase() === 'PLANIFICACION'
-        ? Object.keys(acumuladoPeso).length
-        : undefined,
-      empaque_separado: fase.toUpperCase() === 'PLANIFICACION'
-        ? Object.keys(acumuladoEmpaque).length
-        : undefined,
     });
 
   } catch (error) {
@@ -707,4 +802,7 @@ module.exports = {
   getProgresoFases,
   updateProgreso,
   completarFase,
+  // Exportado para uso en pesaje.controller.js
+  ejecutarSubdivision,
+  getLimiteKg,
 };
