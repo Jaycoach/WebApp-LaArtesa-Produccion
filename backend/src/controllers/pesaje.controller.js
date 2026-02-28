@@ -1,9 +1,17 @@
 /**
  * Controlador para gestión de pesaje y checklist
+ *
+ * CAMBIOS v4 (2026-02-27):
+ *  - confirmarPesaje ahora detecta si la masa supera el límite de amasadora.
+ *  - Si supera: ejecuta la subdivisión CON los pesos reales ya registrados.
+ *    Las sub-masas nacen con PESAJE=COMPLETADO y AMASADO=EN_PROGRESO.
+ *    El usuario no tiene que volver a pesar.
+ *  - Si no supera: flujo estándar, desbloquea AMASADO.
  */
 
 const fasesModel = require('../models/fases.model');
-const logger = require('../utils/logger');
+const logger     = require('../utils/logger');
+const { ejecutarSubdivision } = require('./fases.controller');
 
 /**
  * @desc    Obtener checklist de pesaje de una masa
@@ -14,7 +22,6 @@ const getChecklist = async (req, res, next) => {
   try {
     const { masaId } = req.params;
 
-    // Obtener masa
     const masa = await fasesModel.getMasaById(masaId);
     if (!masa) {
       return res.status(404).json({
@@ -23,33 +30,28 @@ const getChecklist = async (req, res, next) => {
       });
     }
 
-    // Obtener ingredientes con su estado de checklist
-    const ingredientes = await fasesModel.getIngredientesByMasa(masaId);
-
-    // Obtener progreso de la fase de pesaje
+    const ingredientes  = await fasesModel.getIngredientesByMasa(masaId);
     const progresoFases = await fasesModel.getProgresoFases(masaId);
-    const fasePesaje = progresoFases.find(f => f.fase === 'PESAJE');
+    const fasePesaje    = progresoFases.find(f => f.fase === 'PESAJE');
 
-    // Calcular estadísticas del checklist
-    const total = ingredientes.length;
-    const disponibles = ingredientes.filter(i => i.disponible).length;
-    const verificados = ingredientes.filter(i => i.verificado).length;
-    const pesados = ingredientes.filter(i => i.pesado).length;
+    const total          = ingredientes.length;
+    const disponibles    = ingredientes.filter(i => i.disponible).length;
+    const verificados    = ingredientes.filter(i => i.verificado).length;
+    const pesados        = ingredientes.filter(i => i.pesado).length;
 
     const todosDisponibles = disponibles === total;
     const todosVerificados = verificados === total;
-    const todosPesados = pesados === total;
-    const completado = todosDisponibles && todosVerificados && todosPesados;
+    const todosPesados     = pesados === total;
+    const completado       = todosDisponibles && todosVerificados && todosPesados;
 
-    // Calcular progreso
     const progreso = total > 0
       ? Math.round(((disponibles + verificados + pesados) / (total * 3)) * 100)
       : 0;
 
     const checklist = {
-      masa_id: masa.id,
-      tipo_masa: masa.tipo_masa,
-      fecha_inicio: fasePesaje?.fecha_inicio,
+      masa_id:             masa.id,
+      tipo_masa:           masa.tipo_masa,
+      fecha_inicio:        fasePesaje?.fecha_inicio,
       usuario_responsable: fasePesaje?.usuario_responsable,
       ingredientes,
       todosDisponibles,
@@ -59,10 +61,7 @@ const getChecklist = async (req, res, next) => {
       progreso,
     };
 
-    res.json({
-      success: true,
-      data: checklist,
-    });
+    res.json({ success: true, data: checklist });
   } catch (error) {
     logger.error('Error al obtener checklist:', error);
     next(error);
@@ -122,6 +121,10 @@ const updateIngrediente = async (req, res, next) => {
  * @desc    Confirmar que el pesaje está completo
  * @route   POST /api/pesaje/:masaId/confirmar
  * @access  Private
+ *
+ * Si la masa supera el límite de capacidad de amasadora, se crean sub-masas
+ * que ya heredan el pesaje completo (pesos reales divididos proporcionalmente).
+ * Las sub-masas quedan en AMASADO directamente.
  */
 const confirmarPesaje = async (req, res, next) => {
   try {
@@ -129,9 +132,8 @@ const confirmarPesaje = async (req, res, next) => {
     logger.info(`Confirmando pesaje para masa ${masaId}`);
 
     // Verificar que todos los ingredientes estén pesados
-    logger.info(`Verificando ingredientes pesados para masa ${masaId}`);
     const resultado = await fasesModel.checkTodosPesados(masaId);
-    logger.info(`Resultado de verificación: ${JSON.stringify(resultado)}`);
+    logger.info(`Verificación pesaje masa ${masaId}: ${JSON.stringify(resultado)}`);
 
     if (!resultado.completo) {
       logger.warn(`Pesaje incompleto para masa ${masaId}. Faltantes: ${resultado.faltantes.join(', ')}`);
@@ -139,35 +141,55 @@ const confirmarPesaje = async (req, res, next) => {
         success: false,
         message: 'No se puede confirmar el pesaje. Hay ingredientes pendientes.',
         data: {
-          total: resultado.total,
-          completados: resultado.completados,
-          faltantes: resultado.faltantes,
+          total:        resultado.total,
+          completados:  resultado.completados,
+          faltantes:    resultado.faltantes,
         },
       });
     }
 
-    // Completar la fase de pesaje
-    logger.info(`Actualizando estado de fase PESAJE a COMPLETADA para masa ${masaId}`);
+    // Completar fase PESAJE de la masa actual
     await fasesModel.updateEstadoFase(
-      masaId,
-      'PESAJE',
-      'COMPLETADA',
-      100,
-      req.user.id,
+      masaId, 'PESAJE', 'COMPLETADA', 100, req.user.id,
       { confirmado_en: new Date() }
     );
+    logger.info(`Fase PESAJE completada para masa ${masaId}`);
 
-    // Desbloquear la fase de amasado
-    logger.info(`Desbloqueando siguiente fase después de PESAJE para masa ${masaId}`);
+    // ── NUEVO v4: Intentar subdivisión con pesaje heredado ─────────
+    let subdivision = null;
+    try {
+      subdivision = await ejecutarSubdivision(masaId, req.user.id, true /* conPesaje */);
+    } catch (subErr) {
+      // Si falla la subdivisión, NO cortamos el flujo: el pesaje ya se confirmó.
+      // Logueamos el error para investigación.
+      logger.error(`Error durante subdivisión de masa ${masaId}:`, subErr);
+    }
+
+    if (subdivision) {
+      // La masa fue subdividida. Las sub-masas ya tienen PESAJE completado.
+      logger.info(`Masa ${masaId} subdividida en ${subdivision.n_tandas} tandas después del pesaje.`);
+      return res.json({
+        success: true,
+        message: `Pesaje confirmado. La masa supera el límite de ${subdivision.limite_kg} kg y fue dividida en ${subdivision.n_tandas} tandas. Cada tanda ya tiene el pesaje registrado.`,
+        data: {
+          fase_completada:    'PESAJE',
+          fase_desbloqueada:  'AMASADO',
+          subdivision,
+        },
+      });
+    }
+
+    // ── Flujo estándar sin subdivisión ─────────────────────────────
     const siguienteFase = await fasesModel.desbloquearSiguienteFase(masaId, 'PESAJE');
-    logger.info(`Fase desbloqueada: ${siguienteFase?.fase || 'AMASADO'}`);
+    logger.info(`Fase desbloqueada después de PESAJE: ${siguienteFase?.fase || 'AMASADO'}`);
 
     res.json({
       success: true,
       message: 'Pesaje confirmado exitosamente',
       data: {
-        fase_completada: 'PESAJE',
+        fase_completada:   'PESAJE',
         fase_desbloqueada: siguienteFase?.fase || 'AMASADO',
+        subdivision:       null,
       },
     });
   } catch (error) {
@@ -186,9 +208,8 @@ const enviarCorreoEmpaque = async (req, res, next) => {
   try {
     const { masaId } = req.params;
 
-    // Verificar que el pesaje esté completado
     const progresoFases = await fasesModel.getProgresoFases(masaId);
-    const fasePesaje = progresoFases.find(f => f.fase === 'PESAJE');
+    const fasePesaje    = progresoFases.find(f => f.fase === 'PESAJE');
 
     if (!fasePesaje || fasePesaje.estado !== 'COMPLETADA') {
       return res.status(400).json({
@@ -197,15 +218,12 @@ const enviarCorreoEmpaque = async (req, res, next) => {
       });
     }
 
-    // Obtener información de la masa
-    const masa = await fasesModel.getMasaById(masaId);
+    const masa      = await fasesModel.getMasaById(masaId);
     const productos = await fasesModel.getProductosByMasa(masaId);
 
-    // TODO: Implementar lógica real de envío de correo
-    // Por ahora simularemos el envío
-    const destinatarios = ['empaque@artesa.com']; // Esto debería venir de la configuración
-    const asunto = `Pesaje completado - Masa ${masa.codigo_masa}`;
-    const cuerpo = `
+    const destinatarios = ['empaque@artesa.com'];
+    const asunto        = `Pesaje completado - Masa ${masa.codigo_masa}`;
+    const cuerpo        = `
       Se ha completado el pesaje de la masa ${masa.codigo_masa}.
       Tipo: ${masa.tipo_masa}
       Fecha de producción: ${masa.fecha_produccion}
@@ -213,23 +231,22 @@ const enviarCorreoEmpaque = async (req, res, next) => {
       Productos: ${productos.length}
     `;
 
-    // Registrar la notificación
     const notificacion = await fasesModel.createNotificacionEmpaque({
-      masa_id: masaId,
+      masa_id:       masaId,
       destinatarios,
       asunto,
       cuerpo,
-      estado_envio: 'PENDIENTE', // Cambiar a 'ENVIADO' cuando se implemente el envío real
-      fecha_envio: null,
+      estado_envio:  'PENDIENTE',
+      fecha_envio:   null,
       error_mensaje: null,
-      enviado_por: req.user.id,
+      enviado_por:   req.user.id,
     });
 
     res.json({
       success: true,
       message: 'Notificación registrada (correo pendiente de envío)',
       data: {
-        enviado: false, // Cambiar a true cuando se implemente el envío real
+        enviado:     false,
         destinatarios,
         fecha_envio: new Date().toISOString(),
       },
