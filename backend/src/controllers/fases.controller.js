@@ -777,6 +777,101 @@ const completarFase = async (req, res, next) => {
       });
     }
 
+    // ── Caso especial: DIVISION ────────────────────────────────
+    if (fase.toUpperCase() === 'DIVISION') {
+      const { cantidades_divididas, ...restosDatos } = datos.datos || datos;
+
+      // 1. Obtener productos de la masa con su multiplo_divisor
+      const productosResult = await db.query(
+        `SELECT id, producto_nombre, presentacion,
+                unidades_programadas, multiplo_divisor
+         FROM productos_por_masa
+         WHERE masa_id = $1
+         ORDER BY producto_nombre`,
+        [masaId]
+      );
+
+      if (productosResult.rows.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'La masa no tiene productos para dividir.',
+        });
+      }
+
+      // 2. Validar cantidades_divididas si vienen en el payload
+      if (cantidades_divididas && Object.keys(cantidades_divididas).length > 0) {
+        const errores = [];
+
+        for (const prod of productosResult.rows) {
+          const cantidad = Number(cantidades_divididas[prod.id] || 0);
+          const requerido = parseInt(prod.unidades_programadas);
+          const divisor   = parseInt(prod.multiplo_divisor || 0);
+
+          // Validar cantidad mínima (debe ser >= unidades_programadas)
+          if (cantidad < requerido) {
+            errores.push(
+              `"${prod.producto_nombre}${prod.presentacion ? ' ' + prod.presentacion : ''}": ` +
+              `debe cortar mínimo ${requerido} unidades (ingresó ${cantidad}).`
+            );
+            continue;
+          }
+
+          // Validar múltiplo divisor si aplica
+          if (divisor > 0 && cantidad % divisor !== 0) {
+            const inferior = Math.floor(cantidad / divisor) * divisor;
+            const superior = inferior + divisor;
+            errores.push(
+              `"${prod.producto_nombre}${prod.presentacion ? ' ' + prod.presentacion : ''}": ` +
+              `${cantidad} no es múltiplo de ${divisor}. ` +
+              `Valores válidos cercanos: ${inferior} o ${superior}.`
+            );
+          }
+        }
+
+        if (errores.length > 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Cantidades de división inválidas:',
+            errores,
+          });
+        }
+
+        // 3. Guardar cantidades_divididas en productos_por_masa
+        for (const prod of productosResult.rows) {
+          const cantidad = Number(cantidades_divididas[prod.id] || 0);
+          if (cantidad > 0) {
+            await db.query(
+              `UPDATE productos_por_masa
+               SET cantidad_divisiones = $1,
+                   division_completada = TRUE,
+                   updated_at          = NOW()
+               WHERE id = $2`,
+              [cantidad, prod.id]
+            );
+          }
+        }
+
+        logger.info(
+          `División masa ${masaId}: cantidades guardadas para ${productosResult.rows.length} productos`
+        );
+      }
+
+      // 4. Completar fase y desbloquear siguiente
+      const faseActualizada = await fasesModel.updateEstadoFase(
+        masaId, 'DIVISION', 'COMPLETADA', 100, req.user.id,
+        { ...(restosDatos || {}), cantidades_divididas }
+      );
+      const siguienteFase = await fasesModel.desbloquearSiguienteFase(masaId, 'DIVISION');
+
+      return res.json({
+        success: true,
+        data: faseActualizada,
+        siguiente_fase: siguienteFase,
+        message: 'División completada exitosamente',
+        subdivision: null,
+      });
+    }
+
     // ── Flujo estándar (otras fases) ───────────────────────────────
     const faseActualizada = await fasesModel.updateEstadoFase(
       masaId, fase.toUpperCase(), 'COMPLETADA', 100, req.user.id, datos

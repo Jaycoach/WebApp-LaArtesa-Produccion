@@ -155,6 +155,45 @@ const confirmarPesaje = async (req, res, next) => {
     );
     logger.info(`Fase PESAJE completada para masa ${masaId}`);
 
+    // ── Asignar lote_produccion si aún no tiene ────────────────
+    try {
+      const masaLoteResult = await db.query(
+        `SELECT mp.id, mp.tipo_masa, mp.fecha_produccion,
+                mp.lote_produccion, mp.subdivision_letra,
+                ctm.codigo_lote
+         FROM masas_produccion mp
+         LEFT JOIN catalogo_tipos_masa ctm ON mp.tipo_masa = ctm.tipo_masa
+         WHERE mp.id = $1
+         LIMIT 1`,
+        [masaId]
+      );
+
+      if (masaLoteResult.rows.length > 0) {
+        const m = masaLoteResult.rows[0];
+
+        // Solo asignar si aún no tiene lote
+        if (!m.lote_produccion) {
+          const codigoBase = m.codigo_lote || m.tipo_masa.substring(0, 4).toUpperCase();
+          const fecha      = new Date(m.fecha_produccion);
+          const dd   = String(fecha.getUTCDate()).padStart(2, '0');
+          const mm   = String(fecha.getUTCMonth() + 1).padStart(2, '0');
+          const yy   = String(fecha.getUTCFullYear()).slice(-2);
+          const sufijo     = m.subdivision_letra ? `-${m.subdivision_letra}` : '';
+          const lote       = `${codigoBase}${dd}${mm}${yy}${sufijo}`;
+
+          await db.query(
+            `UPDATE masas_produccion SET lote_produccion = $1 WHERE id = $2`,
+            [lote, masaId]
+          );
+          logger.info(`Lote asignado a masa ${masaId}: ${lote}`);
+        }
+      }
+    } catch (loteErr) {
+      // No interrumpir el flujo si falla la asignación de lote
+      logger.error(`Error asignando lote a masa ${masaId}:`, loteErr);
+    }
+    // ── Fin asignación lote ────────────────────────────────────
+
     // ── NUEVO v4: Intentar subdivisión con pesaje heredado ─────────
     let subdivision = null;
     try {
