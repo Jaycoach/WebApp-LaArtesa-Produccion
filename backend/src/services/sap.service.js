@@ -379,17 +379,18 @@ class SAPService {
       const response = await this.client.get('/Items', {
         params: {
           $filter: filterParts,
-          $select: 'ItemCode,ItemName,SalesQtyPerPackUnit,U_JZ_Tipos_Masa,SalesUnitWeight1',
+          $select: 'ItemCode,ItemName,SalesQtyPerPackUnit,U_JZ_Tipos_Masa,SalesUnitWeight1,U_JZ_MultiploDivisor',
           $top: BATCH,
         },
       });
 
       for (const item of (response.data.value || [])) {
         resultado[item.ItemCode] = {
-          itemName: item.ItemName,
+          itemName:            item.ItemName,
           salesQtyPerPackUnit: item.SalesQtyPerPackUnit || 1,
-          tipoMasa: item.U_JZ_Tipos_Masa || 'SIN_CLASIFICAR',
-          gramaje: item.SalesUnitWeight1 || 0,
+          tipoMasa:            item.U_JZ_Tipos_Masa || 'SIN_CLASIFICAR',
+          gramaje:             item.SalesUnitWeight1 || 0,
+          multiploDivisor:     item.U_JZ_MultiploDivisor != null ? Math.round(item.U_JZ_MultiploDivisor) : 0,
         };
       }
     }
@@ -442,6 +443,7 @@ class SAPService {
         cantidadPaquetes,
         gramaje,
         kilosPedidos,
+        multiploDivisor: art.multiploDivisor || 0,
       };
     });
 
@@ -501,7 +503,7 @@ class SAPService {
       const response = await this.client.get('/Items', {
         params: {
           $filter: "U_JZ_Tipos_Masa ne null and U_JZ_Tipos_Masa ne ''",
-          $select: 'ItemCode,ItemName,U_JZ_Tipos_Masa,SalesQtyPerPackUnit,SalesUnitWeight1',
+          $select: 'ItemCode,ItemName,U_JZ_Tipos_Masa,SalesQtyPerPackUnit,SalesUnitWeight1,U_JZ_MultiploDivisor',
           $top: top,
           $skip: skip,
         },
@@ -521,6 +523,7 @@ class SAPService {
       tipoMasa:        item.U_JZ_Tipos_Masa,
       salesQtyPerPack: item.SalesQtyPerPackUnit || 1,
       gramaje:         item.SalesUnitWeight1 || 0,
+      multiploDivisor: item.U_JZ_MultiploDivisor != null ? Math.round(item.U_JZ_MultiploDivisor) : 0,
     }));
   }
 

@@ -831,14 +831,16 @@ const sincronizarDesdeOV = async (req, res, next) => {
              masa_id, producto_codigo, producto_nombre, presentacion,
              gramaje_unitario,
              unidades_pedidas, unidades_programadas, kilos_pedidos, kilos_programados,
-             sap_item_code, unidades_por_paquete, cantidad_paquetes, sap_doc_entry, sap_doc_num
-           ) VALUES ($1, $2, $3, 'Por definir', $4, $5, $5, $6, $6, $7, $8, $9, $10, $11)
+             sap_item_code, unidades_por_paquete, cantidad_paquetes, sap_doc_entry, sap_doc_num,
+             multiplo_divisor
+           ) VALUES ($1, $2, $3, 'Por definir', $4, $5, $5, $6, $6, $7, $8, $9, $10, $11, $12)
            ON CONFLICT (masa_id, sap_item_code) DO UPDATE SET
              unidades_pedidas     = productos_por_masa.unidades_pedidas     + EXCLUDED.unidades_pedidas,
              unidades_programadas = productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas,
              cantidad_paquetes    = productos_por_masa.cantidad_paquetes    + EXCLUDED.cantidad_paquetes,
              kilos_pedidos        = productos_por_masa.kilos_pedidos        + EXCLUDED.kilos_pedidos,
-             kilos_programados    = productos_por_masa.kilos_programados    + EXCLUDED.kilos_programados`,
+             kilos_programados    = productos_por_masa.kilos_programados    + EXCLUDED.kilos_programados,
+             multiplo_divisor     = EXCLUDED.multiplo_divisor`,
           [
             masaId,
             prod.itemCode,          // $2 producto_codigo
@@ -850,7 +852,8 @@ const sincronizarDesdeOV = async (req, res, next) => {
             prod.unidadesPorPaquete, // $8
             prod.cantidadPaquetes,  // $9
             prod.docEntry,          // $10
-            String(prod.docNum)     // $11
+            String(prod.docNum),    // $11
+            prod.multiploDivisor || 0, // $12
           ]
         );
       }
@@ -1111,13 +1114,14 @@ const sincronizarBOM = async (req, res, next) => {
         // 2. Upsert en sap_articulos
         await db.query(
           `INSERT INTO sap_articulos
-             (item_code, item_name, tipo_masa, sales_qty_per_pack, gramaje, activo, synced_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+             (item_code, item_name, tipo_masa, sales_qty_per_pack, gramaje, multiplo_divisor, activo, synced_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
            ON CONFLICT (item_code) DO UPDATE SET
              item_name          = EXCLUDED.item_name,
              tipo_masa          = EXCLUDED.tipo_masa,
              sales_qty_per_pack = EXCLUDED.sales_qty_per_pack,
              gramaje            = EXCLUDED.gramaje,
+             multiplo_divisor   = EXCLUDED.multiplo_divisor,
              activo             = true,
              synced_at          = CURRENT_TIMESTAMP,
              updated_at         = CURRENT_TIMESTAMP`,
@@ -1127,6 +1131,7 @@ const sincronizarBOM = async (req, res, next) => {
             articulo.tipoMasa,
             articulo.salesQtyPerPack,
             articulo.gramaje,
+            articulo.multiploDivisor || 0,
           ]
         );
         articulosUpserted++;
