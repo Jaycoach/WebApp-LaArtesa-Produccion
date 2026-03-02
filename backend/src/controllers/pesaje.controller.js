@@ -10,6 +10,7 @@
  */
 
 const fasesModel = require('../models/fases.model');
+const db        = require('../config/database');
 const logger     = require('../utils/logger');
 const { ejecutarSubdivision } = require('./fases.controller');
 
