@@ -35,17 +35,27 @@ export const DivisionMasa: React.FC = () => {
   };
 
   /**
+   * Retorna el mínimo requerido para cortar: unidades_ajustadas si existe,
+   * sino unidades_programadas.
+   */
+  const getMinimoRequerido = (producto: any): number => {
+    const ajustadas  = parseInt(producto.unidades_ajustadas || 0);
+    const programadas = parseInt(producto.unidades_programadas || 0);
+    return ajustadas > 0 ? ajustadas : programadas;
+  };
+
+  /**
    * Valida la cantidad ingresada para un producto.
    * Retorna null si es válida, o string con el mensaje de error.
    */
   const validarCantidad = (producto: any, cantidad: number): string | null => {
-    const requerido = parseInt(producto.unidades_programadas);
-    const divisor   = parseInt(producto.multiplo_divisor || 0);
+    if (cantidad <= 0) return null; // Aún no ingresó nada
 
-    if (cantidad <= 0) return null; // Aún no ingresó nada, no mostrar error todavía
+    const minimoRequerido = getMinimoRequerido(producto);
+    const divisor = parseInt(producto.multiplo_divisor || 0);
 
-    if (cantidad < requerido) {
-      return `Mínimo ${requerido} unidades`;
+    if (cantidad < minimoRequerido) {
+      return `Mínimo ${minimoRequerido} unidades`;
     }
 
     if (divisor > 0 && cantidad % divisor !== 0) {
@@ -64,16 +74,18 @@ export const DivisionMasa: React.FC = () => {
     });
   };
 
-  /**
-   * Verifica si hay errores de validación activos en algún producto.
-   */
   const hayErroresValidacion = (): boolean => {
     if (!productos) return false;
-    return productos.some((p: any) => {
+    return (productos as any[]).some((p: any) => {
       const cantidad = cantidadesDivididas[p.id] || 0;
       if (cantidad <= 0) return false;
       return validarCantidad(p, cantidad) !== null;
     });
+  };
+
+  const todasTienenCantidad = (): boolean => {
+    if (!productos || (productos as any[]).length === 0) return false;
+    return (productos as any[]).every((p: any) => (cantidadesDivididas[p.id] || 0) > 0);
   };
 
   // ── Submit ─────────────────────────────────────────────────────
@@ -89,35 +101,32 @@ export const DivisionMasa: React.FC = () => {
       return;
     }
 
-    if (!productos || productos.length === 0) {
+    if (!productos || (productos as any[]).length === 0) {
       alert('No hay productos para dividir');
       return;
     }
 
-    // Validar que TODOS los productos tengan cantidad >= unidades_programadas
     const erroresFinal: string[] = [];
 
     for (const p of productos as any[]) {
       const cantidad  = cantidadesDivididas[p.id] || 0;
-      const requerido = parseInt(p.unidades_programadas);
+      const minimo    = getMinimoRequerido(p);
       const divisor   = parseInt(p.multiplo_divisor || 0);
       const nombre    = `${p.producto_nombre}${p.presentacion ? ' ' + p.presentacion : ''}`;
 
       if (cantidad <= 0) {
-        erroresFinal.push(`"${nombre}": debe ingresar la cantidad a cortar (mínimo ${requerido}).`);
+        erroresFinal.push(`"${nombre}": debe ingresar la cantidad a cortar (mínimo ${minimo}).`);
         continue;
       }
-
-      if (cantidad < requerido) {
-        erroresFinal.push(`"${nombre}": ingresó ${cantidad}, debe cortar mínimo ${requerido}.`);
+      if (cantidad < minimo) {
+        erroresFinal.push(`"${nombre}": ingresó ${cantidad}, debe cortar mínimo ${minimo}.`);
         continue;
       }
-
       if (divisor > 0 && cantidad % divisor !== 0) {
         const inferior = Math.floor(cantidad / divisor) * divisor;
         const superior = inferior + divisor;
         erroresFinal.push(
-          `"${nombre}": ${cantidad} no es múltiplo de ${divisor}. Valores válidos cercanos: ${inferior} o ${superior}.`
+          `"${nombre}": ${cantidad} no es múltiplo de ${divisor}. Valores válidos: ${inferior} o ${superior}.`
         );
       }
     }
@@ -135,11 +144,11 @@ export const DivisionMasa: React.FC = () => {
         fase: 'division',
         data: {
           datos: {
-            maquina_corte_id:    Number(formData.maquina_corte_id),
-            temperatura_entrada: Number(formData.temperatura_entrada),
-            requiere_reposo:     formData.requiere_reposo,
-            hora_inicio_reposo:  formData.requiere_reposo ? formData.hora_inicio_reposo : null,
-            hora_fin_reposo:     formData.requiere_reposo ? formData.hora_fin_reposo    : null,
+            maquina_corte_id:      Number(formData.maquina_corte_id),
+            temperatura_entrada:   Number(formData.temperatura_entrada),
+            requiere_reposo:       formData.requiere_reposo,
+            hora_inicio_reposo:    formData.requiere_reposo ? formData.hora_inicio_reposo : null,
+            hora_fin_reposo:       formData.requiere_reposo ? formData.hora_fin_reposo    : null,
             tiempo_reposo_minutos: formData.requiere_reposo ? tiempoReposo : 0,
             cantidades_divididas,
             observaciones: formData.observaciones,
@@ -170,6 +179,11 @@ export const DivisionMasa: React.FC = () => {
     );
   }
 
+  // ── Verificar si hay productos con ajuste de divisor ──────────
+  const productosConAjuste = productos
+    ? (productos as any[]).filter((p: any) => parseInt(p.unidades_excedente || 0) > 0)
+    : [];
+
   // ── Render ─────────────────────────────────────────────────────
 
   return (
@@ -197,15 +211,61 @@ export const DivisionMasa: React.FC = () => {
           </div>
         </div>
 
+        {/* Alerta de ajuste por divisor — solo si hay productos con excedente */}
+        {productosConAjuste.length > 0 && (
+          <div className="bg-amber-50 border-l-4 border-amber-400 rounded-lg p-4">
+            <div className="flex gap-3">
+              <span className="text-2xl">⚠️</span>
+              <div>
+                <h3 className="font-bold text-amber-800 mb-1">
+                  Ajuste de producción por múltiplo divisor
+                </h3>
+                <p className="text-sm text-amber-700 mb-3">
+                  Los siguientes productos requieren producir más unidades de las pedidas para completar
+                  un ciclo de división exacto en la máquina. El excedente se registrará como inventario adicional.
+                </p>
+                <table className="text-sm w-full">
+                  <thead>
+                    <tr className="text-amber-800 font-semibold">
+                      <th className="text-left pb-1">Producto</th>
+                      <th className="text-right pb-1">Pedidas</th>
+                      <th className="text-right pb-1">Divisor</th>
+                      <th className="text-right pb-1">A producir</th>
+                      <th className="text-right pb-1">Excedente</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {productosConAjuste.map((p: any) => (
+                      <tr key={p.id} className="text-amber-700">
+                        <td className="py-0.5">{p.producto_nombre}</td>
+                        <td className="text-right py-0.5">{p.unidades_pedidas}</td>
+                        <td className="text-right py-0.5">
+                          <span className="px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 font-semibold">
+                            ×{p.multiplo_divisor}
+                          </span>
+                        </td>
+                        <td className="text-right py-0.5 font-bold text-amber-900">
+                          {p.unidades_ajustadas}
+                        </td>
+                        <td className="text-right py-0.5">
+                          <span className="text-orange-600 font-semibold">+{p.unidades_excedente}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Información de la Masa */}
         <Card title="Información de la Masa">
           <div className="grid grid-cols-2 gap-6">
             <div>
               <p className="text-sm text-gray-600">Total con Merma</p>
               <p className="text-2xl font-bold text-gray-900">
-                {typeof masa.total_kilos_con_merma === 'number'
-                  ? masa.total_kilos_con_merma.toFixed(2)
-                  : Number(masa.total_kilos_con_merma).toFixed(2)} kg
+                {Number(masa.total_kilos_con_merma).toFixed(2)} kg
               </p>
             </div>
             <div>
@@ -219,7 +279,6 @@ export const DivisionMasa: React.FC = () => {
         <Card title="Control de División">
           <div className="space-y-6">
 
-            {/* Máquina de corte y temperatura */}
             <div className="grid grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -228,7 +287,7 @@ export const DivisionMasa: React.FC = () => {
                 <select
                   value={formData.maquina_corte_id}
                   onChange={(e) => setFormData({ ...formData, maquina_corte_id: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="1">Conic (Automática, 100 kg)</option>
                   <option value="2">Divisora Manual (50 kg)</option>
@@ -244,7 +303,7 @@ export const DivisionMasa: React.FC = () => {
                   step="0.1"
                   value={formData.temperatura_entrada}
                   onChange={(e) => setFormData({ ...formData, temperatura_entrada: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   placeholder="25.0"
                 />
               </div>
@@ -258,13 +317,12 @@ export const DivisionMasa: React.FC = () => {
                   id="requiere_reposo"
                   checked={formData.requiere_reposo}
                   onChange={(e) => setFormData({ ...formData, requiere_reposo: e.target.checked })}
-                  className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                  className="w-5 h-5 text-blue-600 rounded"
                 />
                 <label htmlFor="requiere_reposo" className="text-sm font-medium text-gray-700">
                   Esta masa requiere reposo pre-división
                 </label>
               </div>
-
               {formData.requiere_reposo && (
                 <div className="grid grid-cols-2 gap-6">
                   <div>
@@ -275,7 +333,7 @@ export const DivisionMasa: React.FC = () => {
                       type="datetime-local"
                       value={formData.hora_inicio_reposo}
                       onChange={(e) => setFormData({ ...formData, hora_inicio_reposo: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
                   <div>
@@ -286,7 +344,7 @@ export const DivisionMasa: React.FC = () => {
                       type="datetime-local"
                       value={formData.hora_fin_reposo}
                       onChange={(e) => setFormData({ ...formData, hora_fin_reposo: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
                   {formData.hora_inicio_reposo && formData.hora_fin_reposo && (
@@ -310,7 +368,7 @@ export const DivisionMasa: React.FC = () => {
                 value={formData.observaciones}
                 onChange={(e) => setFormData({ ...formData, observaciones: e.target.value })}
                 rows={3}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 placeholder="Observaciones opcionales..."
               />
             </div>
@@ -320,62 +378,67 @@ export const DivisionMasa: React.FC = () => {
         {/* Cantidades divididas por producto */}
         <Card title="Cantidades a Cortar por Producto">
           <div className="space-y-4">
-            {productos && productos.length > 0 ? (
+            {productos && (productos as any[]).length > 0 ? (
               <>
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                          Producto
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                          Presentación
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                          Debe cortar
-                        </th>
-                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
-                          Divisor
-                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Pedidas</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">A cortar</th>
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Divisor</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Excedente</th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
                           Unidades cortadas <span className="text-red-500">*</span>
                         </th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {(productos as any[]).map((producto) => {
-                        const cantidad  = cantidadesDivididas[producto.id] || 0;
-                        const error     = cantidad > 0 ? validarCantidad(producto, cantidad) : null;
-                        const divisor   = parseInt(producto.multiplo_divisor || 0);
-                        const requerido = parseInt(producto.unidades_programadas);
-                        const esCorrecto = cantidad > 0 && !error;
+                      {(productos as any[]).map((producto: any) => {
+                        const cantidad        = cantidadesDivididas[producto.id] || 0;
+                        const error           = cantidad > 0 ? validarCantidad(producto, cantidad) : null;
+                        const divisor         = parseInt(producto.multiplo_divisor || 0);
+                        const minimoRequerido = getMinimoRequerido(producto);
+                        const excedente       = parseInt(producto.unidades_excedente || 0);
+                        const esCorrecto      = cantidad > 0 && !error;
 
                         return (
                           <tr key={producto.id} className="hover:bg-gray-50">
-                            {/* Nombre */}
                             <td className="px-4 py-3 text-sm font-medium text-gray-900">
                               {producto.producto_nombre}
+                              {producto.presentacion && (
+                                <span className="ml-1 text-xs text-gray-500">{producto.presentacion}</span>
+                              )}
                             </td>
 
-                            {/* Presentación */}
-                            <td className="px-4 py-3 text-sm text-gray-600">
-                              {producto.presentacion}
+                            {/* Pedidas (original SAP) */}
+                            <td className="px-4 py-3 text-sm text-gray-600 text-right">
+                              {producto.unidades_pedidas}
                             </td>
 
-                            {/* Debe cortar — destacado en azul */}
+                            {/* A cortar = unidades_ajustadas */}
                             <td className="px-4 py-3 text-right">
-                              <span className="text-base font-bold text-blue-700">
-                                {requerido}
+                              <span className={`text-base font-bold ${excedente > 0 ? 'text-orange-600' : 'text-blue-700'}`}>
+                                {minimoRequerido}
                               </span>
                             </td>
 
-                            {/* Divisor — badge naranja si aplica */}
+                            {/* Divisor badge */}
                             <td className="px-4 py-3 text-center">
                               {divisor > 0 ? (
                                 <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-orange-100 text-orange-800">
                                   ×{divisor}
                                 </span>
+                              ) : (
+                                <span className="text-gray-300 text-xs">—</span>
+                              )}
+                            </td>
+
+                            {/* Excedente planificado */}
+                            <td className="px-4 py-3 text-right">
+                              {excedente > 0 ? (
+                                <span className="text-xs font-semibold text-orange-600">+{excedente}</span>
                               ) : (
                                 <span className="text-gray-300 text-xs">—</span>
                               )}
@@ -396,12 +459,10 @@ export const DivisionMasa: React.FC = () => {
                                       ? 'border-green-400 bg-green-50'
                                       : 'border-gray-300'
                                   }`}
-                                  placeholder={String(requerido)}
+                                  placeholder={String(minimoRequerido)}
                                 />
                                 {error && (
-                                  <p className="text-xs text-red-600 text-right max-w-xs">
-                                    {error}
-                                  </p>
+                                  <p className="text-xs text-red-600 text-right max-w-xs">{error}</p>
                                 )}
                               </div>
                             </td>
@@ -415,11 +476,10 @@ export const DivisionMasa: React.FC = () => {
                 {/* Nota informativa */}
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <p className="text-sm text-blue-800">
-                    <strong>Importante:</strong> La columna <span className="font-semibold">"Debe cortar"</span> indica
-                    la cantidad mínima requerida para cada producto. Los productos con divisor (
+                    <strong>Importante:</strong> La columna <span className="font-semibold">"A cortar"</span> indica
+                    la cantidad mínima requerida (ajustada al múltiplo divisor si aplica). Los productos con divisor (
                     <span className="inline-flex items-center px-1 py-0.5 rounded text-xs font-semibold bg-orange-100 text-orange-800">×N</span>
                     ) deben cortarse en múltiplos exactos de ese número.
-                    No se puede completar la división si alguna cantidad es menor a la requerida.
                   </p>
                 </div>
               </>
@@ -437,7 +497,7 @@ export const DivisionMasa: React.FC = () => {
             <p>3. Seleccionar la máquina de corte adecuada (Conic para grandes volúmenes)</p>
             <p>4. Medir y registrar la temperatura de entrada de la masa</p>
             <p>5. Cortar la masa en las porciones según el gramaje de cada producto</p>
-            <p>6. Registrar las unidades cortadas — deben ser <strong>iguales o mayores</strong> a la cantidad indicada en "Debe cortar"</p>
+            <p>6. Registrar las unidades cortadas — deben ser <strong>iguales o mayores</strong> a la cantidad indicada en "A cortar"</p>
             <p>7. Verificar que las piezas tengan un peso uniforme</p>
           </div>
         </Card>
