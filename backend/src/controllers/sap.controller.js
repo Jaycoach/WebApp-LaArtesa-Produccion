@@ -826,34 +826,61 @@ const sincronizarDesdeOV = async (req, res, next) => {
 
       // Insertar productos; ON CONFLICT acumula si el mismo ItemCode aparece en varias OV
       for (const prod of grupo.productos) {
+        const unidadesPedidas = prod.unidadesPedidas || prod.cantidadPaquetes || 0;
+        const multiploDivisor = prod.multiploDivisor || 0;
+
+        // Calcular múltiplo superior: si pedidas no es múltiplo exacto del divisor,
+        // redondear hacia arriba al siguiente múltiplo.
+        // Ej: pedidas=5, divisor=10 → ajustadas=10, excedente=5
+        // Ej: pedidas=20, divisor=20 → ajustadas=20, excedente=0
+        // Ej: pedidas=7, divisor=5  → ajustadas=10, excedente=3
+        const unidadesAjustadas = (multiploDivisor > 0 && unidadesPedidas % multiploDivisor !== 0)
+          ? (Math.floor(unidadesPedidas / multiploDivisor) + 1) * multiploDivisor
+          : unidadesPedidas;
+        const unidadesExcedente = unidadesAjustadas - unidadesPedidas;
+
         await client.query(
           `INSERT INTO productos_por_masa (
              masa_id, producto_codigo, producto_nombre, presentacion,
              gramaje_unitario,
              unidades_pedidas, unidades_programadas, kilos_pedidos, kilos_programados,
              sap_item_code, unidades_por_paquete, cantidad_paquetes, sap_doc_entry, sap_doc_num,
-             multiplo_divisor
-           ) VALUES ($1, $2, $3, 'Por definir', $4, $5, $5, $6, $6, $7, $8, $9, $10, $11, $12)
+             multiplo_divisor, unidades_ajustadas, unidades_excedente
+           ) VALUES ($1, $2, $3, 'Por definir', $4, $5, $5, $6, $6, $7, $8, $9, $10, $11, $12, $13, $14)
            ON CONFLICT (masa_id, sap_item_code) DO UPDATE SET
              unidades_pedidas     = productos_por_masa.unidades_pedidas     + EXCLUDED.unidades_pedidas,
              unidades_programadas = productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas,
              cantidad_paquetes    = productos_por_masa.cantidad_paquetes    + EXCLUDED.cantidad_paquetes,
              kilos_pedidos        = productos_por_masa.kilos_pedidos        + EXCLUDED.kilos_pedidos,
              kilos_programados    = productos_por_masa.kilos_programados    + EXCLUDED.kilos_programados,
-             multiplo_divisor     = EXCLUDED.multiplo_divisor`,
+             multiplo_divisor     = EXCLUDED.multiplo_divisor,
+             unidades_ajustadas   = CASE
+               WHEN EXCLUDED.multiplo_divisor > 0 AND
+                    (productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas) % EXCLUDED.multiplo_divisor != 0
+               THEN (FLOOR((productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas)::float / EXCLUDED.multiplo_divisor) + 1) * EXCLUDED.multiplo_divisor
+               ELSE (productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas)
+             END,
+             unidades_excedente   = CASE
+               WHEN EXCLUDED.multiplo_divisor > 0 AND
+                    (productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas) % EXCLUDED.multiplo_divisor != 0
+               THEN ((FLOOR((productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas)::float / EXCLUDED.multiplo_divisor) + 1) * EXCLUDED.multiplo_divisor) - (productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas)
+               ELSE 0
+             END`,
           [
             masaId,
-            prod.itemCode,          // $2 producto_codigo
-            prod.descripcion,       // $3 producto_nombre
-            kiloPorItemCode[prod.itemCode] * 1000,  // $4 gramaje_unitario (en gramos)
-            prod.unidadesPedidas,                    // $5 unidades_pedidas / unidades_programadas
+            prod.itemCode,                                          // $2 producto_codigo
+            prod.descripcion,                                       // $3 producto_nombre
+            kiloPorItemCode[prod.itemCode] * 1000,                  // $4 gramaje_unitario (en gramos)
+            prod.unidadesPedidas,                                   // $5 unidades_pedidas / unidades_programadas
             kiloPorItemCode[prod.itemCode] * prod.cantidadPaquetes, // $6 kilos_pedidos / kilos_programados
-            prod.itemCode,          // $7 sap_item_code
-            prod.unidadesPorPaquete, // $8
-            prod.cantidadPaquetes,  // $9
-            prod.docEntry,          // $10
-            String(prod.docNum),    // $11
-            prod.multiploDivisor || 0, // $12
+            prod.itemCode,                                          // $7 sap_item_code
+            prod.unidadesPorPaquete,                                // $8
+            prod.cantidadPaquetes,                                  // $9
+            prod.docEntry,                                          // $10
+            String(prod.docNum),                                    // $11
+            multiploDivisor,                                        // $12
+            unidadesAjustadas,                                      // $13
+            unidadesExcedente,                                      // $14
           ]
         );
       }

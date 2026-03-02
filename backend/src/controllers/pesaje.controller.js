@@ -49,17 +49,40 @@ const getChecklist = async (req, res, next) => {
       ? Math.round(((disponibles + verificados + pesados) / (total * 3)) * 100)
       : 0;
 
+    // Consultar productos con excedente por ajuste de divisor
+    const productosAjusteResult = await db.query(
+      `SELECT
+         sap_item_code,
+         producto_nombre,
+         unidades_pedidas,
+         unidades_programadas,
+         unidades_ajustadas,
+         unidades_excedente,
+         multiplo_divisor
+       FROM productos_por_masa
+       WHERE masa_id = $1
+         AND multiplo_divisor > 0
+         AND unidades_excedente > 0
+       ORDER BY producto_nombre`,
+      [masaId]
+    );
+
+    const productosConAjuste = productosAjusteResult.rows;
+    const hayAjustesDiv      = productosConAjuste.length > 0;
+
     const checklist = {
-      masa_id:             masa.id,
-      tipo_masa:           masa.tipo_masa,
-      fecha_inicio:        fasePesaje?.fecha_inicio,
-      usuario_responsable: fasePesaje?.usuario_responsable,
+      masa_id:              masa.id,
+      tipo_masa:            masa.tipo_masa,
+      fecha_inicio:         fasePesaje?.fecha_inicio,
+      usuario_responsable:  fasePesaje?.usuario_responsable,
       ingredientes,
       todosDisponibles,
       todosVerificados,
       todosPesados,
       completado,
       progreso,
+      productos_con_ajuste: productosConAjuste,
+      hay_ajustes_divisor:  hayAjustesDiv,
     };
 
     res.json({ success: true, data: checklist });

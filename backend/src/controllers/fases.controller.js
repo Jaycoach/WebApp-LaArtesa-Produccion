@@ -781,10 +781,12 @@ const completarFase = async (req, res, next) => {
     if (fase.toUpperCase() === 'DIVISION') {
       const { cantidades_divididas, ...restosDatos } = datos.datos || datos;
 
-      // 1. Obtener productos de la masa con su multiplo_divisor
+      // 1. Obtener productos de la masa con ajuste de múltiplo
       const productosResult = await db.query(
         `SELECT id, producto_nombre, presentacion,
-                unidades_programadas, multiplo_divisor
+                unidades_pedidas, unidades_programadas,
+                unidades_ajustadas, unidades_excedente,
+                multiplo_divisor
          FROM productos_por_masa
          WHERE masa_id = $1
          ORDER BY producto_nombre`,
@@ -803,15 +805,16 @@ const completarFase = async (req, res, next) => {
         const errores = [];
 
         for (const prod of productosResult.rows) {
-          const cantidad = Number(cantidades_divididas[prod.id] || 0);
-          const requerido = parseInt(prod.unidades_programadas);
+          const cantidad  = Number(cantidades_divididas[prod.id] || 0);
           const divisor   = parseInt(prod.multiplo_divisor || 0);
+          // Validar contra unidades_ajustadas (que ya es el múltiplo correcto)
+          const requerido = parseInt(prod.unidades_ajustadas || prod.unidades_programadas);
+          const nombre    = `${prod.producto_nombre}${prod.presentacion ? ' ' + prod.presentacion : ''}`;
 
-          // Validar cantidad mínima (debe ser >= unidades_programadas)
+          // Validar cantidad mínima (debe ser >= unidades_ajustadas)
           if (cantidad < requerido) {
             errores.push(
-              `"${prod.producto_nombre}${prod.presentacion ? ' ' + prod.presentacion : ''}": ` +
-              `debe cortar mínimo ${requerido} unidades (ingresó ${cantidad}).`
+              `"${nombre}": debe cortar mínimo ${requerido} unidades (ingresó ${cantidad}).`
             );
             continue;
           }
@@ -821,8 +824,7 @@ const completarFase = async (req, res, next) => {
             const inferior = Math.floor(cantidad / divisor) * divisor;
             const superior = inferior + divisor;
             errores.push(
-              `"${prod.producto_nombre}${prod.presentacion ? ' ' + prod.presentacion : ''}": ` +
-              `${cantidad} no es múltiplo de ${divisor}. ` +
+              `"${nombre}": ${cantidad} no es múltiplo de ${divisor}. ` +
               `Valores válidos cercanos: ${inferior} o ${superior}.`
             );
           }
@@ -837,16 +839,19 @@ const completarFase = async (req, res, next) => {
         }
 
         // 3. Guardar cantidades_divididas en productos_por_masa
+        //    unidades_excedente_real = cantidad - unidades_pedidas (excedente real cortado)
         for (const prod of productosResult.rows) {
           const cantidad = Number(cantidades_divididas[prod.id] || 0);
           if (cantidad > 0) {
+            const excedenteReal = Math.max(0, cantidad - parseInt(prod.unidades_pedidas));
             await db.query(
               `UPDATE productos_por_masa
-               SET cantidad_divisiones = $1,
-                   division_completada = TRUE,
-                   updated_at          = NOW()
-               WHERE id = $2`,
-              [cantidad, prod.id]
+               SET cantidad_divisiones  = $1,
+                   division_completada  = TRUE,
+                   unidades_excedente   = $2,
+                   updated_at           = NOW()
+               WHERE id = $3`,
+              [cantidad, excedenteReal, prod.id]
             );
           }
         }
