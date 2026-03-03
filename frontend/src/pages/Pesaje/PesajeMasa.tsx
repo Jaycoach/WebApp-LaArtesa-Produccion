@@ -8,7 +8,7 @@ export const PesajeMasa: React.FC = () => {
   const navigate = useNavigate();
   const masaIdNum = Number(masaId);
 
-  const { data: checklist, isLoading } = useChecklist(masaIdNum);
+  const { data: checklist, isLoading, error } = useChecklist(masaIdNum);
   const updateMutation = useUpdateIngrediente();
   const confirmarMutation = useConfirmarPesaje();
 
@@ -114,10 +114,40 @@ export const PesajeMasa: React.FC = () => {
   }
 
   if (!checklist) {
+    const apiError = error as any;
+    const status = apiError?.response?.status || apiError?.status;
+    const mensaje = apiError?.response?.data?.message || apiError?.message;
+
+    if (status === 403) {
+      return (
+        <div className="p-6 max-w-lg mx-auto mt-12">
+          <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-6 text-center">
+            <div className="text-4xl mb-3">⏸</div>
+            <h2 className="text-lg font-bold text-yellow-800 mb-2">Masa no aprobada</h2>
+            <p className="text-yellow-700 text-sm mb-4">
+              {mensaje || 'Un supervisor o administrador debe aprobar esta masa antes de iniciar el pesaje.'}
+            </p>
+            <button
+              onClick={() => navigate('/planificacion/masas')}
+              className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg text-sm font-medium"
+            >
+              ← Volver a la lista
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="p-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-          <p className="text-red-800">Checklist no disponible</p>
+          <p className="text-red-800">{mensaje || 'Checklist no disponible'}</p>
+          <button
+            onClick={() => navigate(-1)}
+            className="mt-3 px-4 py-2 bg-red-100 hover:bg-red-200 text-red-800 rounded-lg text-sm"
+          >
+            ← Volver
+          </button>
         </div>
       </div>
     );
