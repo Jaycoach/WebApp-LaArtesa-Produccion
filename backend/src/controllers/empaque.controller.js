@@ -88,13 +88,13 @@ exports.getEmpaqueInfo = async (req, res) => {
         WHERE empaque_id = $1
       `;
       const detallesResult = await db.query(detallesQuery, [registroEmpaque.id]);
-      detallesResult.rows.forEach((d: any) => {
+      detallesResult.rows.forEach((d) => {
         detallesMap[d.producto_masa_id] = d;
       });
     }
 
     // Combinar productos con sus detalles de empaque
-    const productos = productosResult.rows.map((p: any) => ({
+    const productos = productosResult.rows.map((p) => ({
       ...p,
       unidades_empacadas: detallesMap[p.id]?.unidades_empacadas ?? null,
       unidades_merma: detallesMap[p.id]?.unidades_merma ?? null,
