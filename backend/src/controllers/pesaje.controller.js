@@ -73,6 +73,7 @@ const getChecklist = async (req, res, next) => {
     const checklist = {
       masa_id:              masa.id,
       tipo_masa:            masa.tipo_masa,
+      es_repeticion:        masa.es_repeticion ?? false,
       fecha_inicio:         fasePesaje?.fecha_inicio,
       usuario_responsable:  fasePesaje?.usuario_responsable,
       ingredientes,

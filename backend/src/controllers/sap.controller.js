@@ -787,14 +787,15 @@ const sincronizarDesdeOV = async (req, res, next) => {
       const porcentajeMerma = 5.0;
 
       const docEntriesUnicos = [...new Set(grupo.productos.map(p => p.docEntry))];
+      const esRepeticion = grupo.productos.some(p => p.series === 89);
 
       const masaResult = await client.query(
         `INSERT INTO masas_produccion (
            codigo_masa, tipo_masa, nombre_masa, fecha_produccion,
            total_kilos_base, total_kilos_con_merma, porcentaje_merma, factor_absorcion_usado,
            estado, fase_actual,
-           fecha_sap_referencia, total_ordenes, total_productos
-         ) VALUES ($1, $2, $3, $4, 0, 0, $5, $6, 'PLANIFICACION', 'PLANIFICACION', $7, $8, $9)
+           fecha_sap_referencia, total_ordenes, total_productos, es_repeticion
+         ) VALUES ($1, $2, $3, $4, 0, 0, $5, $6, 'PLANIFICACION', 'PLANIFICACION', $7, $8, $9, $10)
          RETURNING id, uuid`,
         [
           codigoMasa,
@@ -805,7 +806,8 @@ const sincronizarDesdeOV = async (req, res, next) => {
           factorAbsorcion,
           fechaProduccion,
           docEntriesUnicos.length,
-          grupo.productos.length
+          grupo.productos.length,
+          esRepeticion
         ]
       );
 
