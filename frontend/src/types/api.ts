@@ -48,6 +48,8 @@ export interface MasaProduccionResumen {
   total_productos: number;
   total_unidades_pedidas: number;
   total_unidades_programadas: number;
+  es_repeticion: boolean;
+  lote_produccion?: string;
 }
 
 // Masa de producción (detalle completo)
