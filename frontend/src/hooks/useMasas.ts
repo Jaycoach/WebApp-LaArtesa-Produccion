@@ -150,3 +150,30 @@ export const useMasasHoy = () => {
   const hoy = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
   return useMasasByFecha(hoy);
 };
+
+/**
+ * Hook para aprobar una masa (ADMIN/SUPERVISOR)
+ */
+export const useAprobarMasa = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (masaId: number) => masasService.aprobarMasa(masaId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: MASAS_QUERY_KEYS.all });
+    },
+  });
+};
+
+/**
+ * Hook para marcar una masa como pendiente (ADMIN/SUPERVISOR)
+ */
+export const useMarcarPendiente = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ masaId, motivo }: { masaId: number; motivo?: string }) =>
+      masasService.marcarPendiente(masaId, motivo),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: MASAS_QUERY_KEYS.all });
+    },
+  });
+};

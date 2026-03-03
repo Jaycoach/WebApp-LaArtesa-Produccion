@@ -88,11 +88,27 @@ export const masasService = {
     const data: UpdateUnidadesProgramadasRequest = {
       unidades_programadas: unidades,
     };
-    
+
     const response = await apiService.patch<ProductoMasa>(
       API_CONFIG.ENDPOINTS.MASAS.UPDATE_PRODUCTO(masaId, productoId),
       data
     );
+    return response.data!;
+  },
+
+  /**
+   * Aprobar una masa (ADMIN/SUPERVISOR)
+   */
+  aprobarMasa: async (masaId: number): Promise<any> => {
+    const response = await apiService.patch<any>(`/masas/${masaId}/aprobar`);
+    return response.data!;
+  },
+
+  /**
+   * Marcar una masa como pendiente (ADMIN/SUPERVISOR)
+   */
+  marcarPendiente: async (masaId: number, motivo?: string): Promise<any> => {
+    const response = await apiService.patch<any>(`/masas/${masaId}/pendiente`, { motivo });
     return response.data!;
   },
 };

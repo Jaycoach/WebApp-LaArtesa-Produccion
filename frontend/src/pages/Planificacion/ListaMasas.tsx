@@ -2,7 +2,14 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useMasasByFecha, useSincronizarSAP, useSincronizarBOM } from '../../hooks/useMasas';
+import {
+  useMasasByFecha,
+  useSincronizarSAP,
+  useSincronizarBOM,
+  useAprobarMasa,
+  useMarcarPendiente,
+} from '../../hooks/useMasas';
+import { useAuthStore } from '@/store';
 import { MasaProduccionResumen } from '../../types/api';
 
 /**
@@ -10,18 +17,21 @@ import { MasaProduccionResumen } from '../../types/api';
  */
 export const ListaMasas: React.FC = () => {
   const navigate = useNavigate();
-  const [fecha, setFecha] = useState<string>(
-    new Date().toISOString().split('T')[0] // Fecha actual YYYY-MM-DD
-  );
+  const { user } = useAuthStore();
+  const esSupervisor = user?.rol === 'admin' || user?.rol === 'supervisor';
 
-  // Queries
+  const [fecha, setFecha] = useState<string>(
+    new Date().toISOString().split('T')[0]
+  );
+  const [motivoPendiente, setMotivoPendiente] = useState('');
+  const [masaPendienteId, setMasaPendienteId] = useState<number | null>(null);
+
   const { data: masas, isLoading, error, refetch } = useMasasByFecha(fecha);
   const sincronizarMutation = useSincronizarSAP();
   const sincronizarBOMMutation = useSincronizarBOM();
+  const aprobarMutation = useAprobarMasa();
+  const pendienteMutation = useMarcarPendiente();
 
-  /**
-   * Sincronizar con SAP
-   */
   const handleSincronizar = async () => {
     try {
       await sincronizarMutation.mutateAsync({ fecha });
@@ -31,9 +41,6 @@ export const ListaMasas: React.FC = () => {
     }
   };
 
-  /**
-   * Sincronizar BOM desde SAP
-   */
   const handleSincronizarBOM = async () => {
     try {
       await sincronizarBOMMutation.mutateAsync();
@@ -42,47 +49,80 @@ export const ListaMasas: React.FC = () => {
     }
   };
 
-  /**
-   * Ver detalle de una masa
-   */
   const handleVerDetalle = (masaId: number) => {
     navigate(`/planificacion/masas/${masaId}`);
   };
 
-  /**
-   * Obtener color según estado de la masa
-   */
-  const getEstadoColor = (estado: string): string => {
-    const colors: Record<string, string> = {
-      PLANIFICACION: 'bg-yellow-100 text-yellow-800',
-      PESAJE: 'bg-blue-100 text-blue-800',
-      AMASADO: 'bg-indigo-100 text-indigo-800',
-      DIVISION: 'bg-purple-100 text-purple-800',
-      FORMADO: 'bg-pink-100 text-pink-800',
-      FERMENTACION: 'bg-orange-100 text-orange-800',
-      HORNEADO: 'bg-red-100 text-red-800',
-      COMPLETADO: 'bg-green-100 text-green-800',
+  const handleAprobar = async (e: React.MouseEvent, masaId: number) => {
+    e.stopPropagation();
+    try {
+      await aprobarMutation.mutateAsync(masaId);
+    } catch (error) {
+      console.error('Error aprobando masa:', error);
+    }
+  };
+
+  const handleAbrirPendiente = (e: React.MouseEvent, masaId: number) => {
+    e.stopPropagation();
+    setMasaPendienteId(masaId);
+    setMotivoPendiente('');
+  };
+
+  const handleConfirmarPendiente = async () => {
+    if (!masaPendienteId) return;
+    try {
+      await pendienteMutation.mutateAsync({ masaId: masaPendienteId, motivo: motivoPendiente });
+      setMasaPendienteId(null);
+    } catch (error) {
+      console.error('Error marcando pendiente:', error);
+    }
+  };
+
+  const getEstadoBadge = (estado: string) => {
+    const badges: Record<string, string> = {
+      PLANIFICACION: 'bg-gray-100 text-gray-700',
+      APROBADA:      'bg-green-100 text-green-800',
+      PENDIENTE:     'bg-yellow-100 text-yellow-800',
+      PESAJE:        'bg-blue-100 text-blue-800',
+      AMASADO:       'bg-indigo-100 text-indigo-800',
+      DIVISION:      'bg-purple-100 text-purple-800',
+      FORMADO:       'bg-pink-100 text-pink-800',
+      FERMENTACION:  'bg-orange-100 text-orange-800',
+      HORNEADO:      'bg-red-100 text-red-800',
+      COMPLETADO:    'bg-green-100 text-green-800',
     };
-    return colors[estado] || 'bg-gray-100 text-gray-800';
+    return badges[estado] || 'bg-gray-100 text-gray-800';
+  };
+
+  const getEstadoLabel = (estado: string) => {
+    const labels: Record<string, string> = {
+      PLANIFICACION: 'Planificación',
+      APROBADA:      'Aprobada',
+      PENDIENTE:     'Pendiente',
+      PESAJE:        'Pesaje',
+      AMASADO:       'Amasado',
+      DIVISION:      'División',
+      FORMADO:       'Formado',
+      FERMENTACION:  'Fermentación',
+      HORNEADO:      'Horneado',
+      COMPLETADO:    'Completado',
+    };
+    return labels[estado] || estado;
   };
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
+
         {/* Header */}
         <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
           <div className="flex justify-between items-center">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">
-                Masas de Producción
-              </h1>
-              <p className="text-gray-600 mt-1">
-                Gestiona las masas programadas para el día
-              </p>
+              <h1 className="text-3xl font-bold text-gray-900">Masas de Producción</h1>
+              <p className="text-gray-600 mt-1">Gestiona las masas programadas para el día</p>
             </div>
-            
+
             <div className="flex gap-3 items-center">
-              {/* Selector de fecha */}
               <input
                 type="date"
                 value={fecha}
@@ -140,7 +180,7 @@ export const ListaMasas: React.FC = () => {
               </button>
             </div>
           </div>
-          
+
           {/* Mensajes de sincronización OV */}
           {sincronizarMutation.isSuccess && (
             <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
@@ -227,24 +267,33 @@ export const ListaMasas: React.FC = () => {
             {masas.map((masa: MasaProduccionResumen) => (
               <div
                 key={masa.id}
-                className="bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+                className={`bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer border-l-4 ${
+                  masa.es_repeticion
+                    ? 'border-red-500'
+                    : masa.estado === 'APROBADA'
+                    ? 'border-green-500'
+                    : masa.estado === 'PENDIENTE'
+                    ? 'border-yellow-500'
+                    : 'border-transparent'
+                }`}
                 onClick={() => handleVerDetalle(masa.id)}
               >
                 <div className="p-6">
                   {/* Header de la card */}
                   <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <h3 className="text-xl font-bold text-gray-900">
-                        {masa.tipo_masa}
-                      </h3>
-                      <p className="text-sm text-gray-500">{masa.nombre_masa}</p>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-xl font-bold text-gray-900">{masa.tipo_masa}</h3>
+                        {masa.es_repeticion && (
+                          <span className="text-xs font-bold bg-red-100 text-red-700 border border-red-400 rounded px-2 py-0.5">
+                            REPETICIÓN
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-500 truncate">{masa.nombre_masa}</p>
                     </div>
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs font-medium ${getEstadoColor(
-                        masa.estado
-                      )}`}
-                    >
-                      {masa.fase_actual}
+                    <span className={`ml-2 shrink-0 px-3 py-1 rounded-full text-xs font-medium ${getEstadoBadge(masa.estado)}`}>
+                      {getEstadoLabel(masa.estado)}
                     </span>
                   </div>
 
@@ -265,29 +314,47 @@ export const ListaMasas: React.FC = () => {
                   </div>
 
                   {/* Estadísticas */}
-                  <div className="grid grid-cols-3 gap-4 pt-4 border-t border-gray-200">
+                  <div className="grid grid-cols-3 gap-4 pt-4 border-t border-gray-200 mb-4">
                     <div className="text-center">
-                      <p className="text-2xl font-bold text-gray-900">
-                        {masa.total_ordenes}
-                      </p>
+                      <p className="text-2xl font-bold text-gray-900">{masa.total_ordenes}</p>
                       <p className="text-xs text-gray-500">Órdenes</p>
                     </div>
                     <div className="text-center">
-                      <p className="text-2xl font-bold text-gray-900">
-                        {masa.total_productos}
-                      </p>
+                      <p className="text-2xl font-bold text-gray-900">{masa.total_productos}</p>
                       <p className="text-xs text-gray-500">Productos</p>
                     </div>
                     <div className="text-center">
-                      <p className="text-2xl font-bold text-gray-900">
-                        {masa.total_unidades_programadas}
-                      </p>
+                      <p className="text-2xl font-bold text-gray-900">{masa.total_unidades_programadas}</p>
                       <p className="text-xs text-gray-500">Unidades</p>
                     </div>
                   </div>
 
+                  {/* Botones acción SUPERVISOR/ADMIN */}
+                  {esSupervisor && (masa.estado === 'PLANIFICACION' || masa.estado === 'PENDIENTE' || masa.estado === 'APROBADA') && (
+                    <div className="flex gap-2 mb-3" onClick={(e) => e.stopPropagation()}>
+                      {(masa.estado === 'PLANIFICACION' || masa.estado === 'PENDIENTE') && (
+                        <button
+                          onClick={(e) => handleAprobar(e, masa.id)}
+                          disabled={aprobarMutation.isPending}
+                          className="flex-1 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg disabled:opacity-50 transition-colors"
+                        >
+                          {aprobarMutation.isPending ? '...' : '✓ Aprobar'}
+                        </button>
+                      )}
+                      {(masa.estado === 'PLANIFICACION' || masa.estado === 'APROBADA') && (
+                        <button
+                          onClick={(e) => handleAbrirPendiente(e, masa.id)}
+                          disabled={pendienteMutation.isPending}
+                          className="flex-1 px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-white text-sm font-medium rounded-lg disabled:opacity-50 transition-colors"
+                        >
+                          ⏸ Pendiente
+                        </button>
+                      )}
+                    </div>
+                  )}
+
                   {/* Botón de acción */}
-                  <button className="w-full mt-4 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg transition-colors">
+                  <button className="w-full px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg transition-colors text-sm">
                     Ver detalle →
                   </button>
                 </div>
@@ -296,6 +363,40 @@ export const ListaMasas: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Modal motivo pendiente */}
+      {masaPendienteId !== null && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Marcar como Pendiente</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              La masa quedará bloqueada. Opcionalmente indica el motivo.
+            </p>
+            <textarea
+              value={motivoPendiente}
+              onChange={(e) => setMotivoPendiente(e.target.value)}
+              placeholder="Motivo (opcional)..."
+              rows={3}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 text-sm resize-none"
+            />
+            <div className="flex gap-3 mt-4">
+              <button
+                onClick={() => setMasaPendienteId(null)}
+                className="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmarPendiente}
+                disabled={pendienteMutation.isPending}
+                className="flex-1 px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+              >
+                {pendienteMutation.isPending ? 'Guardando...' : 'Confirmar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
