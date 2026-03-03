@@ -97,4 +97,18 @@ router.post('/sincronizar-tipos-masa', checkRole(['admin', 'supervisor']), sapCo
  */
 router.post('/sincronizar-bom', checkRole(['admin', 'supervisor']), sincronizarBOM);
 
+/**
+ * @route   POST /api/sap/sincronizar-inventario-mp
+ * @desc    Sincronizar stock de materia prima desde SAP (bodega ALMP)
+ * @access  Private (Admin/Supervisor only)
+ */
+router.post('/sincronizar-inventario-mp', checkRole(['admin', 'supervisor']), sapController.sincronizarInventarioMP);
+
+/**
+ * @route   GET /api/sap/inventario-mp
+ * @desc    Obtener inventario de materia prima cacheado
+ * @access  Private
+ */
+router.get('/inventario-mp', sapController.getInventarioMP);
+
 module.exports = router;

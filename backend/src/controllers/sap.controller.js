@@ -1266,6 +1266,80 @@ const sincronizarBOM = async (req, res, next) => {
   }
 };
 
+const sincronizarInventarioMP = async (req, res, next) => {
+  try {
+    const itemsResult = await db.query(
+      `SELECT DISTINCT item_code_comp AS item_code
+       FROM sap_bom_componentes
+       WHERE grupo_sap = 181 AND es_empaque = false`
+    );
+
+    const itemCodes = itemsResult.rows.map(r => r.item_code);
+
+    if (itemCodes.length === 0) {
+      return res.json({
+        success: true,
+        message: 'No hay ítems de materia prima en BOM',
+        data: { sincronizados: 0 },
+      });
+    }
+
+    const stocks = await sapService.getStockMateriaPrima(itemCodes);
+    let sincronizados = 0;
+
+    for (const [itemCode, datos] of Object.entries(stocks)) {
+      if (!datos) continue;
+
+      await db.query(
+        `INSERT INTO sap_inventario_mp
+           (item_code, item_name, uom, stock_almp, committed_almp, ordered_almp, costo_promedio, ultimo_sync)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+         ON CONFLICT (item_code) DO UPDATE SET
+           item_name      = EXCLUDED.item_name,
+           uom            = EXCLUDED.uom,
+           stock_almp     = EXCLUDED.stock_almp,
+           committed_almp = EXCLUDED.committed_almp,
+           ordered_almp   = EXCLUDED.ordered_almp,
+           costo_promedio = EXCLUDED.costo_promedio,
+           ultimo_sync    = NOW()`,
+        [itemCode, datos.itemName, datos.uom, datos.stockAlmp,
+         datos.committedAlmp, datos.orderedAlmp, datos.costoPromedio]
+      );
+      sincronizados++;
+    }
+
+    logger.info(`Inventario MP sincronizado: ${sincronizados} ítems`);
+
+    return res.json({
+      success: true,
+      message: `Inventario sincronizado: ${sincronizados} materias primas`,
+      data: { sincronizados },
+    });
+  } catch (error) {
+    logger.error('Error sincronizando inventario MP:', error);
+    next(error);
+  }
+};
+
+const getInventarioMP = async (req, res, next) => {
+  try {
+    const result = await db.query(
+      `SELECT item_code, item_name, uom, stock_almp, committed_almp,
+              ordered_almp, costo_promedio, ultimo_sync
+       FROM sap_inventario_mp
+       ORDER BY item_name`
+    );
+
+    return res.json({
+      success: true,
+      data: result.rows,
+    });
+  } catch (error) {
+    logger.error('Error obteniendo inventario MP:', error);
+    next(error);
+  }
+};
+
 module.exports = {
   sincronizarSAP,
   sincronizarDemo,
@@ -1277,4 +1351,6 @@ module.exports = {
   verificarStock,
   getHistorialSync,
   testConexionSAP,
+  sincronizarInventarioMP,
+  getInventarioMP,
 };

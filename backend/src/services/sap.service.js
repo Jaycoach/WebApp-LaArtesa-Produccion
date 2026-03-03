@@ -636,6 +636,42 @@ class SAPService {
       throw new Error(`Error al consultar stock en SAP: ${error.message}`);
     }
   }
+
+  async getStockMateriaPrima(itemCodes) {
+    await this.ensureSession();
+
+    if (!itemCodes || itemCodes.length === 0) return {};
+
+    const resultado = {};
+
+    for (const itemCode of itemCodes) {
+      try {
+        const response = await this.client.get(
+          `/Items('${itemCode}')?$select=ItemCode,ItemName,MovingAveragePrice,InventoryUOM,ItemWarehouseInfoCollection`
+        );
+
+        const item       = response.data;
+        const bodegaAlmp = (item.ItemWarehouseInfoCollection || [])
+          .find(b => b.WarehouseCode === 'ALMP');
+
+        resultado[itemCode] = {
+          itemCode:       item.ItemCode,
+          itemName:       item.ItemName,
+          uom:            item.InventoryUOM,
+          costoPromedio:  item.MovingAveragePrice || 0,
+          stockAlmp:      bodegaAlmp?.InStock      || 0,
+          committedAlmp:  bodegaAlmp?.Committed    || 0,
+          orderedAlmp:    bodegaAlmp?.Ordered      || 0,
+        };
+      } catch (error) {
+        logger.warn(`SAP: no se pudo obtener stock para ${itemCode}: ${error.message}`);
+        resultado[itemCode] = null;
+      }
+    }
+
+    logger.info(`SAP: stock obtenido para ${Object.keys(resultado).length} ítems`);
+    return resultado;
+  }
 }
 
 // Singleton

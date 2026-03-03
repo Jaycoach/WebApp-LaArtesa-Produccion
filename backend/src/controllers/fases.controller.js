@@ -811,11 +811,9 @@ const completarFase = async (req, res, next) => {
           const requerido = parseInt(prod.unidades_ajustadas || prod.unidades_programadas);
           const nombre    = `${prod.producto_nombre}${prod.presentacion ? ' ' + prod.presentacion : ''}`;
 
-          // Validar cantidad mínima (debe ser >= unidades_ajustadas)
-          if (cantidad < requerido) {
-            errores.push(
-              `"${nombre}": debe cortar mínimo ${requerido} unidades (ingresó ${cantidad}).`
-            );
+          // Validar cantidad mínima
+          if (cantidad <= 0) {
+            errores.push(`"${nombre}": la cantidad debe ser mayor a 0.`);
             continue;
           }
 
@@ -843,15 +841,21 @@ const completarFase = async (req, res, next) => {
         for (const prod of productosResult.rows) {
           const cantidad = Number(cantidades_divididas[prod.id] || 0);
           if (cantidad > 0) {
-            const excedenteReal = Math.max(0, cantidad - parseInt(prod.unidades_pedidas));
+            const requeridoFinal = parseInt(prod.unidades_ajustadas || prod.unidades_programadas);
+            const excedenteReal  = Math.max(0, cantidad - parseInt(prod.unidades_pedidas));
+            const faltante       = Math.max(0, requeridoFinal - cantidad);
+            const esParcial      = faltante > 0;
+
             await db.query(
               `UPDATE productos_por_masa
                SET cantidad_divisiones  = $1,
                    division_completada  = TRUE,
                    unidades_excedente   = $2,
+                   unidades_faltantes   = $3,
+                   division_parcial     = $4,
                    updated_at           = NOW()
-               WHERE id = $3`,
-              [cantidad, excedenteReal, prod.id]
+               WHERE id = $5`,
+              [cantidad, excedenteReal, faltante, esParcial, prod.id]
             );
           }
         }
@@ -868,11 +872,19 @@ const completarFase = async (req, res, next) => {
       );
       const siguienteFase = await fasesModel.desbloquearSiguienteFase(masaId, 'DIVISION');
 
+      const hayFaltantes = productosResult.rows.some(p => {
+        const cant = Number(cantidades_divididas?.[p.id] || 0);
+        const req  = parseInt(p.unidades_ajustadas || p.unidades_programadas);
+        return cant < req;
+      });
+
       return res.json({
         success: true,
         data: faseActualizada,
         siguiente_fase: siguienteFase,
-        message: 'División completada exitosamente',
+        message: hayFaltantes
+          ? 'División completada con faltantes. Los pendientes quedan registrados.'
+          : 'División completada exitosamente',
         subdivision: null,
       });
     }
