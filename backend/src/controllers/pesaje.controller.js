@@ -31,6 +31,15 @@ const getChecklist = async (req, res, next) => {
       });
     }
 
+    // Validar que la masa esté APROBADA
+    if (masa.estado === 'PLANIFICACION' || masa.estado === 'PENDIENTE') {
+      return res.status(403).json({
+        success: false,
+        message: `La masa debe ser aprobada por un supervisor antes de iniciar el pesaje. Estado actual: ${masa.estado}`,
+        estado: masa.estado,
+      });
+    }
+
     const ingredientes  = await fasesModel.getIngredientesByMasa(masaId);
     const progresoFases = await fasesModel.getProgresoFases(masaId);
     const fasePesaje    = progresoFases.find(f => f.fase === 'PESAJE');
@@ -155,6 +164,21 @@ const confirmarPesaje = async (req, res, next) => {
   try {
     const { masaId } = req.params;
     logger.info(`Confirmando pesaje para masa ${masaId}`);
+
+    // Validar que la masa esté APROBADA
+    const masaCheck = await db.query(
+      `SELECT estado FROM masas_produccion WHERE id = $1`, [masaId]
+    );
+    if (!masaCheck.rows.length) {
+      return res.status(404).json({ success: false, message: 'Masa no encontrada' });
+    }
+    if (masaCheck.rows[0].estado === 'PLANIFICACION' || masaCheck.rows[0].estado === 'PENDIENTE') {
+      return res.status(403).json({
+        success: false,
+        message: 'La masa no está aprobada. No se puede confirmar el pesaje.',
+        estado: masaCheck.rows[0].estado,
+      });
+    }
 
     // Verificar que todos los ingredientes estén pesados
     const resultado = await fasesModel.checkTodosPesados(masaId);
