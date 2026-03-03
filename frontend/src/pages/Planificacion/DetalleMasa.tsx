@@ -82,6 +82,10 @@ export const DetalleMasa: React.FC = () => {
   });
 
   const handleIniciarPesaje = () => {
+    if (masa?.estado !== 'APROBADA') {
+      alert('Esta masa debe ser aprobada por un supervisor antes de iniciar el pesaje.');
+      return;
+    }
     setIniciandoPesaje(true);
     iniciarPesajeMutation.mutate();
   };
@@ -176,8 +180,13 @@ export const DetalleMasa: React.FC = () => {
               {masa.fase_actual === 'PLANIFICACION' && (
                 <button
                   onClick={handleIniciarPesaje}
-                  disabled={iniciandoPesaje}
-                  className="mt-3 px-5 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white rounded-lg font-medium transition-colors flex items-center gap-2 ml-auto"
+                  disabled={iniciandoPesaje || masa.estado !== 'APROBADA'}
+                  title={masa.estado !== 'APROBADA' ? 'Requiere aprobación de supervisor' : ''}
+                  className={`mt-3 px-5 py-2 text-white rounded-lg font-medium transition-colors flex items-center gap-2 ml-auto
+                    ${masa.estado === 'APROBADA'
+                      ? 'bg-green-600 hover:bg-green-700 disabled:bg-green-300'
+                      : 'bg-gray-400 cursor-not-allowed'
+                    }`}
                 >
                   {iniciandoPesaje ? (
                     <>
