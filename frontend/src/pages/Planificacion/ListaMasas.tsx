@@ -264,7 +264,7 @@ export const ListaMasas: React.FC = () => {
         {/* Lista de masas */}
         {!isLoading && masas && masas.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {masas.map((masa: MasaProduccionResumen) => (
+            {[...masas].sort((a, b) => Number(b.es_repeticion) - Number(a.es_repeticion)).map((masa: MasaProduccionResumen) => (
               <div
                 key={masa.id}
                 className={`bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer border-l-4 ${
