@@ -282,15 +282,19 @@ export const ListaMasas: React.FC = () => {
                   {/* Header de la card */}
                   <div className="flex justify-between items-start mb-4">
                     <div className="flex-1 min-w-0">
+                      {masa.es_repeticion && (
+                        <span className="inline-flex items-center gap-1 text-xs font-bold bg-red-600 text-white rounded px-2 py-0.5 mb-1">
+                          🔴 REPETICIÓN — PRIORIDAD
+                        </span>
+                      )}
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-xl font-bold text-gray-900">{masa.tipo_masa}</h3>
-                        {masa.es_repeticion && (
-                          <span className="text-xs font-bold bg-red-100 text-red-700 border border-red-400 rounded px-2 py-0.5">
-                            REPETICIÓN
-                          </span>
-                        )}
+                        <h3 className={`text-xl font-bold ${masa.es_repeticion ? 'text-red-600' : 'text-gray-900'}`}>
+                          {masa.tipo_masa}
+                        </h3>
                       </div>
-                      <p className="text-sm text-gray-500 truncate">{masa.nombre_masa}</p>
+                      <p className={`text-sm truncate ${masa.es_repeticion ? 'text-red-500 font-medium' : 'text-gray-500'}`}>
+                        {masa.nombre_masa}
+                      </p>
                     </div>
                     <span className={`ml-2 shrink-0 px-3 py-1 rounded-full text-xs font-medium ${getEstadoBadge(masa.estado)}`}>
                       {getEstadoLabel(masa.estado)}
