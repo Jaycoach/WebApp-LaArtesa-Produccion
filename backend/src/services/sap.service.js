@@ -313,7 +313,7 @@ class SAPService {
       const response = await this.client.get('/Orders', {
         params: {
           $filter: `DocDate eq '${fecha}' and DocumentStatus eq 'bost_Open'`,
-          $select: 'DocEntry,DocNum,DocDate,DocumentLines',
+          $select: 'DocEntry,DocNum,DocDate,Series,DocumentLines',
           $top: top,
           $skip: skip,
         },
@@ -349,6 +349,7 @@ class SAPService {
         lineas.push({
           docEntry: orden.DocEntry,
           docNum: orden.DocNum,
+          series: orden.Series,
           itemCode: linea.ItemCode,
           itemDescription: linea.ItemDescription,
           quantity: linea.Quantity,
@@ -435,6 +436,7 @@ class SAPService {
       return {
         docEntry: linea.docEntry,
         docNum: linea.docNum,
+        series: linea.series,
         itemCode: linea.itemCode,
         descripcion: art.itemName || linea.itemDescription,
         tipoMasa: art.tipoMasa,

@@ -131,7 +131,14 @@ export const PesajeMasa: React.FC = () => {
           <div className="flex justify-between items-start">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Pesaje de Masa</h1>
-              <p className="text-gray-600 mt-1">{checklist.tipo_masa}</p>
+              <p className={`mt-1 font-semibold ${checklist.es_repeticion ? 'text-red-600' : 'text-gray-600'}`}>
+                {checklist.es_repeticion && (
+                  <span className="inline-block text-xs font-bold bg-red-100 text-red-700 border border-red-400 rounded px-2 py-0.5 mr-2">
+                    REPETICIÓN
+                  </span>
+                )}
+                {checklist.tipo_masa}
+              </p>
               <p className="text-sm text-gray-500 mt-1">ID Masa: {masaId}</p>
             </div>
             <div className="text-right">
