@@ -2,6 +2,7 @@
  * Controlador para gestión de masas de producción
  */
 
+const db = require('../database/connection');
 const fasesModel = require('../models/fases.model');
 const logger = require('../utils/logger');
 
@@ -236,10 +237,110 @@ const updateUnidadesProgramadas = async (req, res, next) => {
   }
 };
 
+const aprobarMasa = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const masa = await db.query(
+      `SELECT id, estado, fase_actual FROM masas_produccion WHERE id = $1`,
+      [id]
+    );
+
+    if (masa.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Masa no encontrada' });
+    }
+
+    if (!['PLANIFICACION', 'PENDIENTE'].includes(masa.rows[0].estado)) {
+      return res.status(400).json({
+        success: false,
+        message: `No se puede aprobar una masa en estado ${masa.rows[0].estado}`,
+      });
+    }
+
+    await db.query(
+      `UPDATE masas_produccion SET estado = 'APROBADA', updated_at = NOW() WHERE id = $1`,
+      [id]
+    );
+
+    await db.query(
+      `UPDATE progreso_fases
+       SET estado = 'EN_PROGRESO', fecha_actualizacion = NOW()
+       WHERE masa_id = $1 AND fase = 'PESAJE'`,
+      [id]
+    );
+
+    logger.info(`Masa ${id} APROBADA por usuario ${req.user.id}`);
+
+    return res.json({
+      success: true,
+      message: 'Masa aprobada. Pesaje desbloqueado.',
+    });
+  } catch (error) {
+    logger.error('Error al aprobar masa:', error);
+    next(error);
+  }
+};
+
+const marcarPendiente = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { motivo } = req.body;
+
+    const masa = await db.query(
+      `SELECT id, estado FROM masas_produccion WHERE id = $1`,
+      [id]
+    );
+
+    if (masa.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Masa no encontrada' });
+    }
+
+    if (!['PLANIFICACION', 'APROBADA'].includes(masa.rows[0].estado)) {
+      return res.status(400).json({
+        success: false,
+        message: `No se puede marcar pendiente una masa en estado ${masa.rows[0].estado}`,
+      });
+    }
+
+    await db.query(
+      `UPDATE masas_produccion SET estado = 'PENDIENTE', updated_at = NOW() WHERE id = $1`,
+      [id]
+    );
+
+    await db.query(
+      `UPDATE progreso_fases
+       SET estado = 'BLOQUEADA', fecha_actualizacion = NOW()
+       WHERE masa_id = $1 AND fase = 'PESAJE' AND estado = 'EN_PROGRESO'`,
+      [id]
+    );
+
+    if (motivo) {
+      await db.query(
+        `UPDATE progreso_fases
+         SET observaciones = $1, fecha_actualizacion = NOW()
+         WHERE masa_id = $2 AND fase = 'PLANIFICACION'`,
+        [motivo, id]
+      );
+    }
+
+    logger.info(`Masa ${id} marcada PENDIENTE por usuario ${req.user.id}`);
+
+    return res.json({
+      success: true,
+      message: 'Masa marcada como pendiente.',
+    });
+  } catch (error) {
+    logger.error('Error al marcar masa pendiente:', error);
+    next(error);
+  }
+};
+
 module.exports = {
   getMasasByFecha,
   getMasaById,
   getProductosByMasa,
   getComposicionByMasa,
   updateUnidadesProgramadas,
+  aprobarMasa,
+  marcarPendiente,
 };

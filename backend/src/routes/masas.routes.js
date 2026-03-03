@@ -6,6 +6,7 @@ const express = require('express');
 const router = express.Router();
 const masasController = require('../controllers/masas.controller');
 const { verifyToken } = require('../middleware/auth');
+const { checkRole } = require('../middleware/roleCheck');
 
 /**
  * Todas las rutas requieren autenticación
@@ -46,5 +47,19 @@ router.get('/:id/composicion', masasController.getComposicionByMasa);
  * @access  Private
  */
 router.patch('/:masaId/productos/:productoId', masasController.updateUnidadesProgramadas);
+
+/**
+ * @route   PATCH /api/masas/:id/aprobar
+ * @desc    Aprobar una masa (desbloquea fase PESAJE)
+ * @access  Private (Admin/Supervisor only)
+ */
+router.patch('/:id/aprobar', checkRole(['admin', 'supervisor']), masasController.aprobarMasa);
+
+/**
+ * @route   PATCH /api/masas/:id/pendiente
+ * @desc    Marcar una masa como pendiente (bloquea fase PESAJE)
+ * @access  Private (Admin/Supervisor only)
+ */
+router.patch('/:id/pendiente', checkRole(['admin', 'supervisor']), masasController.marcarPendiente);
 
 module.exports = router;
