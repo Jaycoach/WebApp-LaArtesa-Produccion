@@ -16,6 +16,7 @@ const pesajeRoutes = require('./pesaje.routes');
 const formadoRoutes = require('./formado.routes');
 const fermentacionRoutes = require('./fermentacion.routes');
 const horneadoRoutes = require('./horneado.routes');
+const empaqueRoutes = require('./empaque.routes');
 const configRoutes = require('./config.routes');
 const sapRoutes = require('./sap.routes');
 
@@ -38,6 +39,7 @@ router.get('/', (req, res) => {
       formado: '/api/formado',
       fermentacion: '/api/fermentacion',
       horneado: '/api/horneado',
+      empaque: '/api/empaque',
       config: '/api/config',
       sap: '/api/sap',
       health: '/health',
@@ -57,6 +59,7 @@ router.use('/pesaje', pesajeRoutes);
 router.use('/formado', formadoRoutes);
 router.use('/fermentacion', fermentacionRoutes);
 router.use('/horneado', horneadoRoutes);
+router.use('/empaque', empaqueRoutes);
 router.use('/config', configRoutes);
 router.use('/sap', sapRoutes);
 

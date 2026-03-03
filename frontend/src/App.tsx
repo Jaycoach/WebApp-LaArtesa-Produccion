@@ -1,5 +1,6 @@
 /**
- * Componente principal de la aplicación con Router
+ * App.tsx — ARTESA
+ * Actualizado 2026-03-02: agrega rutas formado, fermentacion, horneado, empaque
  */
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from '@/store';
@@ -18,32 +19,24 @@ import PesajeMasa from '@/pages/Pesaje/PesajeMasa';
 import ConfirmarPesaje from '@/pages/Pesaje/ConfirmarPesaje';
 import AmasadoMasa from '@/pages/Amasado/AmasadoMasa';
 import DivisionMasa from '@/pages/Division/DivisionMasa';
+import FormadoMasa from '@/pages/Formado/FormadoMasa';
+import FermentacionMasa from '@/pages/Fermentacion/FermentacionMasa';
+import HorneadoMasa from '@/pages/Horneado/HorneadoMasa';
+import EmpaqueMasa from '@/pages/Empaque/EmpaqueMasa';
 import ConfiguracionSistema from '@/pages/Configuracion/ConfiguracionSistema';
 
-/**
- * Componente para rutas protegidas
- */
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
   return <>{children}</>;
 };
 
-/**
- * Componente principal
- */
 function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Ruta pública - Login */}
         <Route path="/login" element={<Login />} />
 
-        {/* Rutas protegidas */}
         <Route
           path="/"
           element={
@@ -52,10 +45,7 @@ function App() {
             </ProtectedRoute>
           }
         >
-          {/* Dashboard */}
           <Route index element={<Dashboard />} />
-
-          {/* Sincronización SAP */}
           <Route path="sincronizar" element={<SincronizarSAP />} />
 
           {/* Planificación */}
@@ -82,11 +72,30 @@ function App() {
             <Route path=":masaId" element={<DivisionMasa />} />
           </Route>
 
+          {/* Formado */}
+          <Route path="formado">
+            <Route path=":masaId" element={<FormadoMasa />} />
+          </Route>
+
+          {/* Fermentación */}
+          <Route path="fermentacion">
+            <Route path=":masaId" element={<FermentacionMasa />} />
+          </Route>
+
+          {/* Horneado */}
+          <Route path="horneado">
+            <Route path=":masaId" element={<HorneadoMasa />} />
+          </Route>
+
+          {/* Empaque */}
+          <Route path="empaque">
+            <Route path=":masaId" element={<EmpaqueMasa />} />
+          </Route>
+
           {/* Configuración */}
           <Route path="configuracion" element={<ConfiguracionSistema />} />
         </Route>
 
-        {/* Ruta 404 */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
