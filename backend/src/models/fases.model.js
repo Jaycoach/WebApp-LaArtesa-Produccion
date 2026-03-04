@@ -48,9 +48,17 @@ const createMasaProduccion = async (data) => {
   return result.rows[0];
 };
 
-const getMasasByFecha = async (fecha) => {
+const getMasasByFecha = async (fecha, fase = null) => {
+  const params = [fecha];
+  let whereExtra = '';
+
+  if (fase) {
+    params.push(fase.toUpperCase());
+    whereExtra = `AND m.fase_actual = $2`;
+  }
+
   const result = await db.query(`
-    SELECT 
+    SELECT
       m.*,
       COUNT(DISTINCT omr.orden_sap_docentry) as total_ordenes,
       COUNT(pm.id) as total_productos,
@@ -60,9 +68,10 @@ const getMasasByFecha = async (fecha) => {
     LEFT JOIN orden_masa_relacion omr ON m.id = omr.masa_id
     LEFT JOIN productos_por_masa pm ON m.id = pm.masa_id
     WHERE m.fecha_produccion = $1
+    ${whereExtra}
     GROUP BY m.id
     ORDER BY m.tipo_masa
-  `, [fecha]);
+  `, params);
 
   return result.rows;
 };

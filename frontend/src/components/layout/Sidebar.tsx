@@ -86,43 +86,33 @@ export const Sidebar: React.FC = () => {
         <h3 className="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">
           Fases de Producción
         </h3>
-        <ul className="mt-4 space-y-2">
-          <li>
-            <span className="flex items-center gap-3 px-4 py-2 text-sm text-gray-600">
-              <span className="w-2 h-2 rounded-full bg-blue-500" />
-              Pesaje
-            </span>
-          </li>
-          <li>
-            <span className="flex items-center gap-3 px-4 py-2 text-sm text-gray-600">
-              <span className="w-2 h-2 rounded-full bg-purple-500" />
-              Amasado
-            </span>
-          </li>
-          <li>
-            <span className="flex items-center gap-3 px-4 py-2 text-sm text-gray-600">
-              <span className="w-2 h-2 rounded-full bg-yellow-500" />
-              División
-            </span>
-          </li>
-          <li>
-            <span className="flex items-center gap-3 px-4 py-2 text-sm text-gray-600">
-              <span className="w-2 h-2 rounded-full bg-green-500" />
-              Formado
-            </span>
-          </li>
-          <li>
-            <span className="flex items-center gap-3 px-4 py-2 text-sm text-gray-600">
-              <span className="w-2 h-2 rounded-full bg-orange-500" />
-              Fermentación
-            </span>
-          </li>
-          <li>
-            <span className="flex items-center gap-3 px-4 py-2 text-sm text-gray-600">
-              <span className="w-2 h-2 rounded-full bg-red-500" />
-              Horneado
-            </span>
-          </li>
+        <ul className="mt-4 space-y-1">
+          {[
+            { key: 'pesaje',       label: 'Pesaje',       color: 'bg-blue-500'   },
+            { key: 'amasado',      label: 'Amasado',      color: 'bg-purple-500' },
+            { key: 'division',     label: 'División',     color: 'bg-yellow-500' },
+            { key: 'formado',      label: 'Formado',      color: 'bg-green-500'  },
+            { key: 'fermentacion', label: 'Fermentación', color: 'bg-orange-500' },
+            { key: 'horneado',     label: 'Horneado',     color: 'bg-red-500'    },
+          ].map(({ key, label, color }) => {
+            const isActive = location.pathname === `/fase/${key}`;
+            return (
+              <li key={key}>
+                <Link
+                  to={`/fase/${key}`}
+                  className={clsx(
+                    'flex items-center gap-3 px-4 py-2 text-sm rounded-lg transition-colors',
+                    isActive
+                      ? 'bg-primary-50 text-primary-700 font-medium'
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                  )}
+                >
+                  <span className={`w-2 h-2 rounded-full ${color} shrink-0`} />
+                  {label}
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       </div>
     </aside>
