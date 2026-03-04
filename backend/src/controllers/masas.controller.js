@@ -258,8 +258,13 @@ const aprobarMasa = async (req, res, next) => {
     }
 
     await db.query(
-      `UPDATE masas_produccion SET estado = 'APROBADA', updated_at = NOW() WHERE id = $1`,
-      [id]
+      `UPDATE masas_produccion
+       SET estado = 'APROBADA',
+           aprobado_por = $2,
+           aprobado_en = NOW(),
+           updated_at = NOW()
+       WHERE id = $1`,
+      [id, req.user.id]
     );
 
     await db.query(
