@@ -40,9 +40,9 @@ export const masasService = {
   /**
    * Obtener lista de masas por fecha
    */
-  getMasasByFecha: async (fecha: string): Promise<MasaProduccionResumen[]> => {
+  getMasasByFecha: async (fecha: string, fase?: string): Promise<MasaProduccionResumen[]> => {
     const response = await apiService.get<MasaProduccionResumen[]>(
-      `${API_CONFIG.ENDPOINTS.MASAS.LIST}?fecha=${fecha}`
+      `${API_CONFIG.ENDPOINTS.MASAS.LIST}?fecha=${fecha}${fase ? `&fase=${fase}` : ''}`
     );
     return response.data!;
   },

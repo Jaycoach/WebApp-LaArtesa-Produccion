@@ -24,6 +24,7 @@ import FermentacionMasa from '@/pages/Fermentacion/FermentacionMasa';
 import HorneadoMasa from '@/pages/Horneado/HorneadoMasa';
 import EmpaqueMasa from '@/pages/Empaque/EmpaqueMasa';
 import ConfiguracionSistema from '@/pages/Configuracion/ConfiguracionSistema';
+import FaseListado from '@/pages/Fases/FaseListado';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -91,6 +92,9 @@ function App() {
           <Route path="empaque">
             <Route path=":masaId" element={<EmpaqueMasa />} />
           </Route>
+
+          {/* Fases de producción - listado por fase */}
+          <Route path="fase/:nombreFase" element={<FaseListado />} />
 
           {/* Configuración */}
           <Route path="configuracion" element={<ConfiguracionSistema />} />

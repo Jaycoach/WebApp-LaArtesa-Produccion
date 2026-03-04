@@ -13,7 +13,7 @@ const logger = require('../utils/logger');
  */
 const getMasasByFecha = async (req, res, next) => {
   try {
-    const { fecha } = req.query;
+    const { fecha, fase } = req.query;
 
     if (!fecha) {
       return res.status(400).json({
@@ -22,7 +22,15 @@ const getMasasByFecha = async (req, res, next) => {
       });
     }
 
-    const masas = await fasesModel.getMasasByFecha(fecha);
+    const fasesValidas = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO'];
+    if (fase && !fasesValidas.includes(fase.toUpperCase())) {
+      return res.status(400).json({
+        success: false,
+        message: `Fase inválida. Valores permitidos: ${fasesValidas.join(', ')}`,
+      });
+    }
+
+    const masas = await fasesModel.getMasasByFecha(fecha, fase || null);
     const masasParseadas = masas.map(m => ({
       ...m,
       total_kilos_base:           parseFloat(m.total_kilos_base)           || 0,
