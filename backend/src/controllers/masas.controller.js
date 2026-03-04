@@ -269,7 +269,7 @@ const aprobarMasa = async (req, res, next) => {
 
     await db.query(
       `UPDATE progreso_fases
-       SET estado = 'EN_PROGRESO', fecha_actualizacion = NOW()
+       SET estado = 'EN_PROGRESO'
        WHERE masa_id = $1 AND fase = 'PESAJE'`,
       [id]
     );
@@ -314,7 +314,7 @@ const marcarPendiente = async (req, res, next) => {
 
     await db.query(
       `UPDATE progreso_fases
-       SET estado = 'BLOQUEADA', fecha_actualizacion = NOW()
+       SET estado = 'BLOQUEADA'
        WHERE masa_id = $1 AND fase = 'PESAJE' AND estado = 'EN_PROGRESO'`,
       [id]
     );
@@ -322,7 +322,7 @@ const marcarPendiente = async (req, res, next) => {
     if (motivo) {
       await db.query(
         `UPDATE progreso_fases
-         SET observaciones = $1, fecha_actualizacion = NOW()
+         SET observaciones = $1
          WHERE masa_id = $2 AND fase = 'PLANIFICACION'`,
         [motivo, id]
       );
