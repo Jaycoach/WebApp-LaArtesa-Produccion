@@ -95,7 +95,11 @@ router.post('/sincronizar-tipos-masa', checkRole(['admin', 'supervisor']), sapCo
  * @desc    Sincronizar Listas de Materiales (BOM) desde SAP → sap_articulos + sap_bom_componentes
  * @access  Private (Admin/Supervisor only)
  */
-router.post('/sincronizar-bom', checkRole(['admin', 'supervisor']), sincronizarBOM);
+router.post('/sincronizar-bom', checkRole(['admin', 'supervisor']), (req, res, next) => {
+  req.setTimeout(660000);
+  res.setTimeout(660000);
+  next();
+}, sincronizarBOM);
 
 /**
  * @route   POST /api/sap/sincronizar-inventario-mp

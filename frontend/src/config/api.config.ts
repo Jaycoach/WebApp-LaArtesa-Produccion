@@ -7,7 +7,7 @@ export const API_CONFIG = {
   BASE_URL: import.meta.env.VITE_API_URL || 'http://localhost:3000/api',
 
   // Timeouts
-  TIMEOUT: 480000, // 8 minutos - necesario para sincronización BOM (~5 min)
+  TIMEOUT: 660000, // 11 minutos - necesario para sincronización BOM (~10 min)
 
   // Endpoints principales
   ENDPOINTS: {
