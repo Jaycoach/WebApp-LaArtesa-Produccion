@@ -1462,6 +1462,18 @@ const sincronizarBOM = async (req, res, next) => {
       }
     }
 
+    // Marcar como inactivos los artículos que ya no vienen de SAP (cancelados/eliminados)
+    const itemCodesActivos = articulos.map(a => a.itemCode);
+    if (itemCodesActivos.length > 0) {
+      const inactivadosResult = await db.query(
+        `UPDATE sap_articulos SET activo = false, updated_at = CURRENT_TIMESTAMP
+         WHERE item_code != ALL($1::varchar[]) AND activo = true`,
+        [itemCodesActivos]
+      );
+      if (inactivadosResult.rowCount > 0)
+        logger.info(`BOM sync: ${inactivadosResult.rowCount} artículos marcados inactivos (ya no están en SAP)`);
+    }
+
     // 6. Registrar en log de sincronización
     await db.query(
       `INSERT INTO sap_sync_log (tipo_operacion, estado, request_payload, response_payload)
