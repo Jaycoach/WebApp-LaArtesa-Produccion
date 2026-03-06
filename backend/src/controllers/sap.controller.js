@@ -727,18 +727,13 @@ const sincronizarDesdeOV = async (req, res, next) => {
         logger.info(`${tiposMasaEnProceso.length} masas preservadas (en producción): [${tiposMasaEnProceso.join(', ')}]`);
 
     } else {
+      // forzar=false: lógica inteligente — no bloquear, sino agregar/crear según estado
       const existenResult = await client.query(
         `SELECT COUNT(*) as count FROM masas_produccion WHERE DATE(fecha_produccion) = $1`,
         [fechaProduccion]
       );
-      if (parseInt(existenResult.rows[0].count) > 0) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({
-          success: false,
-          message: 'Ya existen masas para esta fecha. Use forzar=true para re-sincronizar las que están en PLANIFICACION.',
-          data: { masas_existentes: parseInt(existenResult.rows[0].count) }
-        });
-      }
+      // Si no existen masas, flujo normal (no hacer nada aquí)
+      // Si existen, la lógica por tipo de masa se maneja más abajo en el loop
     }
 
     // 2. Obtener datos combinados OV + artículos desde SAP
@@ -774,10 +769,116 @@ const sincronizarDesdeOV = async (req, res, next) => {
     let ordenCounter = 1;
 
     for (const tipoMasa in masasAgrupadas) {
-      // Omitir tipos de masa que ya están en producción
-      if (tiposMasaEnProceso.includes(tipoMasa)) {
+      // Verificar si ya existe una masa de este tipo para esta fecha
+      const masaExistenteResult = await client.query(
+        `SELECT id, codigo_masa, estado, fase_actual
+         FROM masas_produccion
+         WHERE DATE(fecha_produccion) = $1
+           AND tipo_masa = $2
+           AND es_subdivision = false
+           AND es_adicional = false
+           AND masa_padre_id IS NULL
+         ORDER BY id DESC
+         LIMIT 1`,
+        [fechaProduccion, tipoMasa]
+      );
+
+      const masaExistente = masaExistenteResult.rows[0] || null;
+      const estaEnPlanificacion = masaExistente && masaExistente.fase_actual === 'PLANIFICACION';
+      const estaEnProduccion = masaExistente && masaExistente.fase_actual !== 'PLANIFICACION';
+
+      // Si ya está en producción (forzar=false): crear masa adicional
+      if (estaEnProduccion) {
+        logger.info(`Tipo ${tipoMasa} ya en fase ${masaExistente.fase_actual} — creando masa ADICIONAL`);
+        // continuar el flujo normal de creación pero marcando es_adicional=true
+        // (se aplica más abajo en el INSERT)
+      }
+
+      // Si ya está en PLANIFICACION (forzar=false): agregar productos a la masa existente
+      if (estaEnPlanificacion && !forzar) {
+        logger.info(`Tipo ${tipoMasa} en PLANIFICACION — agregando productos a masa ${masaExistente.id}`);
+
+        const masaIdExistente = masaExistente.id;
+        const grupo = masasAgrupadas[tipoMasa];
+
+        for (const prod of grupo.productos) {
+          // Verificar si este producto (sap_item_code) ya existe en la masa
+          const prodExistenteResult = await client.query(
+            `SELECT id FROM productos_por_masa WHERE masa_id = $1 AND sap_item_code = $2`,
+            [masaIdExistente, prod.itemCode]
+          );
+
+          if (prodExistenteResult.rows.length > 0) {
+            // Ya existe: sumar unidades
+            await client.query(
+              `UPDATE productos_por_masa
+               SET unidades_pedidas = unidades_pedidas + $1,
+                   unidades_programadas = unidades_programadas + $1,
+                   kilos_pedidos = kilos_pedidos + $2,
+                   kilos_programados = kilos_programados + $2,
+                   updated_at = NOW()
+               WHERE masa_id = $3 AND sap_item_code = $4`,
+              [prod.cantidadPaquetes, prod.kilosPedidos || 0, masaIdExistente, prod.itemCode]
+            );
+            logger.info(`Producto ${prod.itemCode} actualizado en masa ${masaIdExistente} (+${prod.cantidadPaquetes} und)`);
+          } else {
+            // No existe: insertar nuevo producto
+            await client.query(
+              `INSERT INTO productos_por_masa (
+                 masa_id, producto_codigo, producto_nombre, presentacion,
+                 gramaje_unitario, unidades_pedidas, unidades_programadas,
+                 kilos_pedidos, kilos_programados,
+                 sap_item_code, unidades_por_paquete, cantidad_paquetes,
+                 sap_doc_entry, sap_doc_num
+               ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+              [
+                masaIdExistente,
+                prod.itemCode,
+                prod.descripcion,
+                prod.descripcion,
+                prod.gramaje * 1000,
+                prod.cantidadPaquetes,
+                prod.cantidadPaquetes,
+                prod.kilosPedidos || 0,
+                prod.kilosPedidos || 0,
+                prod.itemCode,
+                prod.unidadesPorPaquete,
+                prod.cantidadPaquetes,
+                prod.docEntry,
+                String(prod.docNum)
+              ]
+            );
+            logger.info(`Producto ${prod.itemCode} agregado a masa ${masaIdExistente}`);
+          }
+        }
+
+        // Actualizar contadores de la masa existente
+        await client.query(
+          `UPDATE masas_produccion
+           SET total_productos = (SELECT COUNT(*) FROM productos_por_masa WHERE masa_id = $1),
+               total_ordenes = (SELECT COUNT(DISTINCT sap_doc_entry) FROM productos_por_masa WHERE masa_id = $1),
+               updated_at = NOW()
+           WHERE id = $1`,
+          [masaIdExistente]
+        );
+
+        masasCreadas.push({
+          id: masaIdExistente,
+          uuid: masaExistente.uuid,
+          codigo: masaExistente.codigo_masa,
+          tipo_masa: tipoMasa,
+          accion: 'ACTUALIZADA',
+          productos_agregados: grupo.productos.length
+        });
+
+        ordenCounter++;
+        continue; // no crear masa nueva
+      }
+
+      // Omitir tipos que ya están en producción con forzar=true (comportamiento anterior)
+      if (tiposMasaEnProceso.includes(tipoMasa) && forzar) {
         masasOmitidas.push(tipoMasa);
-        logger.info(`Tipo de masa OMITIDO (ya en producción): ${tipoMasa}`);
+        logger.info(`Tipo de masa OMITIDO (ya en producción, forzar=true): ${tipoMasa}`);
         ordenCounter++;
         continue;
       }
@@ -789,16 +890,23 @@ const sincronizarDesdeOV = async (req, res, next) => {
       const docEntriesUnicos = [...new Set(grupo.productos.map(p => p.docEntry))];
       const esRepeticion = grupo.productos.some(p => p.series === 89);
 
+      // Determinar si es masa adicional (tipo ya en producción, forzar=false)
+      const esAdicional = estaEnProduccion && !forzar;
+      const codigoMasaFinal = esAdicional
+        ? `${codigoMasa}-ADICIONAL`
+        : codigoMasa;
+
       const masaResult = await client.query(
         `INSERT INTO masas_produccion (
            codigo_masa, tipo_masa, nombre_masa, fecha_produccion,
            total_kilos_base, total_kilos_con_merma, porcentaje_merma, factor_absorcion_usado,
            estado, fase_actual,
-           fecha_sap_referencia, total_ordenes, total_productos, es_repeticion
-         ) VALUES ($1, $2, $3, $4, 0, 0, $5, $6, 'PLANIFICACION', 'PLANIFICACION', $7, $8, $9, $10)
+           fecha_sap_referencia, total_ordenes, total_productos, es_repeticion,
+           es_adicional, masa_adicional_referencia_id
+         ) VALUES ($1, $2, $3, $4, 0, 0, $5, $6, 'PLANIFICACION', 'PLANIFICACION', $7, $8, $9, $10, $11, $12)
          RETURNING id, uuid`,
         [
-          codigoMasa,
+          codigoMasaFinal,
           tipoMasa,
           tipoMasa,
           fechaProduccion,
@@ -807,7 +915,9 @@ const sincronizarDesdeOV = async (req, res, next) => {
           fechaProduccion,
           docEntriesUnicos.length,
           grupo.productos.length,
-          esRepeticion
+          esRepeticion,
+          esAdicional,
+          esAdicional ? masaExistente.id : null
         ]
       );
 
@@ -823,7 +933,27 @@ const sincronizarDesdeOV = async (req, res, next) => {
            WHERE item_code_padre = $1 AND grupo_sap = 181`,
           [itemCode]
         );
-        kiloPorItemCode[itemCode] = parseFloat(bomResult.rows[0].kg_por_unidad || 0);
+        const kgBOM = parseFloat(bomResult.rows[0].kg_por_unidad || 0);
+
+        if (kgBOM > 0) {
+          kiloPorItemCode[itemCode] = kgBOM;
+        } else {
+          // Fallback: calcular desde gramaje del artículo en sap_articulos
+          const artResult = await client.query(
+            `SELECT gramaje, sales_qty_per_pack FROM sap_articulos WHERE item_code = $1`,
+            [itemCode]
+          );
+          const gramaje = parseFloat(artResult.rows[0]?.gramaje || 0);
+          const qtyPerPack = parseFloat(artResult.rows[0]?.sales_qty_per_pack || 1);
+          if (gramaje > 0) {
+            // gramaje está en gramos, qty_per_pack es unidades por paquete
+            kiloPorItemCode[itemCode] = (gramaje * qtyPerPack) / 1000;
+            logger.warn(`BOM vacío para ${itemCode} — usando fallback gramaje: ${gramaje}g × ${qtyPerPack} = ${kiloPorItemCode[itemCode].toFixed(4)} kg/paquete`);
+          } else {
+            kiloPorItemCode[itemCode] = 0;
+            logger.warn(`BOM vacío y gramaje=0 para ${itemCode}. Kilos quedarán en 0. Sincroniza BOM.`);
+          }
+        }
       }
 
       // Insertar productos; ON CONFLICT acumula si el mismo ItemCode aparece en varias OV

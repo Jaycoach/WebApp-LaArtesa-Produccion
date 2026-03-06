@@ -49,6 +49,8 @@ export interface MasaProduccionResumen {
   total_unidades_pedidas: number;
   total_unidades_programadas: number;
   es_repeticion: boolean;
+  es_adicional?: boolean;
+  masa_adicional_referencia_id?: number | null;
   lote_produccion?: string;
 }
 
