@@ -172,10 +172,10 @@ const confirmarPesaje = async (req, res, next) => {
     if (!masaCheck.rows.length) {
       return res.status(404).json({ success: false, message: 'Masa no encontrada' });
     }
-    if (masaCheck.rows[0].estado === 'PLANIFICACION' || masaCheck.rows[0].estado === 'PENDIENTE') {
+    if (masaCheck.rows[0].estado !== 'APROBADA') {
       return res.status(403).json({
         success: false,
-        message: 'La masa no está aprobada. No se puede confirmar el pesaje.',
+        message: `La masa debe estar en estado APROBADA para confirmar el pesaje. Estado actual: ${masaCheck.rows[0].estado}`,
         estado: masaCheck.rows[0].estado,
       });
     }

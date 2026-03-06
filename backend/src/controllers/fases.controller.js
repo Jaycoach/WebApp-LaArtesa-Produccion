@@ -358,7 +358,8 @@ async function ejecutarSubdivision(masaId, userId, conPesaje = false) {
     `SELECT id, codigo_masa, tipo_masa, nombre_masa, fecha_produccion,
             total_kilos_base, total_kilos_con_merma, porcentaje_merma,
             factor_absorcion_usado, created_by,
-            fue_subdividida, es_subdivision
+            fue_subdividida, es_subdivision,
+            aprobado_por, aprobado_en
      FROM masas_produccion WHERE id = $1`,
     [masaId]
   );
@@ -422,8 +423,9 @@ async function ejecutarSubdivision(masaId, userId, conPesaje = false) {
         (codigo_masa, tipo_masa, nombre_masa, fecha_produccion,
          total_kilos_base, total_kilos_con_merma, porcentaje_merma,
          factor_absorcion_usado, estado, fase_actual,
-         masa_padre_id, es_subdivision, subdivision_letra, created_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,TRUE,$12,$13)
+         masa_padre_id, es_subdivision, subdivision_letra, created_by,
+         aprobado_por, aprobado_en)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,TRUE,$12,$13,$14,$15)
       RETURNING *
     `, [
       `${masa.codigo_masa}-${letra}`,
@@ -439,6 +441,8 @@ async function ejecutarSubdivision(masaId, userId, conPesaje = false) {
       masaId,
       letra,
       masa.created_by,
+      masa.aprobado_por || null,
+      masa.aprobado_en  || null,
     ]);
 
     const subMasa = result.rows[0];
