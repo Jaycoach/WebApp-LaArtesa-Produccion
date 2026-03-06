@@ -380,14 +380,14 @@ class SAPService {
       const response = await this.client.get('/Items', {
         params: {
           $filter: filterParts,
-          $select: 'ItemCode,ItemName,SalesQtyPerPackUnit,U_JZ_Tipos_Masa,SalesUnitWeight1,U_JZ_MultiploDivisor,Canceled',
+          $select: 'ItemCode,ItemName,SalesQtyPerPackUnit,U_JZ_Tipos_Masa,SalesUnitWeight1,U_JZ_MultiploDivisor,Valid,Frozen',
           $top: BATCH,
         },
       });
 
       for (const item of (response.data.value || [])) {
-        if (item.Canceled === 'tYES') {
-          logger.warn(`SAP: artículo inactivo omitido en sync OV: ${item.ItemCode}`);
+        if (item.Valid === 'tNO' || item.Frozen === 'tYES') {
+          logger.warn(`SAP OV: artículo inactivo/congelado omitido: ${item.ItemCode} (Valid=${item.Valid}, Frozen=${item.Frozen})`);
           continue;
         }
         resultado[item.ItemCode] = {
@@ -396,7 +396,6 @@ class SAPService {
           tipoMasa:            item.U_JZ_Tipos_Masa || 'SIN_CLASIFICAR',
           gramaje:             item.SalesUnitWeight1 || 0,
           multiploDivisor:     item.U_JZ_MultiploDivisor != null ? Math.round(item.U_JZ_MultiploDivisor) : 0,
-          activo:              true,
         };
       }
     }
@@ -427,7 +426,7 @@ class SAPService {
     const resultado = lineas
       .filter(linea => {
         if (!articulos[linea.itemCode]) {
-          logger.warn(`SAP sync OV: artículo ${linea.itemCode} no encontrado o inactivo — OV ${linea.docNum} omitida`);
+          logger.warn(`SAP sync OV: artículo ${linea.itemCode} inactivo/congelado/sin tipo masa — línea OV ${linea.docNum} omitida`);
           return false;
         }
         return true;
@@ -513,8 +512,8 @@ class SAPService {
     while (true) {
       const response = await this.client.get('/Items', {
         params: {
-          $filter: "U_JZ_Tipos_Masa ne null and U_JZ_Tipos_Masa ne '' and Canceled ne 'tYES'",
-          $select: 'ItemCode,ItemName,U_JZ_Tipos_Masa,SalesQtyPerPackUnit,SalesUnitWeight1,U_JZ_MultiploDivisor,Canceled',
+          $filter: "U_JZ_Tipos_Masa ne null and U_JZ_Tipos_Masa ne '' and Valid eq 'tYES' and Frozen eq 'tNO'",
+          $select: 'ItemCode,ItemName,U_JZ_Tipos_Masa,SalesQtyPerPackUnit,SalesUnitWeight1,U_JZ_MultiploDivisor,Valid,Frozen',
           $top: top,
           $skip: skip,
         },
