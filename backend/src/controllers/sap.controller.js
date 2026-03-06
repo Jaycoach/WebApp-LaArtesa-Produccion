@@ -784,8 +784,16 @@ const sincronizarDesdeOV = async (req, res, next) => {
       );
 
       const masaExistente = masaExistenteResult.rows[0] || null;
-      const estaEnPlanificacion = masaExistente && masaExistente.fase_actual === 'PLANIFICACION';
-      const estaEnProduccion = masaExistente && masaExistente.fase_actual !== 'PLANIFICACION';
+      // Editable solo si estado Y fase son ambos PLANIFICACION (no aprobada aún)
+      const estaEnPlanificacion = masaExistente &&
+        masaExistente.fase_actual === 'PLANIFICACION' &&
+        masaExistente.estado === 'PLANIFICACION';
+
+      // En producción: aprobada, pendiente, o ya avanzó de fase
+      const estaEnProduccion = masaExistente && (
+        masaExistente.estado !== 'PLANIFICACION' ||
+        masaExistente.fase_actual !== 'PLANIFICACION'
+      );
 
       // Si ya está en producción (forzar=false): crear masa adicional
       if (estaEnProduccion) {
@@ -802,53 +810,66 @@ const sincronizarDesdeOV = async (req, res, next) => {
         const grupo = masasAgrupadas[tipoMasa];
 
         for (const prod of grupo.productos) {
-          // Verificar si este producto (sap_item_code) ya existe en la masa
+          // Verificar por sap_item_code + sap_doc_entry para evitar duplicar la misma OV
           const prodExistenteResult = await client.query(
-            `SELECT id FROM productos_por_masa WHERE masa_id = $1 AND sap_item_code = $2`,
-            [masaIdExistente, prod.itemCode]
+            `SELECT id FROM productos_por_masa
+             WHERE masa_id = $1 AND sap_item_code = $2 AND sap_doc_entry = $3`,
+            [masaIdExistente, prod.itemCode, prod.docEntry]
           );
 
           if (prodExistenteResult.rows.length > 0) {
-            // Ya existe: sumar unidades
-            await client.query(
-              `UPDATE productos_por_masa
-               SET unidades_pedidas = unidades_pedidas + $1,
-                   unidades_programadas = unidades_programadas + $1,
-                   kilos_pedidos = kilos_pedidos + $2,
-                   kilos_programados = kilos_programados + $2,
-                   updated_at = NOW()
-               WHERE masa_id = $3 AND sap_item_code = $4`,
-              [prod.cantidadPaquetes, prod.kilosPedidos || 0, masaIdExistente, prod.itemCode]
-            );
-            logger.info(`Producto ${prod.itemCode} actualizado en masa ${masaIdExistente} (+${prod.cantidadPaquetes} und)`);
+            // Misma OV, mismo producto — ya estaba registrado, no tocar
+            logger.info(`Producto ${prod.itemCode} OV ${prod.docEntry} ya existe en masa ${masaIdExistente} — omitido`);
           } else {
-            // No existe: insertar nuevo producto
-            await client.query(
-              `INSERT INTO productos_por_masa (
-                 masa_id, producto_codigo, producto_nombre, presentacion,
-                 gramaje_unitario, unidades_pedidas, unidades_programadas,
-                 kilos_pedidos, kilos_programados,
-                 sap_item_code, unidades_por_paquete, cantidad_paquetes,
-                 sap_doc_entry, sap_doc_num
-               ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-              [
-                masaIdExistente,
-                prod.itemCode,
-                prod.descripcion,
-                prod.descripcion,
-                prod.gramaje * 1000,
-                prod.cantidadPaquetes,
-                prod.cantidadPaquetes,
-                prod.kilosPedidos || 0,
-                prod.kilosPedidos || 0,
-                prod.itemCode,
-                prod.unidadesPorPaquete,
-                prod.cantidadPaquetes,
-                prod.docEntry,
-                String(prod.docNum)
-              ]
+            // OV nueva para este producto — verificar si el item ya existe con otra OV
+            const itemExistenteResult = await client.query(
+              `SELECT id FROM productos_por_masa
+               WHERE masa_id = $1 AND sap_item_code = $2`,
+              [masaIdExistente, prod.itemCode]
             );
-            logger.info(`Producto ${prod.itemCode} agregado a masa ${masaIdExistente}`);
+
+            if (itemExistenteResult.rows.length > 0) {
+              // Mismo producto, OV diferente — sumar unidades
+              await client.query(
+                `UPDATE productos_por_masa
+                 SET unidades_pedidas = unidades_pedidas + $1,
+                     unidades_programadas = unidades_programadas + $1,
+                     kilos_pedidos = kilos_pedidos + $2,
+                     kilos_programados = kilos_programados + $2,
+                     updated_at = NOW()
+                 WHERE masa_id = $3 AND sap_item_code = $4`,
+                [prod.cantidadPaquetes, prod.kilosPedidos || 0, masaIdExistente, prod.itemCode]
+              );
+              logger.info(`Producto ${prod.itemCode} OV ${prod.docEntry} nueva — sumado a masa ${masaIdExistente} (+${prod.cantidadPaquetes} und)`);
+            } else {
+              // Producto completamente nuevo en esta masa — insertar
+              await client.query(
+                `INSERT INTO productos_por_masa (
+                   masa_id, producto_codigo, producto_nombre, presentacion,
+                   gramaje_unitario, unidades_pedidas, unidades_programadas,
+                   kilos_pedidos, kilos_programados,
+                   sap_item_code, unidades_por_paquete, cantidad_paquetes,
+                   sap_doc_entry, sap_doc_num
+                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+                [
+                  masaIdExistente,
+                  prod.itemCode,
+                  prod.descripcion,
+                  prod.descripcion,
+                  prod.gramaje * 1000,
+                  prod.cantidadPaquetes,
+                  prod.cantidadPaquetes,
+                  prod.kilosPedidos || 0,
+                  prod.kilosPedidos || 0,
+                  prod.itemCode,
+                  prod.unidadesPorPaquete,
+                  prod.cantidadPaquetes,
+                  prod.docEntry,
+                  String(prod.docNum)
+                ]
+              );
+              logger.info(`Producto ${prod.itemCode} agregado a masa ${masaIdExistente}`);
+            }
           }
         }
 
