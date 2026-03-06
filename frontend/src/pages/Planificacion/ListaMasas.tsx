@@ -287,6 +287,22 @@ export const ListaMasas: React.FC = () => {
                           🔴 REPETICIÓN — PRIORIDAD
                         </span>
                       )}
+                      {masa.es_adicional && (
+                        <span
+                          style={{
+                            backgroundColor: '#f97316',
+                            color: 'white',
+                            fontSize: '0.65rem',
+                            fontWeight: 700,
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            letterSpacing: '0.05em',
+                            textTransform: 'uppercase',
+                          }}
+                        >
+                          ADICIONAL
+                        </span>
+                      )}
                       <div className="flex items-center gap-2 flex-wrap">
                         <h3 className={`text-xl font-bold ${masa.es_repeticion ? 'text-red-600' : 'text-gray-900'}`}>
                           {masa.tipo_masa}
