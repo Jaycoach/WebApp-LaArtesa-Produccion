@@ -380,18 +380,23 @@ class SAPService {
       const response = await this.client.get('/Items', {
         params: {
           $filter: filterParts,
-          $select: 'ItemCode,ItemName,SalesQtyPerPackUnit,U_JZ_Tipos_Masa,SalesUnitWeight1,U_JZ_MultiploDivisor',
+          $select: 'ItemCode,ItemName,SalesQtyPerPackUnit,U_JZ_Tipos_Masa,SalesUnitWeight1,U_JZ_MultiploDivisor,Canceled',
           $top: BATCH,
         },
       });
 
       for (const item of (response.data.value || [])) {
+        if (item.Canceled === 'tYES') {
+          logger.warn(`SAP: artículo inactivo omitido en sync OV: ${item.ItemCode}`);
+          continue;
+        }
         resultado[item.ItemCode] = {
           itemName:            item.ItemName,
           salesQtyPerPackUnit: item.SalesQtyPerPackUnit || 1,
           tipoMasa:            item.U_JZ_Tipos_Masa || 'SIN_CLASIFICAR',
           gramaje:             item.SalesUnitWeight1 || 0,
           multiploDivisor:     item.U_JZ_MultiploDivisor != null ? Math.round(item.U_JZ_MultiploDivisor) : 0,
+          activo:              true,
         };
       }
     }
@@ -419,12 +424,16 @@ class SAPService {
     const itemCodesUnicos = [...new Set(lineas.map(l => l.itemCode))];
     const articulos = await this.getArticulosInfo(itemCodesUnicos);
 
-    const resultado = lineas.map(linea => {
-      const art = articulos[linea.itemCode] || {
-        itemName: linea.itemDescription,
-        salesQtyPerPackUnit: 1,
-        tipoMasa: 'SIN_CLASIFICAR',
-      };
+    const resultado = lineas
+      .filter(linea => {
+        if (!articulos[linea.itemCode]) {
+          logger.warn(`SAP sync OV: artículo ${linea.itemCode} no encontrado o inactivo — OV ${linea.docNum} omitida`);
+          return false;
+        }
+        return true;
+      })
+      .map(linea => {
+      const art = articulos[linea.itemCode];
 
       const unidadesPedidas = linea.quantity;
       const unidadesPorPaquete = art.salesQtyPerPackUnit;
@@ -504,8 +513,8 @@ class SAPService {
     while (true) {
       const response = await this.client.get('/Items', {
         params: {
-          $filter: "U_JZ_Tipos_Masa ne null and U_JZ_Tipos_Masa ne ''",
-          $select: 'ItemCode,ItemName,U_JZ_Tipos_Masa,SalesQtyPerPackUnit,SalesUnitWeight1,U_JZ_MultiploDivisor',
+          $filter: "U_JZ_Tipos_Masa ne null and U_JZ_Tipos_Masa ne '' and Canceled ne 'tYES'",
+          $select: 'ItemCode,ItemName,U_JZ_Tipos_Masa,SalesQtyPerPackUnit,SalesUnitWeight1,U_JZ_MultiploDivisor,Canceled',
           $top: top,
           $skip: skip,
         },
