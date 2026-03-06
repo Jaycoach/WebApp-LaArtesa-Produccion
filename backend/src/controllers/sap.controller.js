@@ -769,6 +769,38 @@ const sincronizarDesdeOV = async (req, res, next) => {
     let ordenCounter = 1;
 
     for (const tipoMasa in masasAgrupadas) {
+      const grupo = masasAgrupadas[tipoMasa];
+
+      // ── CONTROL ANTI-DUPLICACIÓN ─────────────────────────────────────
+      // Verificar qué docEntries de este grupo ya están importados para esta fecha
+      const docEntriesGrupo = [...new Set(grupo.productos.map(p => p.docEntry))];
+      const docEntriesImportadosResult = await client.query(
+        `SELECT DISTINCT p.sap_doc_entry
+         FROM productos_por_masa p
+         JOIN masas_produccion m ON p.masa_id = m.id
+         WHERE DATE(m.fecha_produccion) = $1
+           AND p.sap_doc_entry = ANY($2::int[])`,
+        [fechaProduccion, docEntriesGrupo]
+      );
+      const docEntriesYaImportados = new Set(
+        docEntriesImportadosResult.rows.map(r => r.sap_doc_entry)
+      );
+
+      // Filtrar solo los productos con docEntry NO importado aún
+      const productosNuevos = grupo.productos.filter(
+        p => !docEntriesYaImportados.has(p.docEntry)
+      );
+
+      if (productosNuevos.length === 0) {
+        logger.info(`Tipo ${tipoMasa} — todos los docEntries ya importados, omitiendo`);
+        ordenCounter++;
+        continue;
+      }
+
+      // Trabajar solo con los productos nuevos
+      grupo.productos = productosNuevos;
+      // ─────────────────────────────────────────────────────────────────
+
       // Verificar si ya existe una masa de este tipo para esta fecha
       const masaExistenteResult = await client.query(
         `SELECT id, codigo_masa, estado, fase_actual
@@ -807,7 +839,6 @@ const sincronizarDesdeOV = async (req, res, next) => {
         logger.info(`Tipo ${tipoMasa} en PLANIFICACION — agregando productos a masa ${masaExistente.id}`);
 
         const masaIdExistente = masaExistente.id;
-        const grupo = masasAgrupadas[tipoMasa];
 
         for (const prod of grupo.productos) {
           // Verificar por sap_item_code + sap_doc_entry para evitar duplicar la misma OV
@@ -904,7 +935,6 @@ const sincronizarDesdeOV = async (req, res, next) => {
         continue;
       }
 
-      const grupo = masasAgrupadas[tipoMasa];
       const codigoMasa = `MASA-OV-${fechaProduccion.replace(/-/g, '')}-${String(ordenCounter).padStart(3, '0')}`;
       const porcentajeMerma = 5.0;
 
