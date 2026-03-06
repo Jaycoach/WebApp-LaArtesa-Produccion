@@ -1085,6 +1085,66 @@ const sincronizarDesdeOV = async (req, res, next) => {
 
       logger.info(`Masa ${masaId} (${tipoMasa}): ${totalKilosBase.toFixed(2)} kg base calculados desde BOM`);
 
+      // ── Poblar ingredientes_masa desde BOM (solo materias primas, sin empaques) ──
+      const todosItemCodes = [...new Set(grupo.productos.map(p => p.itemCode))];
+
+      // Acumular ingredientes sumando cantidades × unidades de cada producto
+      const ingredientesMap = {}; // key: item_code_comp
+      for (const itemCode of todosItemCodes) {
+        const unidadesProducto = grupo.productos
+          .filter(p => p.itemCode === itemCode)
+          .reduce((sum, p) => sum + (p.cantidadPaquetes || p.unidadesPedidas || 0), 0);
+
+        const bomIngResult = await client.query(
+          `SELECT item_code_comp, item_name_comp, cantidad, uom, es_empaque,
+                  grupo_sap, es_empaque
+           FROM sap_bom_componentes
+           WHERE item_code_padre = $1
+             AND es_empaque = false
+             AND grupo_sap = 181`,
+          [itemCode]
+        );
+
+        for (const ing of bomIngResult.rows) {
+          const cantidadTotal = parseFloat(ing.cantidad) * unidadesProducto;
+          if (ingredientesMap[ing.item_code_comp]) {
+            ingredientesMap[ing.item_code_comp].cantidad_kilos += cantidadTotal;
+          } else {
+            ingredientesMap[ing.item_code_comp] = {
+              item_code_comp: ing.item_code_comp,
+              item_name_comp: ing.item_name_comp,
+              cantidad_kilos: cantidadTotal,
+              uom:            ing.uom,
+            };
+          }
+        }
+      }
+
+      // Insertar ingredientes en ingredientes_masa
+      let ordenIng = 1;
+      for (const ing of Object.values(ingredientesMap)) {
+        const cantidadGramos = ing.cantidad_kilos * 1000;
+        await client.query(
+          `INSERT INTO ingredientes_masa (
+             masa_id, ingrediente_sap_code, ingrediente_nombre,
+             orden_visualizacion, porcentaje_panadero,
+             cantidad_gramos, cantidad_kilos, uom,
+             es_harina, es_agua, es_prefermento, es_empaque
+           ) VALUES ($1, $2, $3, $4, 0, $5, $6, $7, false, false, false, false)`,
+          [
+            masaId,
+            ing.item_code_comp,
+            ing.item_name_comp,
+            ordenIng++,
+            cantidadGramos,
+            ing.cantidad_kilos,
+            ing.uom || 'Kg',
+          ]
+        );
+      }
+      logger.info(`Masa ${masaId}: ${Object.keys(ingredientesMap).length} ingredientes poblados desde BOM`);
+      // ── Fin población ingredientes_masa ──────────────────────────────
+
       // Crear registros de progreso para todas las fases
       const fases = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO'];
       for (let i = 0; i < fases.length; i++) {
