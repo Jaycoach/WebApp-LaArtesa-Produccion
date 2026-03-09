@@ -666,7 +666,7 @@ class SAPService {
           itemCode:       item.ItemCode,
           itemName:       item.ItemName,
           uom:            item.InventoryUOM,
-          costoPromedio:  item.MovingAveragePrice || 0,
+          costoPromedio:  bodegaAlmp?.StandardAveragePrice || item.MovingAveragePrice || 0,
           stockAlmp:      bodegaAlmp?.InStock      || 0,
           committedAlmp:  bodegaAlmp?.Committed    || 0,
           orderedAlmp:    bodegaAlmp?.Ordered      || 0,
