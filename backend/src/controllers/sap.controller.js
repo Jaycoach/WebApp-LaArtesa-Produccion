@@ -1533,10 +1533,11 @@ const sincronizarInventarioMP = async (req, res, next) => {
       return res.json({
         success: true,
         message: 'No hay ítems de materia prima en BOM',
-        data: { sincronizados: 0 },
+        data: { sincronizados: 0, lotes_sincronizados: 0 },
       });
     }
 
+    // 1. Sincronizar stock y costo promedio
     const stocks = await sapService.getStockMateriaPrima(itemCodes);
     let sincronizados = 0;
 
@@ -1561,12 +1562,42 @@ const sincronizarInventarioMP = async (req, res, next) => {
       sincronizados++;
     }
 
-    logger.info(`Inventario MP sincronizado: ${sincronizados} ítems`);
+    // 2. Sincronizar lotes
+    const lotesMap = await sapService.getLotesMateriaPrima(itemCodes);
+    let lotesSincronizados = 0;
+
+    for (const [itemCode, lotes] of Object.entries(lotesMap)) {
+      for (const lote of lotes) {
+        await db.query(
+          `INSERT INTO sap_lotes_mp
+             (item_code, item_name, batch, status, admission_date, manufacturing_date, expiration_date, ultimo_sync)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+           ON CONFLICT (item_code, batch) DO UPDATE SET
+             status             = EXCLUDED.status,
+             admission_date     = EXCLUDED.admission_date,
+             manufacturing_date = EXCLUDED.manufacturing_date,
+             expiration_date    = EXCLUDED.expiration_date,
+             ultimo_sync        = NOW()`,
+          [
+            itemCode,
+            stocks[itemCode]?.itemName || null,
+            lote.batch,
+            lote.status,
+            lote.admissionDate || null,
+            lote.manufacturingDate || null,
+            lote.expirationDate || null,
+          ]
+        );
+        lotesSincronizados++;
+      }
+    }
+
+    logger.info(`Inventario MP sincronizado: ${sincronizados} ítems, ${lotesSincronizados} lotes`);
 
     return res.json({
       success: true,
-      message: `Inventario sincronizado: ${sincronizados} materias primas`,
-      data: { sincronizados },
+      message: `Inventario sincronizado: ${sincronizados} materias primas, ${lotesSincronizados} lotes`,
+      data: { sincronizados, lotes_sincronizados: lotesSincronizados },
     });
   } catch (error) {
     logger.error('Error sincronizando inventario MP:', error);
@@ -1576,17 +1607,33 @@ const sincronizarInventarioMP = async (req, res, next) => {
 
 const getInventarioMP = async (req, res, next) => {
   try {
-    const result = await db.query(
+    const inventario = await db.query(
       `SELECT item_code, item_name, uom, stock_almp, committed_almp,
               ordered_almp, costo_promedio, ultimo_sync
        FROM sap_inventario_mp
        ORDER BY item_name`
     );
 
-    return res.json({
-      success: true,
-      data: result.rows,
-    });
+    const lotes = await db.query(
+      `SELECT item_code, batch, status, admission_date,
+              manufacturing_date, expiration_date
+       FROM sap_lotes_mp
+       ORDER BY item_code, expiration_date ASC NULLS LAST`
+    );
+
+    // Agrupar lotes por item_code
+    const lotesPorItem = {};
+    for (const lote of lotes.rows) {
+      if (!lotesPorItem[lote.item_code]) lotesPorItem[lote.item_code] = [];
+      lotesPorItem[lote.item_code].push(lote);
+    }
+
+    const data = inventario.rows.map(item => ({
+      ...item,
+      lotes: lotesPorItem[item.item_code] || [],
+    }));
+
+    return res.json({ success: true, data });
   } catch (error) {
     logger.error('Error obteniendo inventario MP:', error);
     next(error);

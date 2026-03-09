@@ -233,16 +233,59 @@ export const PesajeMasa: React.FC = () => {
         {/* Lista de Ingredientes */}
         <Card title="Checklist de Ingredientes">
           <div className="space-y-4">
+            {checklist.sin_stock_count > 0 && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-300 rounded-lg">
+                <p className="text-red-800 font-semibold text-sm">
+                  ⚠ {checklist.sin_stock_count} ingrediente(s) sin stock suficiente en SAP:
+                </p>
+                <ul className="mt-1 text-red-700 text-sm list-disc list-inside">
+                  {checklist.ingredientes_sin_stock?.map((nombre: string) => (
+                    <li key={nombre}>{nombre}</li>
+                  ))}
+                </ul>
+                <p className="mt-1 text-red-600 text-xs">
+                  Estos ingredientes están bloqueados. Sincroniza el inventario SAP o informa al supervisor.
+                </p>
+              </div>
+            )}
             {checklist.ingredientes.map((ing: any) => (
               <div key={ing.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
-                    <h3 className="font-semibold text-gray-900">{ing.ingrediente_nombre}</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold text-gray-900">{ing.ingrediente_nombre}</h3>
+                      {ing.sin_stock && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-800 border border-red-300">
+                          ⚠ SIN STOCK
+                        </span>
+                      )}
+                    </div>
                     <p className="text-sm text-gray-600">
                       {typeof ing.cantidad_kilos === 'number'
                         ? ing.cantidad_kilos.toFixed(2)
                         : Number(ing.cantidad_kilos).toFixed(2)} kg ({ing.cantidad_gramos}g) - {ing.porcentaje_panadero}% panadero
                     </p>
+                    {/* Stock e inventario SAP */}
+                    <div className="flex flex-wrap gap-3 mt-1 text-xs text-gray-500">
+                      {ing.stock_disponible !== null && (
+                        <span className={ing.sin_stock ? 'text-red-600 font-semibold' : 'text-green-700'}>
+                          Stock ALMP: {Number(ing.stock_disponible).toFixed(3)} {ing.uom || 'kg'}
+                        </span>
+                      )}
+                      {ing.costo_unitario_sap !== null && ing.costo_unitario_sap > 0 && (
+                        <span className="text-blue-600">
+                          Costo: ${Number(ing.costo_unitario_sap).toLocaleString('es-CO', { minimumFractionDigits: 2 })}/{ing.uom || 'kg'}
+                        </span>
+                      )}
+                      {ing.lotes && ing.lotes.length > 0 && (
+                        <span className="text-purple-600">
+                          Lote(s): {ing.lotes.map((l: any) => l.batch).join(', ')}
+                        </span>
+                      )}
+                      {ing.stock_disponible === null && (
+                        <span className="text-gray-400 italic">Sin datos de inventario SAP</span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Checkboxes */}
@@ -251,8 +294,9 @@ export const PesajeMasa: React.FC = () => {
                       <input
                         type="checkbox"
                         checked={ing.disponible}
-                        onChange={(e) => handleMarcar(ing.id, 'disponible', e.target.checked)}
-                        className="w-5 h-5"
+                        onChange={(e) => !ing.sin_stock && handleMarcar(ing.id, 'disponible', e.target.checked)}
+                        disabled={ing.sin_stock}
+                        className="w-5 h-5 disabled:opacity-50"
                       />
                       <span className="text-sm">Disponible</span>
                     </label>

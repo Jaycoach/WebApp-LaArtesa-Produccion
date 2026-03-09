@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import { Card, Button } from '@/components/common';
 import { useSincronizarBOM, useSincronizarSAP } from '@/hooks/useMasas';
+import { apiClient } from '@/services/api';
 
 export const SincronizarSAP: React.FC = () => {
   const [fecha, setFecha] = useState<string>(
@@ -10,6 +12,10 @@ export const SincronizarSAP: React.FC = () => {
 
   const sincronizarBOMMutation = useSincronizarBOM();
   const sincronizarOVMutation = useSincronizarSAP();
+  const sincronizarInventarioMutation = useMutation({
+    mutationFn: () => apiClient.post('/sap/sincronizar-inventario-mp'),
+    onSuccess: () => {},
+  });
 
   const handleSyncBOM = async () => {
     try {
@@ -24,6 +30,14 @@ export const SincronizarSAP: React.FC = () => {
       await sincronizarOVMutation.mutateAsync({ fecha, forzar });
     } catch {
       // error manejado por el estado de la mutation
+    }
+  };
+
+  const handleSyncInventario = async () => {
+    try {
+      await sincronizarInventarioMutation.mutateAsync();
+    } catch (e) {
+      // error manejado por isError
     }
   };
 
@@ -78,6 +92,32 @@ export const SincronizarSAP: React.FC = () => {
           )}
         </div>
       </Card>
+
+      {/* Sincronizar Inventario MP */}
+      <div className="border rounded-lg p-4 bg-white">
+        <h3 className="font-semibold text-gray-800 mb-1">Inventario y Lotes — Bodega ALMP</h3>
+        <p className="text-sm text-gray-500 mb-3">
+          Sincroniza stock disponible, costo promedio y lotes activos de todas las materias primas desde SAP.
+          Ejecutar antes de iniciar cualquier pesaje.
+        </p>
+        <Button
+          variant="primary"
+          isLoading={sincronizarInventarioMutation.isPending}
+          disabled={sincronizarInventarioMutation.isPending || sincronizarBOMMutation.isPending || sincronizarOVMutation.isPending}
+          onClick={handleSyncInventario}
+        >
+          {sincronizarInventarioMutation.isPending ? 'Sincronizando inventario...' : 'Sincronizar Inventario MP'}
+        </Button>
+        {sincronizarInventarioMutation.isSuccess && sincronizarInventarioMutation.data && (
+          <ul className="mt-2 text-sm text-green-700 space-y-0.5">
+            <li>✓ {(sincronizarInventarioMutation.data as any).data?.sincronizados} materias primas sincronizadas</li>
+            <li>✓ {(sincronizarInventarioMutation.data as any).data?.lotes_sincronizados} lotes sincronizados</li>
+          </ul>
+        )}
+        {sincronizarInventarioMutation.isError && (
+          <p className="mt-2 text-sm text-red-800">✗ Error al sincronizar inventario. Verifica la conexión con SAP.</p>
+        )}
+      </div>
 
       {/* Paso 2: Órdenes de Venta */}
       <Card title="Paso 2 — Órdenes de Venta (diario)">
