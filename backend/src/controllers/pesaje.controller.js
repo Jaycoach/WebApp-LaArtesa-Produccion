@@ -41,6 +41,56 @@ const getChecklist = async (req, res, next) => {
     }
 
     const ingredientes  = await fasesModel.getIngredientesByMasa(masaId);
+
+    // Enriquecer ingredientes con stock e inventario desde sap_inventario_mp
+    const itemCodes = ingredientes
+      .filter(i => i.ingrediente_sap_code)
+      .map(i => i.ingrediente_sap_code);
+
+    let inventarioMap = {};
+    let lotesMap = {};
+    if (itemCodes.length > 0) {
+      const invResult = await db.query(
+        `SELECT item_code, stock_almp, committed_almp, costo_promedio, ultimo_sync
+         FROM sap_inventario_mp
+         WHERE item_code = ANY($1)`,
+        [itemCodes]
+      );
+      for (const row of invResult.rows) {
+        inventarioMap[row.item_code] = row;
+      }
+
+      const lotesResult = await db.query(
+        `SELECT item_code, batch, status, admission_date, expiration_date
+         FROM sap_lotes_mp
+         WHERE item_code = ANY($1)
+         ORDER BY item_code, expiration_date ASC NULLS LAST`,
+        [itemCodes]
+      );
+      for (const lote of lotesResult.rows) {
+        if (!lotesMap[lote.item_code]) lotesMap[lote.item_code] = [];
+        lotesMap[lote.item_code].push(lote);
+      }
+    }
+
+    // Adjuntar datos de stock a cada ingrediente
+    const ingredientesConStock = ingredientes.map(ing => {
+      const inv = inventarioMap[ing.ingrediente_sap_code] || null;
+      const stockDisponible = inv ? parseFloat(inv.stock_almp) - parseFloat(inv.committed_almp) : null;
+      const cantidadRequerida = parseFloat(ing.cantidad_kilos) || 0;
+      const sinStock = inv !== null && stockDisponible < cantidadRequerida;
+      return {
+        ...ing,
+        stock_almp:          inv ? parseFloat(inv.stock_almp) : null,
+        committed_almp:      inv ? parseFloat(inv.committed_almp) : null,
+        stock_disponible:    stockDisponible,
+        costo_unitario_sap:  inv ? parseFloat(inv.costo_promedio) : null,
+        inventario_sync:     inv ? inv.ultimo_sync : null,
+        sin_stock:           sinStock,
+        lotes:               lotesMap[ing.ingrediente_sap_code] || [],
+      };
+    });
+
     const progresoFases = await fasesModel.getProgresoFases(masaId);
     const fasePesaje    = progresoFases.find(f => f.fase === 'PESAJE');
 
@@ -85,7 +135,7 @@ const getChecklist = async (req, res, next) => {
       es_repeticion:        masa.es_repeticion ?? false,
       fecha_inicio:         fasePesaje?.fecha_inicio,
       usuario_responsable:  fasePesaje?.usuario_responsable,
-      ingredientes,
+      ingredientes:         ingredientesConStock,
       todosDisponibles,
       todosVerificados,
       todosPesados,
@@ -93,6 +143,8 @@ const getChecklist = async (req, res, next) => {
       progreso,
       productos_con_ajuste: productosConAjuste,
       hay_ajustes_divisor:  hayAjustesDiv,
+      sin_stock_count:           ingredientesConStock.filter(i => i.sin_stock).length,
+      ingredientes_sin_stock:    ingredientesConStock.filter(i => i.sin_stock).map(i => i.ingrediente_nombre),
     };
 
     res.json({ success: true, data: checklist });
@@ -177,6 +229,36 @@ const confirmarPesaje = async (req, res, next) => {
         success: false,
         message: `La masa debe estar en estado APROBADA para confirmar el pesaje. Estado actual: ${masaCheck.rows[0].estado}`,
         estado: masaCheck.rows[0].estado,
+      });
+    }
+
+    // Validar stock suficiente para todos los ingredientes
+    const ingResult = await db.query(
+      `SELECT im.ingrediente_sap_code, im.ingrediente_nombre, im.cantidad_kilos,
+              inv.stock_almp, inv.committed_almp, inv.costo_promedio
+       FROM ingredientes_masa im
+       LEFT JOIN sap_inventario_mp inv ON inv.item_code = im.ingrediente_sap_code
+       WHERE im.masa_id = $1 AND im.es_empaque = false`,
+      [masaId]
+    );
+
+    const sinStock = ingResult.rows.filter(ing => {
+      if (!ing.stock_almp && ing.stock_almp !== 0) return false; // sin datos SAP: no bloquear
+      const disponible = parseFloat(ing.stock_almp) - parseFloat(ing.committed_almp || 0);
+      return disponible < parseFloat(ing.cantidad_kilos);
+    });
+
+    if (sinStock.length > 0) {
+      return res.status(422).json({
+        success: false,
+        message: 'No se puede confirmar el pesaje: hay ingredientes sin stock suficiente en SAP.',
+        data: {
+          ingredientes_sin_stock: sinStock.map(i => ({
+            nombre: i.ingrediente_nombre,
+            requerido_kg: parseFloat(i.cantidad_kilos),
+            disponible_kg: Math.max(0, parseFloat(i.stock_almp) - parseFloat(i.committed_almp || 0)),
+          })),
+        },
       });
     }
 
@@ -270,6 +352,73 @@ const confirmarPesaje = async (req, res, next) => {
     // ── Flujo estándar sin subdivisión ─────────────────────────────
     const siguienteFase = await fasesModel.desbloquearSiguienteFase(masaId, 'PESAJE');
     logger.info(`Fase desbloqueada después de PESAJE: ${siguienteFase?.fase || 'AMASADO'}`);
+
+    // Calcular y guardar costos de MP
+    try {
+      const ingCostosResult = await db.query(
+        `SELECT im.id, im.ingrediente_sap_code, im.cantidad_kilos, inv.costo_promedio
+         FROM ingredientes_masa im
+         LEFT JOIN sap_inventario_mp inv ON inv.item_code = im.ingrediente_sap_code
+         WHERE im.masa_id = $1 AND im.es_empaque = false`,
+        [masaId]
+      );
+
+      let costoMPTotal = 0;
+      let kilosMasaReal = 0;
+
+      for (const ing of ingCostosResult.rows) {
+        const costo = parseFloat(ing.costo_promedio || 0);
+        const kilos = parseFloat(ing.cantidad_kilos || 0);
+        const costoTotal = costo * kilos;
+        costoMPTotal += costoTotal;
+        kilosMasaReal += kilos;
+
+        await db.query(
+          `UPDATE ingredientes_masa
+           SET costo_unitario_sap = $1, costo_total_mp = $2
+           WHERE id = $3`,
+          [costo, costoTotal, ing.id]
+        );
+      }
+
+      const costoPorKilo = kilosMasaReal > 0 ? costoMPTotal / kilosMasaReal : 0;
+
+      // Upsert en costos_masa
+      await db.query(
+        `INSERT INTO costos_masa
+           (masa_id, costo_mp_total, costo_total_masa, kilos_masa_real, costo_por_kilo, fecha_calculo_mp)
+         VALUES ($1, $2, $2, $3, $4, NOW())
+         ON CONFLICT (masa_id) DO UPDATE SET
+           costo_mp_total     = EXCLUDED.costo_mp_total,
+           costo_total_masa   = EXCLUDED.costo_mp_total,
+           kilos_masa_real    = EXCLUDED.kilos_masa_real,
+           costo_por_kilo     = EXCLUDED.costo_por_kilo,
+           fecha_calculo_mp   = NOW(),
+           updated_at         = NOW()`,
+        [masaId, costoMPTotal, kilosMasaReal, costoPorKilo]
+      );
+
+      // Prorratear costo por producto
+      const productosResult = await db.query(
+        `SELECT id, kilos_programados FROM productos_por_masa WHERE masa_id = $1`,
+        [masaId]
+      );
+
+      for (const prod of productosResult.rows) {
+        const kilosProd = parseFloat(prod.kilos_programados || 0);
+        const costoMPUnitario = kilosMasaReal > 0 ? (costoMPTotal / kilosMasaReal) * kilosProd : 0;
+        await db.query(
+          `UPDATE productos_por_masa
+           SET costo_mp_unitario = $1, costo_mp_total_prod = $2
+           WHERE id = $3`,
+          [costoPorKilo, costoMPUnitario, prod.id]
+        );
+      }
+
+      logger.info(`Costos MP calculados para masa ${masaId}: $${costoMPTotal.toFixed(2)} total, $${costoPorKilo.toFixed(2)}/kg`);
+    } catch (costoError) {
+      logger.warn(`Error calculando costos MP para masa ${masaId} (no bloquea):`, costoError.message);
+    }
 
     res.json({
       success: true,

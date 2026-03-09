@@ -680,6 +680,58 @@ class SAPService {
     logger.info(`SAP: stock obtenido para ${Object.keys(resultado).length} ítems`);
     return resultado;
   }
+  /**
+   * Obtiene lotes activos de materia prima desde SAP BatchNumberDetails.
+   * Filtra por los itemCodes recibidos (no hay filtro por bodega disponible en esta entidad).
+   * @param {string[]} itemCodes - códigos de ítem a consultar
+   * @returns {Object} mapa itemCode → array de lotes
+   */
+  async getLotesMateriaPrima(itemCodes) {
+    await this.ensureSession();
+
+    if (!itemCodes || itemCodes.length === 0) return {};
+
+    const resultado = {};
+    for (const code of itemCodes) resultado[code] = [];
+
+    // SAP no permite filtrar BatchNumberDetails por lista de ItemCodes en un solo call.
+    // Paginamos todos los lotes Released y filtramos en memoria.
+    const itemSet = new Set(itemCodes);
+    let skip = 0;
+    const top = 20;
+
+    while (true) {
+      const response = await this.client.get('/BatchNumberDetails', {
+        params: {
+          $filter: `Status eq 'bdsStatus_Released'`,
+          $select: 'ItemCode,ItemDescription,Batch,Status,AdmissionDate,ManufacturingDate,ExpirationDate',
+          $top: top,
+          $skip: skip,
+        },
+      });
+
+      const lotes = response.data.value || [];
+      if (lotes.length === 0) break;
+
+      for (const lote of lotes) {
+        if (itemSet.has(lote.ItemCode)) {
+          resultado[lote.ItemCode].push({
+            batch:             lote.Batch,
+            status:            lote.Status,
+            admissionDate:     lote.AdmissionDate ? lote.AdmissionDate.substring(0, 10) : null,
+            manufacturingDate: lote.ManufacturingDate ? lote.ManufacturingDate.substring(0, 10) : null,
+            expirationDate:    lote.ExpirationDate ? lote.ExpirationDate.substring(0, 10) : null,
+          });
+        }
+      }
+
+      if (lotes.length < top) break;
+      skip += top;
+    }
+
+    logger.info(`SAP: lotes obtenidos para ${itemCodes.length} ítems`);
+    return resultado;
+  }
 }
 
 // Singleton
