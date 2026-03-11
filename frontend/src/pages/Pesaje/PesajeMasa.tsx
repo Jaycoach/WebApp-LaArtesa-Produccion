@@ -277,10 +277,41 @@ export const PesajeMasa: React.FC = () => {
                           Costo: ${Number(ing.costo_unitario_sap).toLocaleString('es-CO', { minimumFractionDigits: 2 })}/{ing.uom || 'kg'}
                         </span>
                       )}
-                      {ing.lotes && ing.lotes.length > 0 && (
-                        <span className="text-purple-600">
-                          Lote(s): {ing.lotes.map((l: any) => l.batch).join(', ')}
+                      {ing.excluido_stock && (
+                        <span className="text-gray-400 italic">
+                          Sin validación de stock (insumo propio)
                         </span>
+                      )}
+                      {ing.lotes && ing.lotes.length > 0 && (
+                        <div className="w-full mt-1">
+                          <span className="text-purple-700 font-medium">
+                            Lote sugerido: {ing.lote_sugerido || ing.lotes[0]?.batch}
+                          </span>
+                          <div className="flex flex-wrap gap-1 mt-0.5">
+                            {ing.lotes.map((l: any) => (
+                              <span
+                                key={l.batch}
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs border ${
+                                  l.batch === (ing.lote_sugerido || ing.lotes[0]?.batch)
+                                    ? 'bg-purple-100 border-purple-400 text-purple-800 font-semibold'
+                                    : 'bg-gray-50 border-gray-300 text-gray-600'
+                                }`}
+                              >
+                                <span>{l.batch}</span>
+                                <span className="font-medium">
+                                  {typeof l.cantidad_disponible === 'number'
+                                    ? l.cantidad_disponible.toFixed(3)
+                                    : '?'} {ing.uom || 'kg'}
+                                </span>
+                                {l.expiration_date && (
+                                  <span className="text-gray-400">
+                                    vence {l.expiration_date}
+                                  </span>
+                                )}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
                       )}
                       {ing.stock_disponible === null && (
                         <span className="text-gray-400 italic">Sin datos de inventario SAP</span>

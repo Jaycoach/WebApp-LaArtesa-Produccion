@@ -63,3 +63,26 @@ export const useUpdateCorreos = () => {
     },
   });
 };
+
+/**
+ * Hook para obtener el costo del agua
+ */
+export const useCostoAgua = () => {
+  return useQuery({
+    queryKey: ['config', 'costo-agua'],
+    queryFn: () => configService.getCostoAgua(),
+  });
+};
+
+/**
+ * Hook para actualizar el costo del agua por litro
+ */
+export const useUpdateCostoAgua = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (costo: number) => configService.updateCostoAgua(costo),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['config', 'costo-agua'] });
+    },
+  });
+};

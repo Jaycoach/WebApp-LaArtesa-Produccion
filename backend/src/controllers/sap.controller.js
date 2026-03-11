@@ -1570,14 +1570,15 @@ const sincronizarInventarioMP = async (req, res, next) => {
       for (const lote of lotes) {
         await db.query(
           `INSERT INTO sap_lotes_mp
-             (item_code, item_name, batch, status, admission_date, manufacturing_date, expiration_date, ultimo_sync)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+             (item_code, item_name, batch, status, admission_date, manufacturing_date, expiration_date, cantidad_disponible, ultimo_sync)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
            ON CONFLICT (item_code, batch) DO UPDATE SET
-             status             = EXCLUDED.status,
-             admission_date     = EXCLUDED.admission_date,
-             manufacturing_date = EXCLUDED.manufacturing_date,
-             expiration_date    = EXCLUDED.expiration_date,
-             ultimo_sync        = NOW()`,
+             status              = EXCLUDED.status,
+             admission_date      = EXCLUDED.admission_date,
+             manufacturing_date  = EXCLUDED.manufacturing_date,
+             expiration_date     = EXCLUDED.expiration_date,
+             cantidad_disponible = EXCLUDED.cantidad_disponible,
+             ultimo_sync         = NOW()`,
           [
             itemCode,
             stocks[itemCode]?.itemName || null,
@@ -1586,6 +1587,7 @@ const sincronizarInventarioMP = async (req, res, next) => {
             lote.admissionDate || null,
             lote.manufacturingDate || null,
             lote.expirationDate || null,
+            lote.cantidad_disponible || 0,
           ]
         );
         lotesSincronizados++;
@@ -1616,9 +1618,9 @@ const getInventarioMP = async (req, res, next) => {
 
     const lotes = await db.query(
       `SELECT item_code, batch, status, admission_date,
-              manufacturing_date, expiration_date
+              manufacturing_date, expiration_date, cantidad_disponible
        FROM sap_lotes_mp
-       ORDER BY item_code, expiration_date ASC NULLS LAST`
+       ORDER BY item_code, admission_date ASC NULLS LAST`
     );
 
     // Agrupar lotes por item_code

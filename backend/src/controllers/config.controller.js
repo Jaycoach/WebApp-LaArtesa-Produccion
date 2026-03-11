@@ -3,6 +3,7 @@
  */
 
 const fasesModel = require('../models/fases.model');
+const db = require('../database/connection');
 const logger = require('../utils/logger');
 
 /**
@@ -120,9 +121,59 @@ const updateCorreos = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Obtener costo del agua por litro
+ * @route   GET /api/config/costo-agua
+ * @access  Private
+ */
+const getCostoAgua = async (req, res, next) => {
+  try {
+    const result = await db.query(
+      `SELECT valor, fecha_actualizacion AS updated_at
+       FROM configuracion_sistema WHERE clave = 'costo_agua_litro'`
+    );
+    const costo = result.rows.length > 0 ? parseFloat(result.rows[0].valor) || 0 : 0;
+    res.json({ success: true, data: { costo, updated_at: result.rows[0]?.updated_at } });
+  } catch (error) {
+    logger.error('Error al obtener costo del agua:', error);
+    next(error);
+  }
+};
+
+/**
+ * @desc    Actualizar costo del agua por litro
+ * @route   PUT /api/config/costo-agua
+ * @access  Private (Admin only)
+ */
+const updateCostoAgua = async (req, res, next) => {
+  try {
+    const { costo } = req.body;
+    if (costo === undefined || costo === null || isNaN(parseFloat(costo)) || parseFloat(costo) < 0) {
+      return res.status(400).json({ success: false, message: 'Costo inválido. Debe ser un número >= 0' });
+    }
+    const result = await db.query(
+      `UPDATE configuracion_sistema
+       SET valor = $1, fecha_actualizacion = NOW(), actualizado_por = $2
+       WHERE clave = 'costo_agua_litro'
+       RETURNING valor, fecha_actualizacion AS updated_at`,
+      [String(parseFloat(costo)), req.user.id]
+    );
+    res.json({
+      success: true,
+      data: { costo: parseFloat(result.rows[0].valor), updated_at: result.rows[0].updated_at },
+      message: 'Costo del agua actualizado correctamente',
+    });
+  } catch (error) {
+    logger.error('Error al actualizar costo del agua:', error);
+    next(error);
+  }
+};
+
 module.exports = {
   getFactorAbsorcion,
   updateFactorAbsorcion,
   getCorreos,
   updateCorreos,
+  getCostoAgua,
+  updateCostoAgua,
 };
