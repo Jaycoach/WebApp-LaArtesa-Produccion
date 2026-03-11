@@ -152,9 +152,15 @@ const updateCostoAgua = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Costo inválido. Debe ser un número >= 0' });
     }
     const result = await db.query(
-      `UPDATE configuracion_sistema
-       SET valor = $1, fecha_actualizacion = NOW(), actualizado_por = $2
-       WHERE clave = 'costo_agua_litro'
+      `INSERT INTO configuracion_sistema
+         (clave, valor, tipo, categoria, descripcion, es_publica, actualizado_por)
+       VALUES ('costo_agua_litro', $1, 'NUMBER', 'PRODUCCION',
+               'Costo por litro de agua en COP (insumo propio, no se compra directamente)',
+               false, $2)
+       ON CONFLICT (clave) DO UPDATE SET
+         valor           = EXCLUDED.valor,
+         actualizado_por = EXCLUDED.actualizado_por,
+         fecha_actualizacion = NOW()
        RETURNING valor, fecha_actualizacion AS updated_at`,
       [String(parseFloat(costo)), req.user.id]
     );

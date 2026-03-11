@@ -293,6 +293,13 @@ const aprobarMasa = async (req, res, next) => {
            WHERE id = $1`,
           [subMasa.id, req.user.id]
         );
+        // Completar PLANIFICACION (evita que quede EN_PROGRESO junto con PESAJE)
+        await db.query(
+          `UPDATE progreso_fases
+           SET estado = 'COMPLETADA'
+           WHERE masa_id = $1 AND fase = 'PLANIFICACION'`,
+          [subMasa.id]
+        );
         await db.query(
           `UPDATE progreso_fases
            SET estado = 'EN_PROGRESO'
