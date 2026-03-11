@@ -729,13 +729,13 @@ class SAPService {
 
     // Traer todos los lotes Released en ALMP y filtrar en memoria por itemCodes
     const resultado = {};
+    const PAGE_SIZE = 20; // SAP fuerza máximo 20 por página en SQLQueries
     let skip = 0;
-    const top = 500;
 
     while (true) {
       const response = await this.client.get(
         `/SQLQueries('${SQL_CODE}')/List`,
-        { params: { $skip: skip, $top: top } }
+        { params: { $skip: skip, $top: PAGE_SIZE } }
       );
       const rows = response.data?.value || [];
       if (rows.length === 0) break;
@@ -759,8 +759,10 @@ class SAPService {
         });
       }
 
-      if (rows.length < top) break;
-      skip += top;
+      // Si hay nextLink hay más páginas; si vino menos de PAGE_SIZE ya terminamos
+      const hasMore = !!response.data?.['@odata.nextLink'];
+      if (!hasMore || rows.length < PAGE_SIZE) break;
+      skip += PAGE_SIZE;
     }
 
     // Ordenar por fecha de admisión ASC → lote más antiguo primero (sugerido en pesaje)
