@@ -12,6 +12,7 @@
 const fasesModel = require('../models/fases.model');
 const db        = require('../database/connection');
 const logger     = require('../utils/logger');
+const sapService    = require('../services/sap.service');
 const { ejecutarSubdivision } = require('./fases.controller');
 
 /**
@@ -228,6 +229,100 @@ const updateIngrediente = async (req, res, next) => {
 };
 
 /**
+ * Envía salida de inventario a SAP (GoodsIssues) por los ingredientes pesados.
+ * No bloquea el flujo de producción — errores son capturados y logueados.
+ */
+const enviarGoodsIssuePesaje = async (masaId, usuarioId) => {
+  const inicio = Date.now();
+  let requestPayload = null;
+  try {
+    // Leer ingredientes pesados (no empaque) con su lote registrado
+    const result = await db.query(
+      `SELECT im.ingrediente_sap_code, im.ingrediente_nombre,
+              im.peso_real, im.lote,
+              inv.manage_batch_numbers
+       FROM ingredientes_masa im
+       LEFT JOIN sap_inventario_mp inv ON inv.item_code = im.ingrediente_sap_code
+       WHERE im.masa_id = $1
+         AND im.es_empaque = false
+         AND im.pesado = true
+         AND im.peso_real > 0`,
+      [masaId]
+    );
+
+    if (result.rows.length === 0) {
+      logger.warn(`GoodsIssue masa ${masaId}: sin ingredientes pesados, omitiendo.`);
+      return;
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+
+    const documentLines = result.rows.map(ing => {
+      const line = {
+        ItemCode:      ing.ingrediente_sap_code,
+        Quantity:      parseFloat(ing.peso_real) / 1000, // gramos → kg
+        WarehouseCode: 'ALMP',
+      };
+      // Solo agregar BatchNumbers si el ítem maneja lotes Y tiene lote registrado
+      if (ing.manage_batch_numbers && ing.lote) {
+        line.BatchNumbers = [{
+          BatchNumber: ing.lote,
+          Quantity:    parseFloat(ing.peso_real) / 1000,
+        }];
+      }
+      return line;
+    });
+
+    requestPayload = {
+      DocDate:       today,
+      Comments:      `Consumo pesaje masa ${masaId}`,
+      DocumentLines: documentLines,
+    };
+
+    await sapService.ensureSession();
+    const response = await sapService.client.post('/GoodsIssues', requestPayload);
+
+    const tiempoRespuesta = Date.now() - inicio;
+    await db.query(
+      `INSERT INTO sap_sync_log
+         (tipo_operacion, estado, sap_docentry, sap_docnum,
+          request_payload, response_payload, tiempo_respuesta, usuario_id)
+       VALUES ('GOODS_ISSUE_PESAJE', 'SUCCESS', $1, $2, $3, $4, $5, $6)`,
+      [
+        response.data?.DocEntry || null,
+        response.data?.DocNum   ? String(response.data.DocNum) : null,
+        JSON.stringify(requestPayload),
+        JSON.stringify({ DocEntry: response.data?.DocEntry, DocNum: response.data?.DocNum, masa_id: masaId }),
+        tiempoRespuesta,
+        usuarioId,
+      ]
+    );
+
+    logger.info(`GoodsIssue enviado para masa ${masaId}: DocEntry ${response.data?.DocEntry}`);
+  } catch (err) {
+    const tiempoRespuesta = Date.now() - inicio;
+    const sapMsg = err?.response?.data?.error?.message?.value || err.message;
+    logger.error(`Error enviando GoodsIssue para masa ${masaId}: ${sapMsg}`);
+    try {
+      await db.query(
+        `INSERT INTO sap_sync_log
+           (tipo_operacion, estado, request_payload,
+            error_message, tiempo_respuesta, usuario_id)
+         VALUES ('GOODS_ISSUE_PESAJE', 'ERROR', $1, $2, $3, $4)`,
+        [
+          JSON.stringify(requestPayload),
+          sapMsg,
+          tiempoRespuesta,
+          usuarioId,
+        ]
+      );
+    } catch (logErr) {
+      logger.error(`Error logueando fallo GoodsIssue masa ${masaId}:`, logErr.message);
+    }
+  }
+};
+
+/**
  * @desc    Confirmar que el pesaje está completo
  * @route   POST /api/pesaje/:masaId/confirmar
  * @access  Private
@@ -291,6 +386,51 @@ const confirmarPesaje = async (req, res, next) => {
             requerido_kg: parseFloat(i.cantidad_kilos),
             disponible_kg: Math.max(0, parseFloat(i.stock_almp) - parseFloat(i.committed_almp || 0)),
           })),
+        },
+      });
+    }
+
+    // Validar que ingredientes con lotes SAP tengan lote registrado y válido
+    const loteValidResult = await db.query(
+      `SELECT im.ingrediente_sap_code, im.ingrediente_nombre, im.lote,
+              inv.manage_batch_numbers
+       FROM ingredientes_masa im
+       LEFT JOIN sap_inventario_mp inv ON inv.item_code = im.ingrediente_sap_code
+       WHERE im.masa_id = $1
+         AND im.es_empaque = false
+         AND im.pesado = true`,
+      [masaId]
+    );
+
+    const sinLoteRequerido = [];
+    const loteInvalidoSAP  = [];
+
+    for (const ing of loteValidResult.rows) {
+      if (!ing.manage_batch_numbers) continue; // ítem sin manejo de lotes: saltar
+
+      if (!ing.lote || ing.lote.trim() === '') {
+        sinLoteRequerido.push(ing.ingrediente_nombre);
+        continue;
+      }
+
+      // Verificar que el lote exista en sap_lotes_mp
+      const loteExiste = await db.query(
+        `SELECT 1 FROM sap_lotes_mp WHERE item_code = $1 AND batch = $2 LIMIT 1`,
+        [ing.ingrediente_sap_code, ing.lote.trim()]
+      );
+      if (loteExiste.rowCount === 0) {
+        loteInvalidoSAP.push({ nombre: ing.ingrediente_nombre, lote: ing.lote });
+      }
+    }
+
+    if (sinLoteRequerido.length > 0 || loteInvalidoSAP.length > 0) {
+      return res.status(422).json({
+        success: false,
+        message: 'No se puede confirmar el pesaje: hay ingredientes con lote inválido o faltante.',
+        data: {
+          sin_lote:      sinLoteRequerido,
+          lote_invalido: loteInvalidoSAP.map(i => `${i.nombre} (lote: ${i.lote})`),
+          instruccion:   'Sincronice el inventario MP desde SAP para actualizar los lotes disponibles.',
         },
       });
     }
@@ -371,6 +511,10 @@ const confirmarPesaje = async (req, res, next) => {
     if (subdivision) {
       // La masa fue subdividida. Las sub-masas ya tienen PESAJE completado.
       logger.info(`Masa ${masaId} subdividida en ${subdivision.n_tandas} tandas después del pesaje.`);
+
+      // Enviar salida de inventario SAP (no bloquea)
+      enviarGoodsIssuePesaje(masaId, req.user.id).catch(() => {});
+
       return res.json({
         success: true,
         message: `Pesaje confirmado. La masa supera el límite de ${subdivision.limite_kg} kg y fue dividida en ${subdivision.n_tandas} tandas. Cada tanda ya tiene el pesaje registrado.`,
@@ -452,6 +596,9 @@ const confirmarPesaje = async (req, res, next) => {
     } catch (costoError) {
       logger.warn(`Error calculando costos MP para masa ${masaId} (no bloquea):`, costoError.message);
     }
+
+    // Enviar salida de inventario SAP (no bloquea)
+    enviarGoodsIssuePesaje(masaId, req.user.id).catch(() => {});
 
     res.json({
       success: true,

@@ -1546,18 +1546,20 @@ const sincronizarInventarioMP = async (req, res, next) => {
 
       await db.query(
         `INSERT INTO sap_inventario_mp
-           (item_code, item_name, uom, stock_almp, committed_almp, ordered_almp, costo_promedio, ultimo_sync)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+           (item_code, item_name, uom, stock_almp, committed_almp, ordered_almp, costo_promedio, manage_batch_numbers, ultimo_sync)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
          ON CONFLICT (item_code) DO UPDATE SET
-           item_name      = EXCLUDED.item_name,
-           uom            = EXCLUDED.uom,
-           stock_almp     = EXCLUDED.stock_almp,
-           committed_almp = EXCLUDED.committed_almp,
-           ordered_almp   = EXCLUDED.ordered_almp,
-           costo_promedio = EXCLUDED.costo_promedio,
-           ultimo_sync    = NOW()`,
+           item_name            = EXCLUDED.item_name,
+           uom                  = EXCLUDED.uom,
+           stock_almp           = EXCLUDED.stock_almp,
+           committed_almp       = EXCLUDED.committed_almp,
+           ordered_almp         = EXCLUDED.ordered_almp,
+           costo_promedio       = EXCLUDED.costo_promedio,
+           manage_batch_numbers = EXCLUDED.manage_batch_numbers,
+           ultimo_sync          = NOW()`,
         [itemCode, datos.itemName, datos.uom, datos.stockAlmp,
-         datos.committedAlmp, datos.orderedAlmp, datos.costoPromedio]
+         datos.committedAlmp, datos.orderedAlmp, datos.costoPromedio,
+         datos.manageBatchNumbers ?? false]
       );
       sincronizados++;
     }
