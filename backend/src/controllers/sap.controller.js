@@ -1521,21 +1521,52 @@ const sincronizarBOM = async (req, res, next) => {
 
 const sincronizarInventarioMP = async (req, res, next) => {
   try {
+    const modo = req.body?.modo || req.query?.modo || 'completo';
+
+    // Obtener todos los ítems MP del BOM
     const itemsResult = await db.query(
       `SELECT DISTINCT item_code_comp AS item_code
        FROM sap_bom_componentes
        WHERE grupo_sap = 181 AND es_empaque = false`
     );
 
-    const itemCodes = itemsResult.rows.map(r => r.item_code);
+    const todosItemCodes = itemsResult.rows.map(r => r.item_code);
 
-    if (itemCodes.length === 0) {
+    if (todosItemCodes.length === 0) {
       return res.json({
         success: true,
         message: 'No hay ítems de materia prima en BOM',
         data: { sincronizados: 0, lotes_sincronizados: 0 },
       });
     }
+
+    // Modo 'activas': solo ítems de masas en APROBADA/PESAJE sin stock en DB
+    let itemCodesLotes = todosItemCodes;
+    if (modo === 'activas') {
+      const activasResult = await db.query(
+        `SELECT DISTINCT im.ingrediente_sap_code AS item_code
+         FROM ingredientes_masa im
+         JOIN masas_produccion mp ON im.masa_id = mp.id
+         WHERE mp.fase_actual IN ('APROBADA','PESAJE')
+         AND im.es_empaque = false
+         AND im.ingrediente_sap_code IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM sap_lotes_mp sl
+           WHERE sl.item_code = im.ingrediente_sap_code
+           AND sl.cantidad_disponible > 0
+         )`
+      );
+      if (activasResult.rows.length > 0) {
+        itemCodesLotes = activasResult.rows.map(r => r.item_code);
+        logger.info(`Sync lotes modo 'activas': ${itemCodesLotes.length} ítems sin stock en masas activas`);
+      } else {
+        logger.info(`Sync lotes modo 'activas': todos los ítems ya tienen stock en DB`);
+        itemCodesLotes = [];
+      }
+    }
+
+    // Stock siempre sincroniza todos los ítems del BOM
+    const itemCodes = todosItemCodes;
 
     // 1. Sincronizar stock y costo promedio
     const stocks = await sapService.getStockMateriaPrima(itemCodes);
@@ -1564,8 +1595,15 @@ const sincronizarInventarioMP = async (req, res, next) => {
       sincronizados++;
     }
 
-    // 2. Sincronizar lotes
-    const lotesMap = await sapService.getLotesMateriaPrima(itemCodes);
+    // 2. Sincronizar lotes — solo ítems con manage_batch_numbers=true
+    const itemCodesConLotes = itemCodesLotes.filter(code => {
+      const inv = stocks[code];
+      return inv && inv.manageBatchNumbers === true;
+    });
+
+    const lotesMap = itemCodesConLotes.length > 0
+      ? await sapService.getLotesMateriaPrima(itemCodesConLotes)
+      : {};
     let lotesSincronizados = 0;
 
     for (const [itemCode, lotes] of Object.entries(lotesMap)) {

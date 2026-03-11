@@ -694,23 +694,29 @@ class SAPService {
 
     const SQL_CODE = 'artesa_lotes_almp_v2';
     const SQL_NAME = 'Stock lotes por bodega ALMP v2';
-    const SQL_TEXT =
-      'SELECT T0."ItemCode", T0."DistNumber" AS "BatchNum", ' +
-      'T0."CreateDate", T0."ExpDate", T0."MnfDate", T1."Quantity" ' +
-      'FROM "OBTN" T0 ' +
-      'INNER JOIN "OBTQ" T1 ON T0."ItemCode" = T1."ItemCode" ' +
-      'AND T0."SysNumber" = T1."SysNumber" ' +
-      'WHERE T1."WhsCode" = \'ALMP\' ' +
-      'AND T0."Status" = \'0\' ' +
-      'AND T1."Quantity" > 0';
 
-    // GET para verificar si existe, POST solo si no existe (PUT no soportado en SAP)
+    // Filtro IN dinámico — solo los itemCodes solicitados
+    const inList = itemCodes.map(c => `'${c}'`).join(',');
+    const SQL_TEXT =
+      'SELECT "OBTQ"."ItemCode", "OBTN"."DistNumber" AS "BatchNum", ' +
+      '"OBTQ"."Quantity", "OBTN"."ExpDate", "OBTN"."MnfDate", "OBTN"."CreateDate" ' +
+      'FROM "OBTQ" ' +
+      'INNER JOIN "OBTN" ON "OBTQ"."ItemCode" = "OBTN"."ItemCode" ' +
+      'AND "OBTQ"."SysNumber" = "OBTN"."SysNumber" ' +
+      `WHERE "OBTQ"."WhsCode" = 'ALMP' ` +
+      `AND "OBTQ"."Quantity" > 0 ` +
+      `AND "OBTQ"."ItemCode" IN (${inList})`;
+
+    // El SQL cambia dinámicamente (filtro IN), siempre hacer PATCH o POST
     try {
       await this.client.get(`/SQLQueries('${SQL_CODE}')`);
-      logger.info(`SAP SQLQuery '${SQL_CODE}' ya existe, reutilizando.`);
+      // Existe — actualizar con el nuevo SQL (filtro IN dinámico)
+      await this.client.patch(`/SQLQueries('${SQL_CODE}')`, {
+        SqlText: SQL_TEXT,
+      });
+      logger.info(`SAP SQLQuery '${SQL_CODE}' actualizada con filtro IN.`);
     } catch (getErr) {
-      const errStatus = getErr?.response?.status;
-      if (errStatus === 404) {
+      if (getErr?.response?.status === 404) {
         try {
           await this.client.post('/SQLQueries', {
             SqlCode: SQL_CODE,
@@ -742,7 +748,6 @@ class SAPService {
       if (rows.length === 0) break;
 
       for (const row of rows) {
-        if (!itemCodes.includes(row.ItemCode)) continue;
         if (parseFloat(row.Quantity || 0) <= 0) continue;
         if (!resultado[row.ItemCode]) resultado[row.ItemCode] = [];
         resultado[row.ItemCode].push({
