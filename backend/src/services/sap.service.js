@@ -703,17 +703,13 @@ class SAPService {
       'WHERE T1."WhsCode" = \'ALMP\' AND T1."Quantity" > 0 ' +
       'AND T0."Status" = \'bdsStatus_Released\'';
 
-    // Upsert idempotente: PUT actualiza si existe, POST crea si no existe
+    // GET para verificar si existe, POST solo si no existe (PUT no soportado en SAP)
     try {
-      await this.client.put(`/SQLQueries('${SQL_CODE}')`, {
-        SqlCode: SQL_CODE,
-        SqlName: SQL_NAME,
-        SqlText: SQL_TEXT,
-      });
-      logger.info(`SAP SQLQuery '${SQL_CODE}' verificada/actualizada.`);
-    } catch (putErr) {
-      const errCode = putErr?.response?.status || putErr?.response?.data?.error?.code;
-      if (errCode === 404 || errCode === '404') {
+      await this.client.get(`/SQLQueries('${SQL_CODE}')`);
+      logger.info(`SAP SQLQuery '${SQL_CODE}' ya existe, reutilizando.`);
+    } catch (getErr) {
+      const errStatus = getErr?.response?.status;
+      if (errStatus === 404) {
         try {
           await this.client.post('/SQLQueries', {
             SqlCode: SQL_CODE,
@@ -726,7 +722,7 @@ class SAPService {
           return {};
         }
       } else {
-        logger.warn(`SAP SQLQuery upsert error: ${putErr?.message}. Continuando sin lotes.`);
+        logger.warn(`SAP SQLQuery verificación error: ${getErr?.message}. Continuando sin lotes.`);
         return {};
       }
     }
