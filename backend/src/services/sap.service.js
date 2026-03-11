@@ -742,6 +742,7 @@ class SAPService {
 
       for (const row of rows) {
         if (!itemCodes.includes(row.ItemCode)) continue;
+        if (parseFloat(row.Quantity || 0) <= 0) continue;
         if (!resultado[row.ItemCode]) resultado[row.ItemCode] = [];
         resultado[row.ItemCode].push({
           batch:               row.BatchNum,
@@ -761,7 +762,7 @@ class SAPService {
 
       // Si hay nextLink hay más páginas; si vino menos de PAGE_SIZE ya terminamos
       const hasMore = !!response.data?.['@odata.nextLink'];
-      if (!hasMore || rows.length < PAGE_SIZE) break;
+      if (!hasMore && rows.length < PAGE_SIZE) break;
       skip += PAGE_SIZE;
     }
 
