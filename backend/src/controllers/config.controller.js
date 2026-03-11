@@ -175,6 +175,50 @@ const updateCostoAgua = async (req, res, next) => {
   }
 };
 
+const getCostoAgua2 = async (req, res, next) => {
+  try {
+    const result = await db.query(
+      `SELECT valor, fecha_actualizacion AS updated_at
+       FROM configuracion_sistema WHERE clave = 'costo_agua2_litro'`
+    );
+    const costo = result.rows.length > 0 ? parseFloat(result.rows[0].valor) || 0 : 0;
+    res.json({ success: true, data: { costo, updated_at: result.rows[0]?.updated_at } });
+  } catch (error) {
+    logger.error('Error al obtener costo del agua 2:', error);
+    next(error);
+  }
+};
+
+const updateCostoAgua2 = async (req, res, next) => {
+  try {
+    const { costo } = req.body;
+    if (costo === undefined || costo === null || isNaN(parseFloat(costo)) || parseFloat(costo) < 0) {
+      return res.status(400).json({ success: false, message: 'Costo inválido. Debe ser un número >= 0' });
+    }
+    const result = await db.query(
+      `INSERT INTO configuracion_sistema
+         (clave, valor, tipo, categoria, descripcion, es_publica, actualizado_por)
+       VALUES ('costo_agua2_litro', $1, 'NUMBER', 'PRODUCCION',
+               'Costo por litro de Agua 2 (MP0008) en COP (insumo propio, no se compra directamente)',
+               false, $2)
+       ON CONFLICT (clave) DO UPDATE SET
+         valor           = EXCLUDED.valor,
+         actualizado_por = EXCLUDED.actualizado_por,
+         fecha_actualizacion = NOW()
+       RETURNING valor, fecha_actualizacion AS updated_at`,
+      [String(parseFloat(costo)), req.user.id]
+    );
+    res.json({
+      success: true,
+      data: { costo: parseFloat(result.rows[0].valor), updated_at: result.rows[0].updated_at },
+      message: 'Costo del Agua 2 actualizado correctamente',
+    });
+  } catch (error) {
+    logger.error('Error al actualizar costo del agua 2:', error);
+    next(error);
+  }
+};
+
 module.exports = {
   getFactorAbsorcion,
   updateFactorAbsorcion,
@@ -182,4 +226,6 @@ module.exports = {
   updateCorreos,
   getCostoAgua,
   updateCostoAgua,
+  getCostoAgua2,
+  updateCostoAgua2,
 };

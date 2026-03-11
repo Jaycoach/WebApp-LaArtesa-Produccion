@@ -86,3 +86,26 @@ export const useUpdateCostoAgua = () => {
     },
   });
 };
+
+/**
+ * Hook para obtener el costo del Agua 2 (MP0008)
+ */
+export const useCostoAgua2 = () => {
+  return useQuery({
+    queryKey: ['config', 'costo-agua2'],
+    queryFn: () => configService.getCostoAgua2(),
+  });
+};
+
+/**
+ * Hook para actualizar el costo del Agua 2 (MP0008) por litro
+ */
+export const useUpdateCostoAgua2 = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (costo: number) => configService.updateCostoAgua2(costo),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['config', 'costo-agua2'] });
+    },
+  });
+};

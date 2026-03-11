@@ -73,6 +73,27 @@ export const configService = {
     );
     return handleApiResponse(response);
   },
+
+  /**
+   * Obtener costo del Agua 2 (MP0008)
+   */
+  getCostoAgua2: async (): Promise<{ costo: number; updated_at: string }> => {
+    const response = await apiClient.get<ApiResponse<{ costo: number; updated_at: string }>>(
+      API_CONFIG.ENDPOINTS.CONFIG.COSTO_AGUA2
+    );
+    return handleApiResponse(response);
+  },
+
+  /**
+   * Actualizar costo del Agua 2 (MP0008) por litro
+   */
+  updateCostoAgua2: async (costo: number): Promise<{ costo: number; updated_at: string }> => {
+    const response = await apiClient.put<ApiResponse<{ costo: number; updated_at: string }>>(
+      API_CONFIG.ENDPOINTS.CONFIG.COSTO_AGUA2,
+      { costo }
+    );
+    return handleApiResponse(response);
+  },
 };
 
 export default configService;

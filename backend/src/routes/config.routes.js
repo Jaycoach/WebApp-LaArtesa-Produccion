@@ -53,4 +53,16 @@ router.get('/costo-agua', configController.getCostoAgua);
  */
 router.put('/costo-agua', checkRole(['admin']), configController.updateCostoAgua);
 
+/**
+ * @route   GET /api/config/costo-agua2
+ * @desc    Obtener costo del Agua 2 (MP0008) por litro
+ */
+router.get('/costo-agua2', configController.getCostoAgua2);
+
+/**
+ * @route   PUT /api/config/costo-agua2
+ * @desc    Actualizar costo del Agua 2 (MP0008) por litro
+ */
+router.put('/costo-agua2', checkRole(['admin']), configController.updateCostoAgua2);
+
 module.exports = router;

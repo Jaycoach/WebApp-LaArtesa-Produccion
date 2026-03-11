@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card } from '@/components/common';
-import { useUpdateFactorAbsorcion, useUpdateCorreos, useCostoAgua, useUpdateCostoAgua } from '@/hooks/useConfig';
+import { useUpdateFactorAbsorcion, useUpdateCorreos, useCostoAgua, useUpdateCostoAgua, useCostoAgua2, useUpdateCostoAgua2 } from '@/hooks/useConfig';
 
 export const ConfiguracionSistema: React.FC = () => {
   // State local para formularios
@@ -12,12 +12,15 @@ export const ConfiguracionSistema: React.FC = () => {
   const [humedadMin, setHumedadMin] = useState<number>(60);
   const [humedadMax, setHumedadMax] = useState<number>(80);
   const [costoAgua, setCostoAgua] = useState<number>(0);
+  const [costoAgua2, setCostoAgua2] = useState<number>(0);
 
   // Queries y mutations
   const updateFactorMutation = useUpdateFactorAbsorcion();
   const updateCorreosMutation = useUpdateCorreos();
   const updateCostoAguaMutation = useUpdateCostoAgua();
+  const updateCostoAgua2Mutation = useUpdateCostoAgua2();
   const { data: costoAguaData } = useCostoAgua();
+  const { data: costoAgua2Data } = useCostoAgua2();
 
   // Sincronizar costo agua desde servidor
   React.useEffect(() => {
@@ -25,6 +28,12 @@ export const ConfiguracionSistema: React.FC = () => {
       setCostoAgua(costoAguaData.costo);
     }
   }, [costoAguaData]);
+
+  useEffect(() => {
+    if (costoAgua2Data?.costo !== undefined) {
+      setCostoAgua2(costoAgua2Data.costo);
+    }
+  }, [costoAgua2Data]);
 
   // Mensajes de feedback
   const [successMessage, setSuccessMessage] = useState<string>('');
@@ -290,6 +299,44 @@ export const ConfiguracionSistema: React.FC = () => {
                   className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {updateCostoAguaMutation.isPending ? 'Guardando...' : 'Guardar'}
+                </button>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Costo del Agua 2 por Litro (COP)
+                </label>
+                <p className="text-xs text-gray-500 mb-2">
+                  El Agua 2 (MP0008) no tiene stock en SAP. Su costo se usa para el cálculo de costos de producción.
+                </p>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={costoAgua2}
+                    onChange={(e) => setCostoAgua2(parseFloat(e.target.value) || 0)}
+                    className="w-48 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="0.00"
+                  />
+                  <span className="text-sm text-gray-600">COP / Litro</span>
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  onClick={async () => {
+                    try {
+                      await updateCostoAgua2Mutation.mutateAsync(costoAgua2);
+                      setSuccessMessage('Costo del Agua 2 actualizado correctamente');
+                      setErrorMessage('');
+                    } catch (error: any) {
+                      setErrorMessage(error?.message || 'Error al actualizar el costo del Agua 2');
+                      setSuccessMessage('');
+                    }
+                  }}
+                  disabled={updateCostoAgua2Mutation.isPending}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {updateCostoAgua2Mutation.isPending ? 'Guardando...' : 'Guardar'}
                 </button>
               </div>
             </div>

@@ -742,7 +742,7 @@ class SAPService {
     while (true) {
       const response = await this.client.get(
         `/SQLQueries('${SQL_CODE}')/List`,
-        { params: { $skip: skip, $top: PAGE_SIZE } }
+        { params: { $skip: skip, $top: PAGE_SIZE }, timeout: 120000 }
       );
       const rows = response.data?.value || [];
       if (rows.length === 0) break;
