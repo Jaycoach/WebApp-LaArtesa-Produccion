@@ -1606,6 +1606,18 @@ const sincronizarInventarioMP = async (req, res, next) => {
       : {};
     let lotesSincronizados = 0;
 
+    // Limpiar lotes sin stock de los ítems que se van a sincronizar
+    // para evitar acumulación de registros basura con cantidad=0
+    if (Object.keys(lotesMap).length > 0) {
+      const itemsConLotesNuevos = Object.keys(lotesMap);
+      await db.query(
+        `DELETE FROM sap_lotes_mp
+         WHERE item_code = ANY($1)
+           AND cantidad_disponible = 0`,
+        [itemsConLotesNuevos]
+      );
+    }
+
     for (const [itemCode, lotes] of Object.entries(lotesMap)) {
       for (const lote of lotes) {
         await db.query(

@@ -77,10 +77,24 @@ export const PesajeMasa: React.FC = () => {
 
   const handleEditar = (ingrediente: any) => {
     setEditando(ingrediente.id);
+
+    // Pre-seleccionar lote sugerido (el más antiguo con stock) si no hay lote ya registrado
+    const lotePreseleccionado = ingrediente.lote ||
+      ingrediente.lote_sugerido ||
+      (ingrediente.lotes && ingrediente.lotes.length > 0 ? ingrediente.lotes[0].batch : '');
+
+    // Si el lote preseleccionado existe en la lista, traer su fecha de vencimiento automáticamente
+    const loteObj = ingrediente.lotes?.find((l: any) => l.batch === lotePreseleccionado);
+    const vencimientoPreseleccionado = ingrediente.fecha_vencimiento ||
+      (loteObj?.expiration_date ? loteObj.expiration_date.substring(0, 10) : '');
+
     setFormData({
-      peso_real: ingrediente.peso_real != null ? String(ingrediente.peso_real) : (ingrediente.cantidad_gramos != null ? String(ingrediente.cantidad_gramos) : ''),
-      lote: ingrediente.lote || '',
-      fecha_vencimiento: ingrediente.fecha_vencimiento || '',
+      peso_real: ingrediente.peso_real != null
+        ? String(ingrediente.peso_real)
+        : (ingrediente.cantidad_gramos != null ? String(ingrediente.cantidad_gramos) : ''),
+      lote: lotePreseleccionado,
+      fecha_vencimiento: vencimientoPreseleccionado,
+      fecha_vencimiento_display: undefined,
     });
   };
 
@@ -356,7 +370,7 @@ export const PesajeMasa: React.FC = () => {
 
                 {/* Formulario de pesaje */}
                 {ing.verificado && !ing.pesado && editando === ing.id && (
-                  <div className="mt-4 grid grid-cols-3 gap-4 p-4 bg-gray-50 rounded">
+                  <div className="mt-4 grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Peso Real (g)</label>
                       <input
@@ -366,14 +380,79 @@ export const PesajeMasa: React.FC = () => {
                         className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Lote</label>
-                      <input
-                        type="text"
-                        value={formData.lote}
-                        onChange={(e) => setFormData({ ...formData, lote: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                      />
+                    <div className="col-span-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Lote
+                        {ing.lotes && ing.lotes.length > 0 && (
+                          <span className="ml-2 text-xs text-purple-600 font-normal">
+                            Selecciona el lote a consumir
+                          </span>
+                        )}
+                      </label>
+                      {ing.lotes && ing.lotes.length > 0 ? (
+                        <div className="grid grid-cols-2 gap-2">
+                          {ing.lotes.map((l: any) => (
+                            <label
+                              key={l.batch}
+                              className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                                formData.lote === l.batch
+                                  ? 'bg-purple-50 border-purple-500 ring-2 ring-purple-300'
+                                  : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-400'
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name={`lote-${ing.id}`}
+                                value={l.batch}
+                                checked={formData.lote === l.batch}
+                                onChange={() => {
+                                  const venc = l.expiration_date
+                                    ? l.expiration_date.substring(0, 10)
+                                    : '';
+                                  setFormData({
+                                    ...formData,
+                                    lote: l.batch,
+                                    fecha_vencimiento: venc,
+                                    fecha_vencimiento_display: undefined,
+                                  });
+                                }}
+                                className="mt-0.5 accent-purple-600"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-semibold text-gray-900 text-sm truncate">
+                                  {l.batch}
+                                  {l.batch === (ing.lote_sugerido || ing.lotes[0]?.batch) && (
+                                    <span className="ml-2 text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
+                                      sugerido
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-green-700 font-medium">
+                                  {Number(l.cantidad_disponible).toFixed(3)} {ing.uom || 'kg'} disponibles
+                                </div>
+                                {l.expiration_date && (
+                                  <div className="text-xs text-gray-500">
+                                    Vence: {new Date(l.expiration_date + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                                  </div>
+                                )}
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      ) : (
+                        <div>
+                          <input
+                            type="text"
+                            value={formData.lote}
+                            onChange={(e) => setFormData({ ...formData, lote: e.target.value })}
+                            placeholder="Ingrese el lote manualmente"
+                            className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                          />
+                          <p className="text-xs text-amber-600 mt-1">
+                            ⚠ No hay lotes registrados en SAP para este ingrediente. Sincroniza el inventario o ingresa el lote manualmente.
+                          </p>
+                        </div>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -416,7 +495,7 @@ export const PesajeMasa: React.FC = () => {
                         className="w-full mt-1 px-3 py-2 border border-gray-200 rounded text-xs text-gray-500"
                       />
                     </div>
-                    <div className="col-span-3 flex gap-2">
+                    <div className="col-span-2 flex gap-2">
                       <button
                         onClick={() => handleGuardar(ing.id)}
                         className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
