@@ -687,49 +687,89 @@ class SAPService {
    * @returns {Object} mapa itemCode → array de lotes
    */
   async getLotesMateriaPrima(itemCodes) {
-    await this.ensureSession();
-
     if (!itemCodes || itemCodes.length === 0) return {};
 
-    const resultado = {};
-    for (const code of itemCodes) resultado[code] = [];
+    await this.ensureSession();
 
-    // SAP no permite filtrar BatchNumberDetails por lista de ItemCodes en un solo call.
-    // Paginamos todos los lotes Released y filtramos en memoria.
-    const itemSet = new Set(itemCodes);
+    const SQL_CODE = 'artesa_lotes_stock_almp';
+    const SQL_NAME = 'Stock lotes por bodega ALMP';
+    const SQL_TEXT =
+      'SELECT T0."ItemCode", T0."DistNumber" AS "BatchNum", ' +
+      'T0."AdmissionDate", T0."ExpirationDate", T1."Quantity" ' +
+      'FROM "OBTN" T0 ' +
+      'INNER JOIN "OBTQ" T1 ON T0."ItemCode" = T1."ItemCode" ' +
+      'AND T0."SysNumber" = T1."SysNumber" ' +
+      'WHERE T1."WhsCode" = \'ALMP\' AND T1."Quantity" > 0 ' +
+      'AND T0."Status" = \'bdsStatus_Released\'';
+
+    // Upsert idempotente: PUT actualiza si existe, POST crea si no existe
+    try {
+      await this.client.put(`/SQLQueries('${SQL_CODE}')`, {
+        SqlCode: SQL_CODE,
+        SqlName: SQL_NAME,
+        SqlText: SQL_TEXT,
+      });
+      logger.info(`SAP SQLQuery '${SQL_CODE}' verificada/actualizada.`);
+    } catch (putErr) {
+      const errCode = putErr?.response?.status || putErr?.response?.data?.error?.code;
+      if (errCode === 404 || errCode === '404') {
+        try {
+          await this.client.post('/SQLQueries', {
+            SqlCode: SQL_CODE,
+            SqlName: SQL_NAME,
+            SqlText: SQL_TEXT,
+          });
+          logger.info(`SAP SQLQuery '${SQL_CODE}' creada.`);
+        } catch (postErr) {
+          logger.warn(`No se pudo crear SQLQuery '${SQL_CODE}': ${postErr?.message}. Continuando sin lotes.`);
+          return {};
+        }
+      } else {
+        logger.warn(`SAP SQLQuery upsert error: ${putErr?.message}. Continuando sin lotes.`);
+        return {};
+      }
+    }
+
+    // Traer todos los lotes Released en ALMP y filtrar en memoria por itemCodes
+    const resultado = {};
     let skip = 0;
-    const top = 20;
+    const top = 500;
 
     while (true) {
-      const response = await this.client.get('/BatchNumberDetails', {
-        params: {
-          $filter: `Status eq 'bdsStatus_Released'`,
-          $select: 'ItemCode,ItemDescription,Batch,Status,AdmissionDate,ManufacturingDate,ExpirationDate',
-          $top: top,
-          $skip: skip,
-        },
-      });
+      const response = await this.client.get(
+        `/SQLQueries('${SQL_CODE}')/List`,
+        { params: { $skip: skip, $top: top } }
+      );
+      const rows = response.data?.value || [];
+      if (rows.length === 0) break;
 
-      const lotes = response.data.value || [];
-      if (lotes.length === 0) break;
-
-      for (const lote of lotes) {
-        if (itemSet.has(lote.ItemCode)) {
-          resultado[lote.ItemCode].push({
-            batch:             lote.Batch,
-            status:            lote.Status,
-            admissionDate:     lote.AdmissionDate ? lote.AdmissionDate.substring(0, 10) : null,
-            manufacturingDate: lote.ManufacturingDate ? lote.ManufacturingDate.substring(0, 10) : null,
-            expirationDate:    lote.ExpirationDate ? lote.ExpirationDate.substring(0, 10) : null,
-          });
-        }
+      for (const row of rows) {
+        if (!itemCodes.includes(row.ItemCode)) continue;
+        if (!resultado[row.ItemCode]) resultado[row.ItemCode] = [];
+        resultado[row.ItemCode].push({
+          batch:               row.BatchNum,
+          cantidad_disponible: parseFloat(row.Quantity || 0),
+          admissionDate:       row.AdmissionDate ? row.AdmissionDate.split('T')[0] : null,
+          expirationDate:      row.ExpirationDate ? row.ExpirationDate.split('T')[0] : null,
+          manufacturingDate:   null,
+          status:              'bdsStatus_Released',
+        });
       }
 
-      if (lotes.length < top) break;
+      if (rows.length < top) break;
       skip += top;
     }
 
-    logger.info(`SAP: lotes obtenidos para ${itemCodes.length} ítems`);
+    // Ordenar por fecha de admisión ASC → lote más antiguo primero (sugerido en pesaje)
+    for (const code of Object.keys(resultado)) {
+      resultado[code].sort((a, b) => {
+        if (!a.admissionDate) return 1;
+        if (!b.admissionDate) return -1;
+        return a.admissionDate.localeCompare(b.admissionDate);
+      });
+    }
+
+    logger.info(`SAP: lotes con cantidad obtenidos para ${Object.keys(resultado).length} ítems`);
     return resultado;
   }
 }

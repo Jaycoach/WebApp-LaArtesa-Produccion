@@ -248,9 +248,11 @@ const updateUnidadesProgramadas = async (req, res, next) => {
 const aprobarMasa = async (req, res, next) => {
   try {
     const { id } = req.params;
+    const { ejecutarSubdivision } = require('./fases.controller');
 
     const masa = await db.query(
-      `SELECT id, estado, fase_actual FROM masas_produccion WHERE id = $1`,
+      `SELECT id, estado, fase_actual, tipo_masa, total_kilos_con_merma
+       FROM masas_produccion WHERE id = $1`,
       [id]
     );
 
@@ -265,6 +267,7 @@ const aprobarMasa = async (req, res, next) => {
       });
     }
 
+    // Marcar masa como APROBADA
     await db.query(
       `UPDATE masas_produccion
        SET estado = 'APROBADA',
@@ -275,6 +278,39 @@ const aprobarMasa = async (req, res, next) => {
       [id, req.user.id]
     );
 
+    // Intentar subdivisión (conPesaje=false → sub-masas arrancan en PLANIFICACION)
+    const resultadoSubdivision = await ejecutarSubdivision(id, req.user.id, false);
+
+    if (resultadoSubdivision && resultadoSubdivision.realizada) {
+      // Aprobar todas las sub-masas y desbloquear su PESAJE directamente
+      for (const subMasa of resultadoSubdivision.sub_masas) {
+        await db.query(
+          `UPDATE masas_produccion
+           SET estado = 'APROBADA',
+               aprobado_por = $2,
+               aprobado_en = NOW(),
+               updated_at = NOW()
+           WHERE id = $1`,
+          [subMasa.id, req.user.id]
+        );
+        await db.query(
+          `UPDATE progreso_fases
+           SET estado = 'EN_PROGRESO'
+           WHERE masa_id = $1 AND fase = 'PESAJE'`,
+          [subMasa.id]
+        );
+      }
+
+      logger.info(`Masa ${id} subdividida en ${resultadoSubdivision.n_tandas} tandas y aprobadas por usuario ${req.user.id}`);
+
+      return res.json({
+        success: true,
+        message: `Masa subdividida en ${resultadoSubdivision.n_tandas} tandas. Cada tanda está aprobada y lista para pesaje.`,
+        subdivision: resultadoSubdivision,
+      });
+    }
+
+    // Sin subdivisión: flujo normal
     await db.query(
       `UPDATE progreso_fases
        SET estado = 'EN_PROGRESO'
@@ -287,6 +323,7 @@ const aprobarMasa = async (req, res, next) => {
     return res.json({
       success: true,
       message: 'Masa aprobada. Pesaje desbloqueado.',
+      subdivision: null,
     });
   } catch (error) {
     logger.error('Error al aprobar masa:', error);

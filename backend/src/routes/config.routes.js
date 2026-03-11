@@ -41,4 +41,16 @@ router.get('/correos', configController.getCorreos);
  */
 router.put('/correos', checkRole(['admin']), configController.updateCorreos);
 
+/**
+ * @route   GET /api/config/costo-agua
+ * @desc    Obtener costo del agua por litro
+ */
+router.get('/costo-agua', configController.getCostoAgua);
+
+/**
+ * @route   PUT /api/config/costo-agua
+ * @desc    Actualizar costo del agua por litro
+ */
+router.put('/costo-agua', checkRole(['admin']), configController.updateCostoAgua);
+
 module.exports = router;

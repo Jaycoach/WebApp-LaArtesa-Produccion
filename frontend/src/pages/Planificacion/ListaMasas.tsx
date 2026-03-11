@@ -56,7 +56,11 @@ export const ListaMasas: React.FC = () => {
   const handleAprobar = async (e: React.MouseEvent, masaId: number) => {
     e.stopPropagation();
     try {
-      await aprobarMutation.mutateAsync(masaId);
+      const result = await aprobarMutation.mutateAsync(masaId);
+      if (result?.subdivision?.realizada) {
+        const n = result.subdivision.n_tandas;
+        alert(`✅ Masa subdividida en ${n} tandas. Cada tanda está aprobada y lista para pesaje.`);
+      }
     } catch (error) {
       console.error('Error aprobando masa:', error);
     }
@@ -82,6 +86,7 @@ export const ListaMasas: React.FC = () => {
     const badges: Record<string, string> = {
       PLANIFICACION: 'bg-gray-100 text-gray-700',
       APROBADA:      'bg-green-100 text-green-800',
+      SUBDIVIDIDA:   'bg-purple-100 text-purple-700',
       PENDIENTE:     'bg-yellow-100 text-yellow-800',
       PESAJE:        'bg-blue-100 text-blue-800',
       AMASADO:       'bg-indigo-100 text-indigo-800',
@@ -98,6 +103,7 @@ export const ListaMasas: React.FC = () => {
     const labels: Record<string, string> = {
       PLANIFICACION: 'Planificación',
       APROBADA:      'Aprobada',
+      SUBDIVIDIDA:   'Subdividida',
       PENDIENTE:     'Pendiente',
       PESAJE:        'Pesaje',
       AMASADO:       'Amasado',

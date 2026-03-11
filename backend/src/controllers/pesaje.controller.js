@@ -61,10 +61,10 @@ const getChecklist = async (req, res, next) => {
       }
 
       const lotesResult = await db.query(
-        `SELECT item_code, batch, status, admission_date, expiration_date
+        `SELECT item_code, batch, status, admission_date, expiration_date, cantidad_disponible
          FROM sap_lotes_mp
          WHERE item_code = ANY($1)
-         ORDER BY item_code, expiration_date ASC NULLS LAST`,
+         ORDER BY item_code, admission_date ASC NULLS LAST`,
         [itemCodes]
       );
       for (const lote of lotesResult.rows) {
@@ -73,21 +73,45 @@ const getChecklist = async (req, res, next) => {
       }
     }
 
+    // Leer ingredientes excluidos de validación de stock (ej: MP0007 = agua)
+    const configExcluidos = await db.query(
+      `SELECT valor FROM configuracion_sistema WHERE clave = 'ingredientes_excluir_stock_validacion'`
+    );
+    const excluidos = configExcluidos.rows.length > 0
+      ? configExcluidos.rows[0].valor.split(',').map(c => c.trim()).filter(Boolean)
+      : [];
+
+    // Leer costo del agua desde configuración
+    const configCostoAgua = await db.query(
+      `SELECT valor FROM configuracion_sistema WHERE clave = 'costo_agua_litro'`
+    );
+    const costoAgua = configCostoAgua.rows.length > 0
+      ? parseFloat(configCostoAgua.rows[0].valor) || 0
+      : 0;
+
     // Adjuntar datos de stock a cada ingrediente
     const ingredientesConStock = ingredientes.map(ing => {
+      const esExcluido = excluidos.includes(ing.ingrediente_sap_code);
       const inv = inventarioMap[ing.ingrediente_sap_code] || null;
       const stockDisponible = inv ? parseFloat(inv.stock_almp) - parseFloat(inv.committed_almp) : null;
       const cantidadRequerida = parseFloat(ing.cantidad_kilos) || 0;
-      const sinStock = inv !== null && stockDisponible < cantidadRequerida;
+      // Excluidos nunca bloquean por stock
+      const sinStock = esExcluido ? false : (inv !== null && stockDisponible < cantidadRequerida);
+      // Costo: excluidos usan configuración, resto usan SAP
+      const costoUnitario = esExcluido ? costoAgua : (inv ? parseFloat(inv.costo_promedio) : null);
+      // Lotes ordenados por admission_date ASC → el primero es el sugerido
+      const lotes = lotesMap[ing.ingrediente_sap_code] || [];
       return {
         ...ing,
         stock_almp:          inv ? parseFloat(inv.stock_almp) : null,
         committed_almp:      inv ? parseFloat(inv.committed_almp) : null,
-        stock_disponible:    stockDisponible,
-        costo_unitario_sap:  inv ? parseFloat(inv.costo_promedio) : null,
+        stock_disponible:    esExcluido ? null : stockDisponible,
+        costo_unitario_sap:  costoUnitario,
         inventario_sync:     inv ? inv.ultimo_sync : null,
         sin_stock:           sinStock,
-        lotes:               lotesMap[ing.ingrediente_sap_code] || [],
+        excluido_stock:      esExcluido,
+        lote_sugerido:       lotes.length > 0 ? lotes[0].batch : null,
+        lotes,
       };
     });
 
@@ -242,7 +266,16 @@ const confirmarPesaje = async (req, res, next) => {
       [masaId]
     );
 
+    // Leer excluidos de validación de stock
+    const configExcluidosConf = await db.query(
+      `SELECT valor FROM configuracion_sistema WHERE clave = 'ingredientes_excluir_stock_validacion'`
+    );
+    const excluidosConf = configExcluidosConf.rows.length > 0
+      ? configExcluidosConf.rows[0].valor.split(',').map(c => c.trim()).filter(Boolean)
+      : [];
+
     const sinStock = ingResult.rows.filter(ing => {
+      if (excluidosConf.includes(ing.ingrediente_sap_code)) return false; // excluidos: nunca bloquear
       if (!ing.stock_almp && ing.stock_almp !== 0) return false; // sin datos SAP: no bloquear
       const disponible = parseFloat(ing.stock_almp) - parseFloat(ing.committed_almp || 0);
       return disponible < parseFloat(ing.cantidad_kilos);

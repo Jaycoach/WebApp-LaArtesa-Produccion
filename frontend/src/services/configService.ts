@@ -52,6 +52,27 @@ export const configService = {
     );
     return handleApiResponse(response);
   },
+
+  /**
+   * Obtener costo del agua
+   */
+  getCostoAgua: async (): Promise<{ costo: number; updated_at: string }> => {
+    const response = await apiClient.get<ApiResponse<{ costo: number; updated_at: string }>>(
+      API_CONFIG.ENDPOINTS.CONFIG.COSTO_AGUA
+    );
+    return handleApiResponse(response);
+  },
+
+  /**
+   * Actualizar costo del agua por litro
+   */
+  updateCostoAgua: async (costo: number): Promise<{ costo: number; updated_at: string }> => {
+    const response = await apiClient.put<ApiResponse<{ costo: number; updated_at: string }>>(
+      API_CONFIG.ENDPOINTS.CONFIG.COSTO_AGUA,
+      { costo }
+    );
+    return handleApiResponse(response);
+  },
 };
 
 export default configService;
