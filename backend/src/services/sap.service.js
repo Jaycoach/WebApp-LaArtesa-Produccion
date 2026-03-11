@@ -655,7 +655,7 @@ class SAPService {
     for (const itemCode of itemCodes) {
       try {
         const response = await this.client.get(
-          `/Items('${itemCode}')?$select=ItemCode,ItemName,MovingAveragePrice,InventoryUOM,ItemWarehouseInfoCollection`
+          `/Items('${itemCode}')?$select=ItemCode,ItemName,MovingAveragePrice,InventoryUOM,ManageBatchNumbers,ItemWarehouseInfoCollection`
         );
 
         const item       = response.data;
@@ -663,13 +663,14 @@ class SAPService {
           .find(b => b.WarehouseCode === 'ALMP');
 
         resultado[itemCode] = {
-          itemCode:       item.ItemCode,
-          itemName:       item.ItemName,
-          uom:            item.InventoryUOM,
-          costoPromedio:  bodegaAlmp?.StandardAveragePrice || item.MovingAveragePrice || 0,
-          stockAlmp:      bodegaAlmp?.InStock      || 0,
-          committedAlmp:  bodegaAlmp?.Committed    || 0,
-          orderedAlmp:    bodegaAlmp?.Ordered      || 0,
+          itemCode:             item.ItemCode,
+          itemName:             item.ItemName,
+          uom:                  item.InventoryUOM,
+          manageBatchNumbers:   item.ManageBatchNumbers === 'tYES',
+          costoPromedio:        bodegaAlmp?.StandardAveragePrice || item.MovingAveragePrice || 0,
+          stockAlmp:            bodegaAlmp?.InStock      || 0,
+          committedAlmp:        bodegaAlmp?.Committed    || 0,
+          orderedAlmp:          bodegaAlmp?.Ordered      || 0,
         };
       } catch (error) {
         logger.warn(`SAP: no se pudo obtener stock para ${itemCode}: ${error.message}`);
