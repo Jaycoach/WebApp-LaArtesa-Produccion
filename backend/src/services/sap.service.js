@@ -701,7 +701,8 @@ class SAPService {
       'INNER JOIN "OBTQ" T1 ON T0."ItemCode" = T1."ItemCode" ' +
       'AND T0."SysNumber" = T1."SysNumber" ' +
       'WHERE T1."WhsCode" = \'ALMP\' ' +
-      'AND T0."Status" = \'0\'';
+      'AND T0."Status" = \'0\' ' +
+      'AND T1."Quantity" > 0';
 
     // GET para verificar si existe, POST solo si no existe (PUT no soportado en SAP)
     try {
