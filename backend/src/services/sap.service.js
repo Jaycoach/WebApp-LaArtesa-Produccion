@@ -692,16 +692,16 @@ class SAPService {
 
     await this.ensureSession();
 
-    const SQL_CODE = 'artesa_lotes_stock_almp';
-    const SQL_NAME = 'Stock lotes por bodega ALMP';
+    const SQL_CODE = 'artesa_lotes_almp_v2';
+    const SQL_NAME = 'Stock lotes por bodega ALMP v2';
     const SQL_TEXT =
       'SELECT T0."ItemCode", T0."DistNumber" AS "BatchNum", ' +
-      'T0."AdmissionDate", T0."ExpirationDate", T1."Quantity" ' +
+      'T0."CreateDate", T0."ExpDate", T0."MnfDate", T1."Quantity" ' +
       'FROM "OBTN" T0 ' +
       'INNER JOIN "OBTQ" T1 ON T0."ItemCode" = T1."ItemCode" ' +
       'AND T0."SysNumber" = T1."SysNumber" ' +
-      'WHERE T1."WhsCode" = \'ALMP\' AND T1."Quantity" > 0 ' +
-      'AND T0."Status" = \'bdsStatus_Released\'';
+      'WHERE T1."WhsCode" = \'ALMP\' ' +
+      'AND T0."Status" = \'0\'';
 
     // GET para verificar si existe, POST solo si no existe (PUT no soportado en SAP)
     try {
@@ -746,10 +746,16 @@ class SAPService {
         resultado[row.ItemCode].push({
           batch:               row.BatchNum,
           cantidad_disponible: parseFloat(row.Quantity || 0),
-          admissionDate:       row.AdmissionDate ? row.AdmissionDate.split('T')[0] : null,
-          expirationDate:      row.ExpirationDate ? row.ExpirationDate.split('T')[0] : null,
-          manufacturingDate:   null,
-          status:              'bdsStatus_Released',
+          admissionDate:       row.CreateDate
+                                 ? `${row.CreateDate.substring(0,4)}-${row.CreateDate.substring(4,6)}-${row.CreateDate.substring(6,8)}`
+                                 : null,
+          expirationDate:      row.ExpDate
+                                 ? `${row.ExpDate.substring(0,4)}-${row.ExpDate.substring(4,6)}-${row.ExpDate.substring(6,8)}`
+                                 : null,
+          manufacturingDate:   row.MnfDate
+                                 ? `${row.MnfDate.substring(0,4)}-${row.MnfDate.substring(4,6)}-${row.MnfDate.substring(6,8)}`
+                                 : null,
+          status:              'released',
         });
       }
 
