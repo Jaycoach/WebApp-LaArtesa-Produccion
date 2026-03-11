@@ -47,6 +47,7 @@ export const API_CONFIG = {
       FACTOR_ABSORCION: '/config/factor-absorcion',
       CORREOS: '/config/correos',
       COSTO_AGUA: '/config/costo-agua',
+      COSTO_AGUA2: '/config/costo-agua2',
     },
 
     // Fases de producción

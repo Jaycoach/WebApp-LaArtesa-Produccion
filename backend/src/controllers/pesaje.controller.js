@@ -82,13 +82,17 @@ const getChecklist = async (req, res, next) => {
       ? configExcluidos.rows[0].valor.split(',').map(c => c.trim()).filter(Boolean)
       : [];
 
-    // Leer costo del agua desde configuración
-    const configCostoAgua = await db.query(
-      `SELECT valor FROM configuracion_sistema WHERE clave = 'costo_agua_litro'`
+    // Leer costos de insumos propios desde configuración
+    const configCostosInsumos = await db.query(
+      `SELECT clave, valor FROM configuracion_sistema
+       WHERE clave IN ('costo_agua_litro', 'costo_agua2_litro')`
     );
-    const costoAgua = configCostoAgua.rows.length > 0
-      ? parseFloat(configCostoAgua.rows[0].valor) || 0
-      : 0;
+    const costosInsumos = {};
+    for (const row of configCostosInsumos.rows) {
+      costosInsumos[row.clave] = parseFloat(row.valor) || 0;
+    }
+    const costoAgua = costosInsumos['costo_agua_litro'] || 0;
+    const costoAgua2 = costosInsumos['costo_agua2_litro'] || 0;
 
     // Adjuntar datos de stock a cada ingrediente
     const ingredientesConStock = ingredientes.map(ing => {
@@ -99,7 +103,9 @@ const getChecklist = async (req, res, next) => {
       // Excluidos nunca bloquean por stock
       const sinStock = esExcluido ? false : (inv !== null && stockDisponible < cantidadRequerida);
       // Costo: excluidos usan configuración, resto usan SAP
-      const costoUnitario = esExcluido ? costoAgua : (inv ? parseFloat(inv.costo_promedio) : null);
+      const costoUnitario = esExcluido
+        ? (ing.ingrediente_sap_code === 'MP0008' ? costoAgua2 : costoAgua)
+        : (inv ? parseFloat(inv.costo_promedio) : null);
       // Lotes ordenados por admission_date ASC → el primero es el sugerido
       const lotes = lotesMap[ing.ingrediente_sap_code] || [];
       return {
