@@ -265,6 +265,15 @@ const enviarInventoryGenExits = async (masaId, usuarioId) => {
   const inicio = Date.now();
   let requestPayload = null;
   try {
+    // Ítems excluidos del consumo SAP (agua, insumos propios sin lote SAP)
+    const configExc = await db.query(
+      `SELECT valor FROM configuracion_sistema WHERE clave = 'ingredientes_excluir_stock_validacion'`
+    );
+    const excluidos = configExc.rows.length > 0
+      ? configExc.rows[0].valor.split(',').map(c => c.trim()).filter(Boolean)
+      : [];
+    const excluidosParam = excluidos.length > 0 ? excluidos : null;
+
     const result = await db.query(
       `SELECT im.ingrediente_sap_code, im.ingrediente_nombre,
               im.peso_real, im.lote,
@@ -274,8 +283,9 @@ const enviarInventoryGenExits = async (masaId, usuarioId) => {
        WHERE im.masa_id = $1
          AND im.es_empaque = false
          AND im.pesado = true
-         AND im.peso_real > 0`,
-      [masaId]
+         AND im.peso_real > 0
+         AND ($2::text[] IS NULL OR im.ingrediente_sap_code != ALL($2::text[]))`,
+      [masaId, excluidosParam]
     );
 
     if (result.rows.length === 0) {
@@ -293,8 +303,9 @@ const enviarInventoryGenExits = async (masaId, usuarioId) => {
        JOIN ingredientes_masa im ON im.id = plc.ingrediente_id
        LEFT JOIN sap_inventario_mp inv ON inv.item_code = plc.item_code
        WHERE plc.masa_id = $1
-         AND im.es_empaque = false`,
-      [masaId]
+         AND im.es_empaque = false
+         AND ($2::text[] IS NULL OR plc.item_code != ALL($2::text[]))`,
+      [masaId, excluidosParam]
     );
 
     // Agrupar por item_code (un ítem puede tener múltiples lotes)
@@ -307,7 +318,7 @@ const enviarInventoryGenExits = async (masaId, usuarioId) => {
       itemMap[r.item_code].batches.push({ batch: r.batch, cantidad_kg: parseFloat(r.cantidad_kg) });
     }
 
-    // Ingredientes sin lotes en pesaje_lotes_consumo (ej: agua) → usar peso_real directo
+    // Ingredientes sin lotes en pesaje_lotes_consumo (ej: sin manejo de batch) → usar peso_real directo
     const sinLotesResult = await db.query(
       `SELECT im.ingrediente_sap_code, im.peso_real, inv.manage_batch_numbers
        FROM ingredientes_masa im
@@ -317,8 +328,9 @@ const enviarInventoryGenExits = async (masaId, usuarioId) => {
          AND im.es_empaque = false
          AND im.pesado = true
          AND im.peso_real > 0
-         AND plc.id IS NULL`,
-      [masaId]
+         AND plc.id IS NULL
+         AND ($2::text[] IS NULL OR im.ingrediente_sap_code != ALL($2::text[]))`,
+      [masaId, excluidosParam]
     );
     for (const r of sinLotesResult.rows) {
       if (!itemMap[r.ingrediente_sap_code]) {
