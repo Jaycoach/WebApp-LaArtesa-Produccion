@@ -238,11 +238,37 @@ const updateIngrediente = async (req, res, next) => {
  * Envía salida de inventario a SAP (InventoryGenExits) por los ingredientes pesados.
  * No bloquea el flujo de producción — errores son capturados y logueados.
  */
-const enviarGoodsIssuePesaje = async (masaId, usuarioId) => {
+// Descuenta inventario local tras confirmación exitosa de SAP
+const descontarInventarioLocal = async (rows, masaId) => {
+  for (const ing of rows) {
+    const cantidadKg = parseFloat(ing.peso_real) / 1000;
+
+    await db.query(
+      `UPDATE sap_inventario_mp
+       SET stock_almp  = GREATEST(0, stock_almp - $1),
+           ultimo_sync = NOW()
+       WHERE item_code = $2`,
+      [cantidadKg, ing.ingrediente_sap_code]
+    );
+
+    if (ing.manage_batch_numbers && ing.lote) {
+      await db.query(
+        `UPDATE sap_lotes_mp
+         SET cantidad_disponible = GREATEST(0, cantidad_disponible - $1),
+             ultimo_sync         = NOW()
+         WHERE item_code = $2 AND batch = $3`,
+        [cantidadKg, ing.ingrediente_sap_code, ing.lote.trim()]
+      );
+    }
+  }
+  logger.info(`Inventario local descontado para masa ${masaId}`);
+};
+
+// Envía InventoryGenExit a SAP. Retorna { success, docEntry, rows } o { success: false, error }
+const enviarInventoryGenExits = async (masaId, usuarioId) => {
   const inicio = Date.now();
   let requestPayload = null;
   try {
-    // Leer ingredientes pesados (no empaque) con su lote registrado
     const result = await db.query(
       `SELECT im.ingrediente_sap_code, im.ingrediente_nombre,
               im.peso_real, im.lote,
@@ -257,8 +283,8 @@ const enviarGoodsIssuePesaje = async (masaId, usuarioId) => {
     );
 
     if (result.rows.length === 0) {
-      logger.warn(`GoodsIssue masa ${masaId}: sin ingredientes pesados, omitiendo.`);
-      return;
+      logger.warn(`InventoryGenExits masa ${masaId}: sin ingredientes pesados, omitiendo.`);
+      return { success: true, docEntry: null, rows: [] };
     }
 
     const today = new Date().toISOString().split('T')[0];
@@ -266,11 +292,10 @@ const enviarGoodsIssuePesaje = async (masaId, usuarioId) => {
     const documentLines = result.rows.map(ing => {
       const line = {
         ItemCode:      ing.ingrediente_sap_code,
-        Quantity:      parseFloat(ing.peso_real) / 1000, // gramos → kg
+        Quantity:      parseFloat(ing.peso_real) / 1000,
         WarehouseCode: 'ALMP',
         AccountCode:   '14050501',
       };
-      // Solo agregar BatchNumbers si el ítem maneja lotes Y tiene lote registrado
       if (ing.manage_batch_numbers && ing.lote) {
         line.BatchNumbers = [{
           BatchNumber: ing.lote,
@@ -305,39 +330,9 @@ const enviarGoodsIssuePesaje = async (masaId, usuarioId) => {
       ]
     );
 
-    logger.info(`GoodsIssue enviado para masa ${masaId}: DocEntry ${response.data?.DocEntry}`);
+    logger.info(`InventoryGenExits enviado para masa ${masaId}: DocEntry ${response.data?.DocEntry}`);
+    return { success: true, docEntry: response.data?.DocEntry, rows: result.rows };
 
-    // ── Descuento local de inventario (espejo de lo enviado a SAP) ──────────
-    try {
-      for (const ing of result.rows) {
-        const cantidadKg = parseFloat(ing.peso_real) / 1000;
-
-        // Descontar stock general en sap_inventario_mp
-        await db.query(
-          `UPDATE sap_inventario_mp
-           SET stock_almp  = GREATEST(0, stock_almp - $1),
-               ultimo_sync = NOW()
-           WHERE item_code = $2`,
-          [cantidadKg, ing.ingrediente_sap_code]
-        );
-
-        // Descontar cantidad_disponible en sap_lotes_mp (solo si tiene lote registrado)
-        if (ing.manage_batch_numbers && ing.lote) {
-          await db.query(
-            `UPDATE sap_lotes_mp
-             SET cantidad_disponible = GREATEST(0, cantidad_disponible - $1),
-                 ultimo_sync         = NOW()
-             WHERE item_code = $2 AND batch = $3`,
-            [cantidadKg, ing.ingrediente_sap_code, ing.lote.trim()]
-          );
-        }
-      }
-      logger.info(`Inventario local descontado para masa ${masaId}`);
-    } catch (descuentoErr) {
-      // No bloquea — SAP ya registró el movimiento, el próximo sync corregirá la DB
-      logger.error(`Error descontando inventario local para masa ${masaId}: ${descuentoErr.message}`);
-    }
-    // ── Fin descuento local ─────────────────────────────────────────────────
   } catch (err) {
     const tiempoRespuesta = Date.now() - inicio;
     const sapMsg = err?.response?.data?.error?.message?.value
@@ -345,7 +340,7 @@ const enviarGoodsIssuePesaje = async (masaId, usuarioId) => {
       || err?.response?.data?.message
       || err.message;
     logger.error(`SAP error detalle masa ${masaId}:`, JSON.stringify(err?.response?.data || {}));
-    logger.error(`Error enviando GoodsIssue para masa ${masaId}: ${sapMsg}`);
+    logger.error(`Error enviando InventoryGenExits para masa ${masaId}: ${sapMsg}`);
     try {
       await db.query(
         `INSERT INTO sap_sync_log
@@ -360,8 +355,9 @@ const enviarGoodsIssuePesaje = async (masaId, usuarioId) => {
         ]
       );
     } catch (logErr) {
-      logger.error(`Error logueando fallo GoodsIssue masa ${masaId}:`, logErr.message);
+      logger.error(`Error logueando fallo InventoryGenExits masa ${masaId}:`, logErr.message);
     }
+    return { success: false, error: sapMsg };
   }
 };
 
@@ -555,8 +551,39 @@ const confirmarPesaje = async (req, res, next) => {
       // La masa fue subdividida. Las sub-masas ya tienen PESAJE completado.
       logger.info(`Masa ${masaId} subdividida en ${subdivision.n_tandas} tandas después del pesaje.`);
 
-      // Enviar salida de inventario SAP (no bloquea)
-      enviarGoodsIssuePesaje(masaId, req.user.id).catch(() => {});
+      // Enviar a SAP — bloqueante
+      const sapResult = await enviarInventoryGenExits(masaId, req.user.id);
+      if (!sapResult.success) {
+        // Rollback: revertir PESAJE a EN_PROGRESO y AMASADO a BLOQUEADA
+        try {
+          await fasesModel.updateEstadoFase(masaId, 'PESAJE', 'EN_PROGRESO', 90, req.user.id, {});
+          await db.query(
+            `UPDATE progreso_fases SET estado = 'BLOQUEADA', porcentaje_completado = 0
+             WHERE masa_id = $1 AND fase = 'AMASADO'`,
+            [masaId]
+          );
+          await db.query(
+            `UPDATE masas_produccion SET fase_actual = 'PESAJE', estado = 'APROBADA' WHERE id = $1`,
+            [masaId]
+          );
+        } catch (rollbackErr) {
+          logger.error(`Error en rollback de masa ${masaId}:`, rollbackErr.message);
+        }
+        return res.status(502).json({
+          success: false,
+          message: `No se pudo registrar el consumo en SAP: ${sapResult.error}`,
+          data: { reintentable: true },
+        });
+      }
+
+      // SAP OK → descontar inventario local
+      if (sapResult.rows.length > 0) {
+        try {
+          await descontarInventarioLocal(sapResult.rows, masaId);
+        } catch (descErr) {
+          logger.error(`Error descontando inventario local masa ${masaId}:`, descErr.message);
+        }
+      }
 
       return res.json({
         success: true,
@@ -564,6 +591,7 @@ const confirmarPesaje = async (req, res, next) => {
         data: {
           fase_completada:    'PESAJE',
           fase_desbloqueada:  'AMASADO',
+          sap_docentry:       sapResult.docEntry,
           subdivision,
         },
       });
@@ -640,8 +668,39 @@ const confirmarPesaje = async (req, res, next) => {
       logger.warn(`Error calculando costos MP para masa ${masaId} (no bloquea):`, costoError.message);
     }
 
-    // Enviar salida de inventario SAP (no bloquea)
-    enviarGoodsIssuePesaje(masaId, req.user.id).catch(() => {});
+    // Enviar a SAP — bloqueante
+    const sapResult = await enviarInventoryGenExits(masaId, req.user.id);
+    if (!sapResult.success) {
+      // Rollback: revertir PESAJE a EN_PROGRESO y AMASADO a BLOQUEADA
+      try {
+        await fasesModel.updateEstadoFase(masaId, 'PESAJE', 'EN_PROGRESO', 90, req.user.id, {});
+        await db.query(
+          `UPDATE progreso_fases SET estado = 'BLOQUEADA', porcentaje_completado = 0
+           WHERE masa_id = $1 AND fase = 'AMASADO'`,
+          [masaId]
+        );
+        await db.query(
+          `UPDATE masas_produccion SET fase_actual = 'PESAJE', estado = 'APROBADA' WHERE id = $1`,
+          [masaId]
+        );
+      } catch (rollbackErr) {
+        logger.error(`Error en rollback de masa ${masaId}:`, rollbackErr.message);
+      }
+      return res.status(502).json({
+        success: false,
+        message: `No se pudo registrar el consumo en SAP: ${sapResult.error}`,
+        data: { reintentable: true },
+      });
+    }
+
+    // SAP OK → descontar inventario local
+    if (sapResult.rows.length > 0) {
+      try {
+        await descontarInventarioLocal(sapResult.rows, masaId);
+      } catch (descErr) {
+        logger.error(`Error descontando inventario local masa ${masaId}:`, descErr.message);
+      }
+    }
 
     res.json({
       success: true,
@@ -649,6 +708,7 @@ const confirmarPesaje = async (req, res, next) => {
       data: {
         fase_completada:   'PESAJE',
         fase_desbloqueada: siguienteFase?.fase || 'AMASADO',
+        sap_docentry:      sapResult.docEntry,
         subdivision:       null,
       },
     });
