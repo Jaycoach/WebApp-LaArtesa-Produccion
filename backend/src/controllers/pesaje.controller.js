@@ -320,7 +320,7 @@ const enviarInventoryGenExits = async (masaId, usuarioId) => {
 
     // Ingredientes sin lotes en pesaje_lotes_consumo (ej: sin manejo de batch) → usar peso_real directo
     const sinLotesResult = await db.query(
-      `SELECT im.ingrediente_sap_code, im.peso_real, inv.manage_batch_numbers
+      `SELECT im.ingrediente_sap_code, im.peso_real, im.lote, inv.manage_batch_numbers
        FROM ingredientes_masa im
        LEFT JOIN sap_inventario_mp inv ON inv.item_code = im.ingrediente_sap_code
        LEFT JOIN pesaje_lotes_consumo plc ON plc.ingrediente_id = im.id
@@ -334,10 +334,14 @@ const enviarInventoryGenExits = async (masaId, usuarioId) => {
     );
     for (const r of sinLotesResult.rows) {
       if (!itemMap[r.ingrediente_sap_code]) {
+        const totalKg = parseFloat(r.peso_real) / 1000;
+        const batches = (r.manage_batch_numbers && r.lote)
+          ? [{ batch: r.lote, cantidad_kg: totalKg }]
+          : [];
         itemMap[r.ingrediente_sap_code] = {
           manage_batch_numbers: r.manage_batch_numbers,
-          total_kg: parseFloat(r.peso_real) / 1000,
-          batches: [],
+          total_kg: totalKg,
+          batches,
         };
       }
     }
