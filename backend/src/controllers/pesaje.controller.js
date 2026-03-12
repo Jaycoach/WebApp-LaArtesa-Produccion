@@ -340,7 +340,11 @@ const enviarGoodsIssuePesaje = async (masaId, usuarioId) => {
     // ── Fin descuento local ─────────────────────────────────────────────────
   } catch (err) {
     const tiempoRespuesta = Date.now() - inicio;
-    const sapMsg = err?.response?.data?.error?.message?.value || err.message;
+    const sapMsg = err?.response?.data?.error?.message?.value
+      || err?.response?.data?.error?.message
+      || err?.response?.data?.message
+      || err.message;
+    logger.error(`SAP error detalle masa ${masaId}:`, JSON.stringify(err?.response?.data || {}));
     logger.error(`Error enviando GoodsIssue para masa ${masaId}: ${sapMsg}`);
     try {
       await db.query(
