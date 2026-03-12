@@ -134,6 +134,11 @@ export interface ChecklistPesaje {
   progreso: number; // 0-100
 }
 
+export interface LoteConsumo {
+  batch: string;
+  cantidad_kg: number;
+}
+
 // Request para actualizar ingrediente
 export interface UpdateIngredienteRequest {
   disponible?: boolean;
@@ -143,6 +148,13 @@ export interface UpdateIngredienteRequest {
   lote?: string;
   fecha_vencimiento?: string;
   observaciones?: string;
+  lotes_consumo?: LoteConsumo[];
+}
+
+export interface LoteFallidoInfo {
+  lote_fallido: string | null;
+  disponible: number | null;
+  lotes_actuales: { batch: string; cantidad_disponible: number; expiration_date?: string }[];
 }
 
 // Request para actualizar unidades programadas

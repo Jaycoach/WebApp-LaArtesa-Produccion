@@ -60,12 +60,22 @@ export const PesajeMasa: React.FC = () => {
     lote: string;
     fecha_vencimiento: string;
     fecha_vencimiento_display?: string;
+    lotes_consumo: { batch: string; cantidad_kg: string; fecha_vencimiento?: string }[];
   }>({
     peso_real: '',
     lote: '',
     fecha_vencimiento: '',
     fecha_vencimiento_display: undefined,
+    lotes_consumo: [],
   });
+
+  const [stockError, setStockError] = useState<{
+    ingredienteId: number;
+    mensaje: string;
+    lote_fallido: string | null;
+    disponible: number | null;
+    lotes_actuales: { batch: string; cantidad_disponible: number; expiration_date?: string }[];
+  } | null>(null);
 
   const handleMarcar = async (ingredienteId: number, field: 'disponible' | 'verificado' | 'pesado', value: boolean) => {
     await updateMutation.mutateAsync({
@@ -88,6 +98,7 @@ export const PesajeMasa: React.FC = () => {
     const vencimientoPreseleccionado = ingrediente.fecha_vencimiento ||
       (loteObj?.expiration_date ? loteObj.expiration_date.substring(0, 10) : '');
 
+    setStockError(null);
     setFormData({
       peso_real: ingrediente.peso_real != null
         ? String(ingrediente.peso_real)
@@ -95,21 +106,68 @@ export const PesajeMasa: React.FC = () => {
       lote: lotePreseleccionado,
       fecha_vencimiento: vencimientoPreseleccionado,
       fecha_vencimiento_display: undefined,
+      lotes_consumo: lotePreseleccionado
+        ? [{ batch: lotePreseleccionado, cantidad_kg: '', fecha_vencimiento: vencimientoPreseleccionado }]
+        : [],
     });
   };
 
   const handleGuardar = async (ingredienteId: number) => {
-    await updateMutation.mutateAsync({
-      masaId: masaIdNum,
-      ingredienteId,
-      data: {
-        pesado: true,
-        peso_real: Number(formData.peso_real),
-        lote: formData.lote,
-        fecha_vencimiento: formData.fecha_vencimiento,
-      },
-    });
-    setEditando(null);
+    setStockError(null);
+
+    // Construir lotes_consumo solo si el ingrediente tiene lotes SAP
+    const ing = checklist?.ingredientes.find((i: any) => i.id === ingredienteId);
+    const tieneLotesSAP = ing?.lotes && ing.lotes.length > 0;
+
+    const lotes_consumo = tieneLotesSAP
+      ? formData.lotes_consumo
+          .filter(l => l.batch && parseFloat(l.cantidad_kg) > 0)
+          .map(l => ({ batch: l.batch, cantidad_kg: parseFloat(l.cantidad_kg) }))
+      : undefined;
+
+    // Validar que la suma de lotes coincida con el peso real (tolerancia 1g = 0.001 kg)
+    if (lotes_consumo && lotes_consumo.length > 0) {
+      const pesoKg = Number(formData.peso_real) / 1000;
+      const sumaLotes = lotes_consumo.reduce((s, l) => s + l.cantidad_kg, 0);
+      if (Math.abs(sumaLotes - pesoKg) > 0.001) {
+        setStockError({
+          ingredienteId,
+          mensaje: `La suma de lotes (${sumaLotes.toFixed(3)} kg) no coincide con el peso real (${pesoKg.toFixed(3)} kg).`,
+          lote_fallido: null,
+          disponible: null,
+          lotes_actuales: [],
+        });
+        return;
+      }
+    }
+
+    try {
+      await updateMutation.mutateAsync({
+        masaId: masaIdNum,
+        ingredienteId,
+        data: {
+          pesado: true,
+          peso_real: Number(formData.peso_real),
+          lote: formData.lote,
+          fecha_vencimiento: formData.fecha_vencimiento,
+          lotes_consumo,
+        },
+      });
+      setEditando(null);
+    } catch (err: any) {
+      // handleError de api.ts transforma el error — usa err?.status (no err?.response?.status)
+      if (err?.status === 409) {
+        setStockError({
+          ingredienteId,
+          mensaje: err?.message || 'Stock insuficiente',
+          lote_fallido: err?.data?.lote_fallido || null,
+          disponible: err?.data?.disponible ?? null,
+          lotes_actuales: err?.data?.lotes_actuales || [],
+        });
+      } else {
+        throw err;
+      }
+    }
   };
 
   const handleConfirmar = async () => {
@@ -382,62 +440,134 @@ export const PesajeMasa: React.FC = () => {
                     </div>
                     <div className="col-span-3">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Lote
+                        Lotes a consumir
                         {ing.lotes && ing.lotes.length > 0 && (
                           <span className="ml-2 text-xs text-purple-600 font-normal">
-                            Selecciona el lote a consumir
+                            Selecciona uno o más lotes e indica la cantidad de cada uno
                           </span>
                         )}
                       </label>
+
+                      {/* Error 409 — stock insuficiente */}
+                      {stockError && stockError.ingredienteId === ing.id && (
+                        <div className="mb-3 p-3 bg-red-50 border border-red-300 rounded-lg text-sm">
+                          <p className="text-red-800 font-semibold">⚠ {stockError.mensaje}</p>
+                          {stockError.lote_fallido && (
+                            <p className="text-red-700 mt-1">
+                              Lote sin stock suficiente: <span className="font-mono font-bold">{stockError.lote_fallido}</span>
+                              {stockError.disponible !== null && ` (disponible: ${stockError.disponible.toFixed(3)} kg)`}
+                            </p>
+                          )}
+                          {stockError.lotes_actuales.length > 0 && (
+                            <div className="mt-2">
+                              <p className="text-red-700 font-medium">Stock actualizado disponible:</p>
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {stockError.lotes_actuales.map(la => (
+                                  <span key={la.batch} className="px-2 py-0.5 bg-white border border-red-200 rounded text-xs text-gray-700">
+                                    <span className="font-mono font-bold">{la.batch}</span>: {Number(la.cantidad_disponible).toFixed(3)} kg
+                                    {la.expiration_date && ` · vence ${la.expiration_date}`}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {ing.lotes && ing.lotes.length > 0 ? (
-                        <div className="grid grid-cols-2 gap-2">
-                          {ing.lotes.map((l: any) => (
-                            <label
-                              key={l.batch}
-                              className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                                formData.lote === l.batch
-                                  ? 'bg-purple-50 border-purple-500 ring-2 ring-purple-300'
-                                  : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-400'
-                              }`}
-                            >
-                              <input
-                                type="radio"
-                                name={`lote-${ing.id}`}
-                                value={l.batch}
-                                checked={formData.lote === l.batch}
-                                onChange={() => {
-                                  const venc = l.expiration_date
-                                    ? l.expiration_date.substring(0, 10)
-                                    : '';
-                                  setFormData({
-                                    ...formData,
-                                    lote: l.batch,
-                                    fecha_vencimiento: venc,
-                                    fecha_vencimiento_display: undefined,
-                                  });
-                                }}
-                                className="mt-0.5 accent-purple-600"
-                              />
-                              <div className="flex-1 min-w-0">
-                                <div className="font-semibold text-gray-900 text-sm truncate">
-                                  {l.batch}
-                                  {l.batch === (ing.lote_sugerido || ing.lotes[0]?.batch) && (
-                                    <span className="ml-2 text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
-                                      sugerido
-                                    </span>
-                                  )}
+                        <div className="space-y-2">
+                          {ing.lotes.map((l: any) => {
+                            const entrada = formData.lotes_consumo.find(lc => lc.batch === l.batch);
+                            const seleccionado = !!entrada;
+                            const esFallido = stockError?.lote_fallido === l.batch;
+                            return (
+                              <div
+                                key={l.batch}
+                                className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
+                                  esFallido
+                                    ? 'bg-red-50 border-red-400'
+                                    : seleccionado
+                                    ? 'bg-purple-50 border-purple-500 ring-1 ring-purple-300'
+                                    : 'bg-white border-gray-200'
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={seleccionado}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      const venc = l.expiration_date ? l.expiration_date.substring(0, 10) : '';
+                                      const nuevos = [...formData.lotes_consumo, { batch: l.batch, cantidad_kg: '', fecha_vencimiento: venc }];
+                                      setFormData({
+                                        ...formData,
+                                        lote: nuevos[0]?.batch || '',
+                                        fecha_vencimiento: nuevos[0]?.fecha_vencimiento || '',
+                                        lotes_consumo: nuevos,
+                                      });
+                                    } else {
+                                      const nuevos = formData.lotes_consumo.filter(lc => lc.batch !== l.batch);
+                                      setFormData({
+                                        ...formData,
+                                        lote: nuevos[0]?.batch || '',
+                                        fecha_vencimiento: nuevos[0]?.fecha_vencimiento || '',
+                                        lotes_consumo: nuevos,
+                                      });
+                                    }
+                                    setStockError(null);
+                                  }}
+                                  className="w-4 h-4 accent-purple-600 flex-shrink-0"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-semibold text-gray-900 text-sm">
+                                    {l.batch}
+                                    {l.batch === (ing.lote_sugerido || ing.lotes[0]?.batch) && (
+                                      <span className="ml-2 text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">sugerido</span>
+                                    )}
+                                    {esFallido && (
+                                      <span className="ml-2 text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded">sin stock</span>
+                                    )}
+                                  </div>
+                                  <div className="text-xs text-green-700">
+                                    {Number(l.cantidad_disponible).toFixed(3)} {ing.uom || 'kg'} disponibles
+                                    {l.expiration_date && ` · vence ${new Date(l.expiration_date + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })}`}
+                                  </div>
                                 </div>
-                                <div className="text-xs text-green-700 font-medium">
-                                  {Number(l.cantidad_disponible).toFixed(3)} {ing.uom || 'kg'} disponibles
-                                </div>
-                                {l.expiration_date && (
-                                  <div className="text-xs text-gray-500">
-                                    Vence: {new Date(l.expiration_date + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                                {seleccionado && (
+                                  <div className="flex items-center gap-1 flex-shrink-0">
+                                    <input
+                                      type="number"
+                                      step="0.001"
+                                      min="0.001"
+                                      placeholder="kg"
+                                      value={entrada?.cantidad_kg ?? ''}
+                                      onChange={(e) => {
+                                        const nuevos = formData.lotes_consumo.map(lc =>
+                                          lc.batch === l.batch ? { ...lc, cantidad_kg: e.target.value } : lc
+                                        );
+                                        setFormData({ ...formData, lotes_consumo: nuevos });
+                                        setStockError(null);
+                                      }}
+                                      className="w-24 px-2 py-1 border border-purple-300 rounded text-sm focus:ring-2 focus:ring-purple-400"
+                                    />
+                                    <span className="text-xs text-gray-500">kg</span>
                                   </div>
                                 )}
                               </div>
-                            </label>
-                          ))}
+                            );
+                          })}
+                          {/* Indicador de suma vs peso real */}
+                          {formData.lotes_consumo.length > 0 && (() => {
+                            const pesoKg = Number(formData.peso_real) / 1000;
+                            const suma = formData.lotes_consumo.reduce((s, l) => s + (parseFloat(l.cantidad_kg) || 0), 0);
+                            const diff = Math.abs(suma - pesoKg);
+                            const ok = diff <= 0.001;
+                            return (
+                              <div className={`text-xs mt-1 font-medium ${ok ? 'text-green-700' : 'text-amber-700'}`}>
+                                Suma lotes: {suma.toFixed(3)} kg / Peso real: {pesoKg.toFixed(3)} kg
+                                {ok ? ' ✓' : ` — faltan ${(pesoKg - suma).toFixed(3)} kg por asignar`}
+                              </div>
+                            );
+                          })()}
                         </div>
                       ) : (
                         <div>
@@ -449,7 +579,7 @@ export const PesajeMasa: React.FC = () => {
                             className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
                           />
                           <p className="text-xs text-amber-600 mt-1">
-                            ⚠ No hay lotes registrados en SAP para este ingrediente. Sincroniza el inventario o ingresa el lote manualmente.
+                            ⚠ No hay lotes registrados en SAP. Sincroniza el inventario o ingresa el lote manualmente.
                           </p>
                         </div>
                       )}
@@ -503,7 +633,7 @@ export const PesajeMasa: React.FC = () => {
                         Guardar
                       </button>
                       <button
-                        onClick={() => setEditando(null)}
+                        onClick={() => { setEditando(null); setStockError(null); }}
                         className="px-4 py-2 bg-gray-300 text-gray-800 rounded hover:bg-gray-400"
                       >
                         Cancelar
