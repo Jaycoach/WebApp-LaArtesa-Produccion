@@ -122,17 +122,17 @@ export const PesajeMasa: React.FC = () => {
     const lotes_consumo = tieneLotesSAP
       ? formData.lotes_consumo
           .filter(l => l.batch && parseFloat(l.cantidad_kg) > 0)
-          .map(l => ({ batch: l.batch, cantidad_kg: parseFloat(l.cantidad_kg) }))
+          .map(l => ({ batch: l.batch, cantidad_kg: parseFloat(l.cantidad_kg) / 1000 }))
       : undefined;
 
-    // Validar que la suma de lotes coincida con el peso real (tolerancia 1g = 0.001 kg)
+    // Validar que la suma de lotes coincida con el peso real (tolerancia 1g)
     if (lotes_consumo && lotes_consumo.length > 0) {
-      const pesoKg = Number(formData.peso_real) / 1000;
-      const sumaLotes = lotes_consumo.reduce((s, l) => s + l.cantidad_kg, 0);
-      if (Math.abs(sumaLotes - pesoKg) > 0.001) {
+      const pesoReal = Number(formData.peso_real);
+      const sumaGramos = lotes_consumo.reduce((s, l) => s + l.cantidad_kg * 1000, 0);
+      if (Math.abs(sumaGramos - pesoReal) > 1) {
         setStockError({
           ingredienteId,
-          mensaje: `La suma de lotes (${sumaLotes.toFixed(3)} kg) no coincide con el peso real (${pesoKg.toFixed(3)} kg).`,
+          mensaje: `La suma de lotes (${sumaGramos.toFixed(0)}g) no coincide con el peso real (${pesoReal.toFixed(0)}g).`,
           lote_fallido: null,
           disponible: null,
           lotes_actuales: [],
@@ -455,7 +455,7 @@ export const PesajeMasa: React.FC = () => {
                           {stockError.lote_fallido && (
                             <p className="text-red-700 mt-1">
                               Lote sin stock suficiente: <span className="font-mono font-bold">{stockError.lote_fallido}</span>
-                              {stockError.disponible !== null && ` (disponible: ${stockError.disponible.toFixed(3)} kg)`}
+                              {stockError.disponible !== null && ` (disponible: ${(stockError.disponible * 1000).toFixed(0)}g)`}
                             </p>
                           )}
                           {stockError.lotes_actuales.length > 0 && (
@@ -464,7 +464,7 @@ export const PesajeMasa: React.FC = () => {
                               <div className="flex flex-wrap gap-1 mt-1">
                                 {stockError.lotes_actuales.map(la => (
                                   <span key={la.batch} className="px-2 py-0.5 bg-white border border-red-200 rounded text-xs text-gray-700">
-                                    <span className="font-mono font-bold">{la.batch}</span>: {Number(la.cantidad_disponible).toFixed(3)} kg
+                                    <span className="font-mono font-bold">{la.batch}</span>: {(Number(la.cantidad_disponible) * 1000).toFixed(0)}g
                                     {la.expiration_date && ` · vence ${la.expiration_date}`}
                                   </span>
                                 ))}
@@ -528,7 +528,7 @@ export const PesajeMasa: React.FC = () => {
                                     )}
                                   </div>
                                   <div className="text-xs text-green-700">
-                                    {Number(l.cantidad_disponible).toFixed(3)} {ing.uom || 'kg'} disponibles
+                                    {(Number(l.cantidad_disponible) * 1000).toFixed(0)}g disponibles
                                     {l.expiration_date && ` · vence ${new Date(l.expiration_date + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })}`}
                                   </div>
                                 </div>
@@ -536,9 +536,9 @@ export const PesajeMasa: React.FC = () => {
                                   <div className="flex items-center gap-1 flex-shrink-0">
                                     <input
                                       type="number"
-                                      step="0.001"
-                                      min="0.001"
-                                      placeholder="kg"
+                                      step="1"
+                                      min="1"
+                                      placeholder="g"
                                       value={entrada?.cantidad_kg ?? ''}
                                       onChange={(e) => {
                                         const nuevos = formData.lotes_consumo.map(lc =>
@@ -549,7 +549,7 @@ export const PesajeMasa: React.FC = () => {
                                       }}
                                       className="w-24 px-2 py-1 border border-purple-300 rounded text-sm focus:ring-2 focus:ring-purple-400"
                                     />
-                                    <span className="text-xs text-gray-500">kg</span>
+                                    <span className="text-xs text-gray-500">g</span>
                                   </div>
                                 )}
                               </div>
@@ -557,14 +557,14 @@ export const PesajeMasa: React.FC = () => {
                           })}
                           {/* Indicador de suma vs peso real */}
                           {formData.lotes_consumo.length > 0 && (() => {
-                            const pesoKg = Number(formData.peso_real) / 1000;
+                            const pesoReal = Number(formData.peso_real);
                             const suma = formData.lotes_consumo.reduce((s, l) => s + (parseFloat(l.cantidad_kg) || 0), 0);
-                            const diff = Math.abs(suma - pesoKg);
-                            const ok = diff <= 0.001;
+                            const pendiente = pesoReal - suma;
+                            const ok = Math.abs(pendiente) <= 1;
                             return (
                               <div className={`text-xs mt-1 font-medium ${ok ? 'text-green-700' : 'text-amber-700'}`}>
-                                Suma lotes: {suma.toFixed(3)} kg / Peso real: {pesoKg.toFixed(3)} kg
-                                {ok ? ' ✓' : ` — faltan ${(pesoKg - suma).toFixed(3)} kg por asignar`}
+                                Asignado: {suma.toFixed(0)}g / Pendiente: {pendiente.toFixed(0)}g
+                                {ok ? ' ✓' : pendiente > 0 ? ` — faltan ${pendiente.toFixed(0)}g` : ` — exceso de ${(-pendiente).toFixed(0)}g`}
                               </div>
                             );
                           })()}
