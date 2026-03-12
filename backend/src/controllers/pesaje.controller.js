@@ -357,7 +357,32 @@ const enviarInventoryGenExits = async (masaId, usuarioId) => {
     } catch (logErr) {
       logger.error(`Error logueando fallo InventoryGenExits masa ${masaId}:`, logErr.message);
     }
-    return { success: false, error: sapMsg };
+    // Parsear error de stock insuficiente SAP (código 10001153)
+    let lote_fallido = null;
+    let alternativas = [];
+    const matchStock = sapMsg.match(/10001153 - Insufficient quantity for item (\S+) with batch (\S+)/i);
+    if (matchStock) {
+      const itemFallido = matchStock[1];
+      const batchFallido = matchStock[2];
+      lote_fallido = { item_code: itemFallido, batch: batchFallido };
+      try {
+        const alt = await db.query(
+          `SELECT batch, cantidad_disponible, expiration_date
+           FROM sap_lotes_mp
+           WHERE item_code = $1
+             AND batch != $2
+             AND cantidad_disponible > 0
+             AND (status IS NULL OR status = 'DISPONIBLE')
+           ORDER BY expiration_date ASC NULLS LAST
+           LIMIT 5`,
+          [itemFallido, batchFallido]
+        );
+        alternativas = alt.rows;
+      } catch (altErr) {
+        logger.warn(`Error consultando alternativas de lote para ${itemFallido}:`, altErr.message);
+      }
+    }
+    return { success: false, error: sapMsg, lote_fallido, alternativas };
   }
 };
 
@@ -572,7 +597,11 @@ const confirmarPesaje = async (req, res, next) => {
         return res.status(502).json({
           success: false,
           message: `No se pudo registrar el consumo en SAP: ${sapResult.error}`,
-          data: { reintentable: true },
+          data: {
+            reintentable: true,
+            lote_fallido:  sapResult.lote_fallido  || null,
+            alternativas:  sapResult.alternativas  || [],
+          },
         });
       }
 
@@ -689,7 +718,11 @@ const confirmarPesaje = async (req, res, next) => {
       return res.status(502).json({
         success: false,
         message: `No se pudo registrar el consumo en SAP: ${sapResult.error}`,
-        data: { reintentable: true },
+        data: {
+          reintentable: true,
+          lote_fallido:  sapResult.lote_fallido  || null,
+          alternativas:  sapResult.alternativas  || [],
+        },
       });
     }
 
