@@ -137,34 +137,123 @@ const updateIngredienteChecklist = async (ingredienteId, data) => {
   const {
     disponible, verificado, pesado, peso_real,
     lote, fecha_vencimiento, observaciones, usuarioId,
+    lotes_consumo, // array opcional: [{batch, cantidad_kg}]
   } = data;
 
-  const result = await db.query(`
-    UPDATE ingredientes_masa
-    SET 
-      disponible = COALESCE($1, disponible),
-      verificado = COALESCE($2, verificado),
-      pesado = COALESCE($3, pesado),
-      peso_real = COALESCE($4, peso_real),
-      diferencia_gramos = CASE 
-        WHEN $4 IS NOT NULL THEN $4 - cantidad_gramos 
-        ELSE diferencia_gramos 
-      END,
-      lote = COALESCE($5, lote),
-      fecha_vencimiento = COALESCE($6, fecha_vencimiento),
-      observaciones = COALESCE($7, observaciones),
-      usuario_peso = COALESCE($8, usuario_peso),
-      timestamp_peso = CASE WHEN $3 = TRUE THEN NOW() ELSE timestamp_peso END,
-      updated_at = NOW()
-    WHERE id = $9
-    RETURNING *
-  `, [
-    disponible, verificado, pesado, peso_real,
-    lote, fecha_vencimiento, observaciones, usuarioId,
-    ingredienteId,
-  ]);
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
 
-  return result.rows[0];
+    // ── Reserva de lotes si viene lotes_consumo ──────────────────────
+    if (Array.isArray(lotes_consumo) && lotes_consumo.length > 0) {
+
+      // Obtener masa_id e item_code del ingrediente
+      const ingRow = await client.query(
+        `SELECT masa_id, ingrediente_sap_code FROM ingredientes_masa WHERE id = $1`,
+        [ingredienteId]
+      );
+      if (!ingRow.rows[0]) throw Object.assign(new Error('Ingrediente no encontrado'), { status: 404 });
+      const { masa_id, ingrediente_sap_code } = ingRow.rows[0];
+
+      // Devolver stock previo de este ingrediente (si ya tenía lotes reservados)
+      const previos = await client.query(
+        `SELECT batch, cantidad_kg FROM pesaje_lotes_consumo WHERE ingrediente_id = $1`,
+        [ingredienteId]
+      );
+      for (const p of previos.rows) {
+        await client.query(
+          `UPDATE sap_lotes_mp
+           SET cantidad_disponible = cantidad_disponible + $1, ultimo_sync = NOW()
+           WHERE item_code = $2 AND batch = $3`,
+          [p.cantidad_kg, ingrediente_sap_code, p.batch]
+        );
+      }
+      await client.query(
+        `DELETE FROM pesaje_lotes_consumo WHERE ingrediente_id = $1`,
+        [ingredienteId]
+      );
+
+      // Validar y descontar cada lote nuevo — SELECT FOR UPDATE evita concurrencia
+      for (const lc of lotes_consumo) {
+        const lockRow = await client.query(
+          `SELECT cantidad_disponible FROM sap_lotes_mp
+           WHERE item_code = $1 AND batch = $2
+           FOR UPDATE`,
+          [ingrediente_sap_code, lc.batch]
+        );
+        if (!lockRow.rows[0]) {
+          throw Object.assign(
+            new Error(`Lote ${lc.batch} no encontrado para ítem ${ingrediente_sap_code}`),
+            { status: 409, lote: lc.batch }
+          );
+        }
+        const disponibleLote = parseFloat(lockRow.rows[0].cantidad_disponible);
+        if (disponibleLote < lc.cantidad_kg) {
+          const lotesActuales = await client.query(
+            `SELECT batch, cantidad_disponible, expiration_date
+             FROM sap_lotes_mp
+             WHERE item_code = $1 AND cantidad_disponible > 0
+             ORDER BY expiration_date ASC NULLS LAST`,
+            [ingrediente_sap_code]
+          );
+          throw Object.assign(
+            new Error(`Stock insuficiente: lote ${lc.batch} tiene ${disponibleLote} kg, se requieren ${lc.cantidad_kg} kg`),
+            { status: 409, lote: lc.batch, disponible: disponibleLote, lotes_actuales: lotesActuales.rows }
+          );
+        }
+        await client.query(
+          `UPDATE sap_lotes_mp
+           SET cantidad_disponible = cantidad_disponible - $1, ultimo_sync = NOW()
+           WHERE item_code = $2 AND batch = $3`,
+          [lc.cantidad_kg, ingrediente_sap_code, lc.batch]
+        );
+        await client.query(
+          `INSERT INTO pesaje_lotes_consumo
+             (ingrediente_id, masa_id, item_code, batch, cantidad_kg, usuario_id)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [ingredienteId, masa_id, ingrediente_sap_code, lc.batch, lc.cantidad_kg, usuarioId]
+        );
+      }
+
+      // lote legacy = primer batch (compatibilidad con enviarInventoryGenExits)
+      if (lotes_consumo[0]) data.lote = lotes_consumo[0].batch;
+    }
+
+    // ── UPDATE principal ─────────────────────────────────────────────
+    const result = await client.query(`
+      UPDATE ingredientes_masa
+      SET
+        disponible        = COALESCE($1, disponible),
+        verificado        = COALESCE($2, verificado),
+        pesado            = COALESCE($3, pesado),
+        peso_real         = COALESCE($4, peso_real),
+        diferencia_gramos = CASE
+          WHEN $4 IS NOT NULL THEN $4 - cantidad_gramos
+          ELSE diferencia_gramos
+        END,
+        lote              = COALESCE($5, lote),
+        fecha_vencimiento = COALESCE($6, fecha_vencimiento),
+        observaciones     = COALESCE($7, observaciones),
+        usuario_peso      = COALESCE($8, usuario_peso),
+        timestamp_peso    = CASE WHEN $3 = TRUE THEN NOW() ELSE timestamp_peso END,
+        updated_at        = NOW()
+      WHERE id = $9
+      RETURNING *
+    `, [
+      disponible, verificado, pesado, peso_real,
+      data.lote ?? lote, fecha_vencimiento, observaciones, usuarioId,
+      ingredienteId,
+    ]);
+
+    await client.query('COMMIT');
+    return result.rows[0];
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 };
 
 const checkTodosPesados = async (masaId) => {

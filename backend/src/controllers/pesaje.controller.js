@@ -201,6 +201,7 @@ const updateIngrediente = async (req, res, next) => {
       lote,
       fecha_vencimiento,
       observaciones,
+      lotes_consumo, // [{batch, cantidad_kg}] — opcional
     } = req.body;
 
     const data = {
@@ -212,23 +213,27 @@ const updateIngrediente = async (req, res, next) => {
       fecha_vencimiento: fecha_vencimiento && fecha_vencimiento.trim() !== '' ? fecha_vencimiento : null,
       observaciones,
       usuarioId: req.user.id,
+      lotes_consumo,
     };
 
     const ingrediente = await fasesModel.updateIngredienteChecklist(ingredienteId, data);
-
     if (!ingrediente) {
-      return res.status(404).json({
+      return res.status(404).json({ success: false, message: 'Ingrediente no encontrado' });
+    }
+    res.json({ success: true, data: ingrediente, message: 'Ingrediente actualizado correctamente' });
+
+  } catch (error) {
+    if (error.status === 409) {
+      return res.status(409).json({
         success: false,
-        message: 'Ingrediente no encontrado',
+        message: error.message,
+        data: {
+          lote_fallido:   error.lote        || null,
+          disponible:     error.disponible  ?? null,
+          lotes_actuales: error.lotes_actuales || [],
+        },
       });
     }
-
-    res.json({
-      success: true,
-      data: ingrediente,
-      message: 'Ingrediente actualizado correctamente',
-    });
-  } catch (error) {
     logger.error('Error al actualizar ingrediente:', error);
     next(error);
   }
@@ -242,7 +247,8 @@ const updateIngrediente = async (req, res, next) => {
 const descontarInventarioLocal = async (rows, masaId) => {
   for (const ing of rows) {
     const cantidadKg = parseFloat(ing.peso_real) / 1000;
-
+    // sap_lotes_mp ya fue descontado al guardar cada ingrediente (pesaje_lotes_consumo)
+    // Aquí solo actualizamos el stock general por ítem
     await db.query(
       `UPDATE sap_inventario_mp
        SET stock_almp  = GREATEST(0, stock_almp - $1),
@@ -250,16 +256,6 @@ const descontarInventarioLocal = async (rows, masaId) => {
        WHERE item_code = $2`,
       [cantidadKg, ing.ingrediente_sap_code]
     );
-
-    if (ing.manage_batch_numbers && ing.lote) {
-      await db.query(
-        `UPDATE sap_lotes_mp
-         SET cantidad_disponible = GREATEST(0, cantidad_disponible - $1),
-             ultimo_sync         = NOW()
-         WHERE item_code = $2 AND batch = $3`,
-        [cantidadKg, ing.ingrediente_sap_code, ing.lote.trim()]
-      );
-    }
   }
   logger.info(`Inventario local descontado para masa ${masaId}`);
 };
@@ -289,18 +285,63 @@ const enviarInventoryGenExits = async (masaId, usuarioId) => {
 
     const today = new Date().toISOString().split('T')[0];
 
-    const documentLines = result.rows.map(ing => {
+    // Leer lotes reservados en pesaje_lotes_consumo para esta masa
+    const lotesResult = await db.query(
+      `SELECT plc.item_code, plc.batch, plc.cantidad_kg,
+              inv.manage_batch_numbers
+       FROM pesaje_lotes_consumo plc
+       JOIN ingredientes_masa im ON im.id = plc.ingrediente_id
+       LEFT JOIN sap_inventario_mp inv ON inv.item_code = plc.item_code
+       WHERE plc.masa_id = $1
+         AND im.es_empaque = false`,
+      [masaId]
+    );
+
+    // Agrupar por item_code (un ítem puede tener múltiples lotes)
+    const itemMap = {};
+    for (const r of lotesResult.rows) {
+      if (!itemMap[r.item_code]) {
+        itemMap[r.item_code] = { manage_batch_numbers: r.manage_batch_numbers, total_kg: 0, batches: [] };
+      }
+      itemMap[r.item_code].total_kg += parseFloat(r.cantidad_kg);
+      itemMap[r.item_code].batches.push({ batch: r.batch, cantidad_kg: parseFloat(r.cantidad_kg) });
+    }
+
+    // Ingredientes sin lotes en pesaje_lotes_consumo (ej: agua) → usar peso_real directo
+    const sinLotesResult = await db.query(
+      `SELECT im.ingrediente_sap_code, im.peso_real, inv.manage_batch_numbers
+       FROM ingredientes_masa im
+       LEFT JOIN sap_inventario_mp inv ON inv.item_code = im.ingrediente_sap_code
+       LEFT JOIN pesaje_lotes_consumo plc ON plc.ingrediente_id = im.id
+       WHERE im.masa_id = $1
+         AND im.es_empaque = false
+         AND im.pesado = true
+         AND im.peso_real > 0
+         AND plc.id IS NULL`,
+      [masaId]
+    );
+    for (const r of sinLotesResult.rows) {
+      if (!itemMap[r.ingrediente_sap_code]) {
+        itemMap[r.ingrediente_sap_code] = {
+          manage_batch_numbers: r.manage_batch_numbers,
+          total_kg: parseFloat(r.peso_real) / 1000,
+          batches: [],
+        };
+      }
+    }
+
+    const documentLines = Object.entries(itemMap).map(([itemCode, data]) => {
       const line = {
-        ItemCode:      ing.ingrediente_sap_code,
-        Quantity:      parseFloat(ing.peso_real) / 1000,
+        ItemCode:      itemCode,
+        Quantity:      data.total_kg,
         WarehouseCode: 'ALMP',
         AccountCode:   '14050501',
       };
-      if (ing.manage_batch_numbers && ing.lote) {
-        line.BatchNumbers = [{
-          BatchNumber: ing.lote,
-          Quantity:    parseFloat(ing.peso_real) / 1000,
-        }];
+      if (data.manage_batch_numbers && data.batches.length > 0) {
+        line.BatchNumbers = data.batches.map(b => ({
+          BatchNumber: b.batch,
+          Quantity:    b.cantidad_kg,
+        }));
       }
       return line;
     });
@@ -810,9 +851,34 @@ const enviarCorreoEmpaque = async (req, res, next) => {
   }
 };
 
+/**
+ * Devuelve al stock local todos los lotes reservados de una masa.
+ * Llamar al cancelar o rechazar una masa que tenga pesaje en progreso.
+ */
+const devolverStockMasa = async (masaId) => {
+  const lotes = await db.query(
+    `SELECT item_code, batch, SUM(cantidad_kg) as total_kg
+     FROM pesaje_lotes_consumo
+     WHERE masa_id = $1
+     GROUP BY item_code, batch`,
+    [masaId]
+  );
+  for (const l of lotes.rows) {
+    await db.query(
+      `UPDATE sap_lotes_mp
+       SET cantidad_disponible = cantidad_disponible + $1, ultimo_sync = NOW()
+       WHERE item_code = $2 AND batch = $3`,
+      [l.total_kg, l.item_code, l.batch]
+    );
+  }
+  await db.query(`DELETE FROM pesaje_lotes_consumo WHERE masa_id = $1`, [masaId]);
+  logger.info(`Stock devuelto para masa cancelada ${masaId}: ${lotes.rows.length} lotes liberados`);
+};
+
 module.exports = {
   getChecklist,
   updateIngrediente,
   confirmarPesaje,
   enviarCorreoEmpaque,
+  devolverStockMasa,
 };
