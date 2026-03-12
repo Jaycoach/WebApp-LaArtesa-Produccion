@@ -235,7 +235,7 @@ const updateIngrediente = async (req, res, next) => {
 };
 
 /**
- * Envía salida de inventario a SAP (GoodsIssues) por los ingredientes pesados.
+ * Envía salida de inventario a SAP (InventoryGenExits) por los ingredientes pesados.
  * No bloquea el flujo de producción — errores son capturados y logueados.
  */
 const enviarGoodsIssuePesaje = async (masaId, usuarioId) => {
@@ -268,6 +268,7 @@ const enviarGoodsIssuePesaje = async (masaId, usuarioId) => {
         ItemCode:      ing.ingrediente_sap_code,
         Quantity:      parseFloat(ing.peso_real) / 1000, // gramos → kg
         WarehouseCode: 'ALMP',
+        AccountCode:   '14050501',
       };
       // Solo agregar BatchNumbers si el ítem maneja lotes Y tiene lote registrado
       if (ing.manage_batch_numbers && ing.lote) {
@@ -286,7 +287,7 @@ const enviarGoodsIssuePesaje = async (masaId, usuarioId) => {
     };
 
     await sapService.ensureSession();
-    const response = await sapService.client.post('/GoodsIssues', requestPayload);
+    const response = await sapService.client.post('/InventoryGenExits', requestPayload);
 
     const tiempoRespuesta = Date.now() - inicio;
     await db.query(
@@ -305,6 +306,38 @@ const enviarGoodsIssuePesaje = async (masaId, usuarioId) => {
     );
 
     logger.info(`GoodsIssue enviado para masa ${masaId}: DocEntry ${response.data?.DocEntry}`);
+
+    // ── Descuento local de inventario (espejo de lo enviado a SAP) ──────────
+    try {
+      for (const ing of result.rows) {
+        const cantidadKg = parseFloat(ing.peso_real) / 1000;
+
+        // Descontar stock general en sap_inventario_mp
+        await db.query(
+          `UPDATE sap_inventario_mp
+           SET stock_almp  = GREATEST(0, stock_almp - $1),
+               ultimo_sync = NOW()
+           WHERE item_code = $2`,
+          [cantidadKg, ing.ingrediente_sap_code]
+        );
+
+        // Descontar cantidad_disponible en sap_lotes_mp (solo si tiene lote registrado)
+        if (ing.manage_batch_numbers && ing.lote) {
+          await db.query(
+            `UPDATE sap_lotes_mp
+             SET cantidad_disponible = GREATEST(0, cantidad_disponible - $1),
+                 ultimo_sync         = NOW()
+             WHERE item_code = $2 AND batch = $3`,
+            [cantidadKg, ing.ingrediente_sap_code, ing.lote.trim()]
+          );
+        }
+      }
+      logger.info(`Inventario local descontado para masa ${masaId}`);
+    } catch (descuentoErr) {
+      // No bloquea — SAP ya registró el movimiento, el próximo sync corregirá la DB
+      logger.error(`Error descontando inventario local para masa ${masaId}: ${descuentoErr.message}`);
+    }
+    // ── Fin descuento local ─────────────────────────────────────────────────
   } catch (err) {
     const tiempoRespuesta = Date.now() - inicio;
     const sapMsg = err?.response?.data?.error?.message?.value || err.message;
