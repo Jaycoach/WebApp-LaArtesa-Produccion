@@ -103,6 +103,16 @@ class ApiService {
           error: data?.error,
         });
 
+      case HTTP_STATUS.CONFLICT:
+        console.error('Conflict (409):', data?.message);
+        return Promise.reject({
+          success: false,
+          status: 409,
+          message: data?.message || 'Conflicto de datos',
+          data: (data as any)?.data,  // { lote_fallido, disponible, lotes_actuales }
+          error: data?.error,
+        });
+
       case HTTP_STATUS.INTERNAL_SERVER_ERROR:
         console.error('Server Error:', data?.error);
         return Promise.reject({
