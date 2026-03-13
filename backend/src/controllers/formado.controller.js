@@ -324,15 +324,11 @@ exports.completarFormado = async (req, res) => {
     `;
     await client.query(updateFaseQuery, [masaId, observaciones || null]);
 
-    // Desbloquear fase FERMENTACION
-    const desbloquearQuery = `
-      UPDATE progreso_fases
-      SET estado = 'BLOQUEADA'
-      WHERE masa_id = $1 AND fase = 'FERMENTACION' AND estado = 'BLOQUEADA'
-    `;
-    await client.query(desbloquearQuery, [masaId]);
-
     await client.query('COMMIT');
+
+    // Desbloquear fase FERMENTACION usando el modelo estándar
+    const fasesModel = require('../models/fases.model');
+    await fasesModel.desbloquearSiguienteFase(masaId, 'FORMADO');
 
     logger.info(`Formado completado para masa ${masaId} por usuario ${usuario.username}`);
 
