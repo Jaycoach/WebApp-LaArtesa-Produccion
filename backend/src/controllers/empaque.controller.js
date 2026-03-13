@@ -492,6 +492,108 @@ exports.completarEmpaque = async (req, res) => {
   } finally { client.release(); }
 };
 
+// ── GET /api/empaque/pendientes ──────────────────────────────────────────────
+// Lista todas las masas con HORNEADO completado y EMPAQUE no completado.
+// Para sub-masas, hereda sap_doc_num/sap_doc_entry del producto equivalente
+// en la masa padre (mismo sap_item_code).
+exports.getMasasPendientesEmpaque = async (req, res) => {
+  try {
+    const masasR = await db.query(`
+      SELECT mp.id, mp.codigo_masa, mp.nombre_masa, mp.tipo_masa,
+             mp.total_kilos_con_merma, mp.fecha_produccion,
+             mp.es_subdivision, mp.masa_padre_id,
+             pf_e.estado AS estado_empaque
+      FROM masas_produccion mp
+      JOIN progreso_fases pf_h ON pf_h.masa_id = mp.id AND pf_h.fase = 'HORNEADO'
+      JOIN progreso_fases pf_e ON pf_e.masa_id = mp.id AND pf_e.fase = 'EMPAQUE'
+      WHERE pf_h.estado = 'COMPLETADA'
+        AND pf_e.estado != 'COMPLETADA'
+        AND mp.estado != 'SUBDIVIDIDA'
+        AND mp.estado != 'CANCELADA'
+      ORDER BY mp.fecha_produccion DESC, mp.id DESC
+    `);
+
+    if (!masasR.rows.length)
+      return res.json({ success: true, data: [] });
+
+    const resultado = [];
+
+    for (const masa of masasR.rows) {
+      const prodsR = await db.query(`
+        SELECT ppm.id, ppm.sap_item_code, ppm.producto_nombre, ppm.presentacion,
+               ppm.gramaje_unitario, ppm.unidades_pedidas,
+               COALESCE(ppm.unidades_ajustadas, ppm.unidades_programadas) AS unidades_ajustadas,
+               COALESCE(ppm.unidades_producidas, 0) AS unidades_producidas,
+               ppm.sap_doc_num, ppm.sap_doc_entry
+        FROM productos_por_masa ppm
+        WHERE ppm.masa_id = $1
+        ORDER BY ppm.sap_doc_num, ppm.producto_nombre
+      `, [masa.id]);
+
+      let productos = prodsR.rows;
+
+      // Para sub-masas: heredar sap_doc_num del padre por sap_item_code
+      if (masa.es_subdivision && masa.masa_padre_id) {
+        const padreProdsR = await db.query(`
+          SELECT sap_item_code, sap_doc_num, sap_doc_entry
+          FROM productos_por_masa
+          WHERE masa_id = $1
+        `, [masa.masa_padre_id]);
+
+        const mapaDoc = {};
+        for (const pp of padreProdsR.rows) {
+          if (pp.sap_item_code) mapaDoc[pp.sap_item_code] = {
+            sap_doc_num: pp.sap_doc_num,
+            sap_doc_entry: pp.sap_doc_entry,
+          };
+        }
+
+        productos = productos.map(p => ({
+          ...p,
+          sap_doc_num:   p.sap_doc_num   || mapaDoc[p.sap_item_code]?.sap_doc_num   || null,
+          sap_doc_entry: p.sap_doc_entry || mapaDoc[p.sap_item_code]?.sap_doc_entry || null,
+        }));
+      }
+
+      // Agrupar productos por OV
+      const porOV = {};
+      for (const p of productos) {
+        const ov = p.sap_doc_num || 'SIN_OV';
+        if (!porOV[ov]) porOV[ov] = [];
+        porOV[ov].push(p);
+      }
+
+      const empR = await db.query(`
+        SELECT id, estado, fecha_vencimiento
+        FROM registros_empaque WHERE masa_id = $1 LIMIT 1
+      `, [masa.id]);
+
+      resultado.push({
+        id:                    masa.id,
+        codigo_masa:           masa.codigo_masa,
+        nombre_masa:           masa.nombre_masa,
+        tipo_masa:             masa.tipo_masa,
+        total_kilos_con_merma: parseFloat(masa.total_kilos_con_merma || 0),
+        fecha_produccion:      masa.fecha_produccion,
+        es_subdivision:        masa.es_subdivision,
+        estado_empaque:        masa.estado_empaque,
+        empaque_iniciado:      empR.rows.length > 0,
+        empaque_id:            empR.rows[0]?.id || null,
+        fecha_vencimiento:     empR.rows[0]?.fecha_vencimiento || null,
+        ovs: Object.entries(porOV).map(([doc_num, prods]) => ({
+          doc_num,
+          productos: prods,
+        })),
+      });
+    }
+
+    res.json({ success: true, data: resultado });
+  } catch (error) {
+    logger.error('Error getMasasPendientesEmpaque:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // ── GET /api/empaque/:masaId/etiqueta/:productoId ────────────────────────────
 exports.getEtiqueta = async (req, res) => {
   try {

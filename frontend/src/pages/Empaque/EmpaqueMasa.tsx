@@ -1,8 +1,11 @@
 /**
  * EmpaqueMasa.tsx — ARTESA
- * Vista consolidada de empaque por OV
- * Busca por número de OV, muestra todas las sub-masas,
- * costeo completo y generación de etiqueta INVIMA.
+ * Módulo de empaque con dos modos de acceso:
+ *   A) Lista de masas listas (horneado completo, empaque pendiente)
+ *   B) Búsqueda manual por número de OV SAP
+ *
+ * Para masas con múltiples OVs, el formulario agrupa los productos por OV.
+ * Si hay faltantes, se exige observación obligatoria antes de completar.
  */
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -24,6 +27,36 @@ const api = async (path: string, opts?: RequestInit) => {
 };
 
 // ── tipos ────────────────────────────────────────────────────────────────────
+interface ProductoPendiente {
+  id: number;
+  sap_item_code: string;
+  producto_nombre: string;
+  presentacion: string;
+  gramaje_unitario: number;
+  unidades_ajustadas: number;
+  unidades_producidas: number;
+  sap_doc_num: string | null;
+  sap_doc_entry: number | null;
+}
+interface OVPendiente {
+  doc_num: string;
+  productos: ProductoPendiente[];
+}
+interface MasaPendiente {
+  id: number;
+  codigo_masa: string;
+  nombre_masa: string;
+  tipo_masa: string;
+  total_kilos_con_merma: number;
+  fecha_produccion: string;
+  es_subdivision: boolean;
+  estado_empaque: string;
+  empaque_iniciado: boolean;
+  empaque_id: number | null;
+  fecha_vencimiento: string | null;
+  ovs: OVPendiente[];
+}
+
 interface SubMasa {
   id: number;
   codigo_masa: string;
@@ -60,8 +93,11 @@ interface MaterialEmpaque {
   stock_disponible: number;
 }
 interface ResumenCostos {
-  costo_mp: number; costo_mo: number;
-  costo_empaque: number; costo_indirecto: number; costo_total: number;
+  costo_mp: number;
+  costo_mo: number;
+  costo_empaque: number;
+  costo_indirecto: number;
+  costo_total: number;
 }
 interface OVData {
   masa_padre: { id: number; codigo: string; tipo: string; total_kg: number };
@@ -72,7 +108,8 @@ interface OVData {
   resumen_costos: ResumenCostos;
 }
 
-const COP = (v: number) => v.toLocaleString('es-CO', { minimumFractionDigits: 0 });
+const COP = (v: number) => isNaN(v) ? '0' : v.toLocaleString('es-CO', { minimumFractionDigits: 0 });
+const fmtFecha = (s: string) => new Date(s + 'T12:00').toLocaleDateString('es-CO');
 
 // ── Etiqueta imprimible ──────────────────────────────────────────────────────
 const Etiqueta: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose }) => {
@@ -93,7 +130,7 @@ const Etiqueta: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose 
       <div class="nombre">${data.nombre_producto}</div>
       <div class="grid">
         <div><span class="lbl">Peso neto:</span> ${data.peso_neto_txt}</div>
-        <div><span class="lbl">Vence:</span> ${data.fecha_vencimiento ? new Date(data.fecha_vencimiento + 'T12:00').toLocaleDateString('es-CO') : '--'}</div>
+        <div><span class="lbl">Vence:</span> ${data.fecha_vencimiento ? fmtFecha(data.fecha_vencimiento) : '--'}</div>
       </div>
       <div class="sep"></div>
       <div><span class="lbl">Ingredientes:</span> ${data.ingredientes_txt || 'N/D'}</div>
@@ -123,7 +160,7 @@ const Etiqueta: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose 
           <div className="font-bold text-sm mb-1">{data.nombre_producto}</div>
           <div className="grid grid-cols-2 gap-1 text-xs">
             <div><span className="font-bold">Peso neto:</span> {data.peso_neto_txt}</div>
-            <div><span className="font-bold">Vence:</span> {data.fecha_vencimiento ? new Date(data.fecha_vencimiento + 'T12:00').toLocaleDateString('es-CO') : '--'}</div>
+            <div><span className="font-bold">Vence:</span> {data.fecha_vencimiento ? fmtFecha(data.fecha_vencimiento) : '--'}</div>
           </div>
           <hr className="my-1 border-gray-300" />
           <div className="text-xs"><span className="font-bold">Ingredientes:</span> {data.ingredientes_txt || 'N/D'}</div>
@@ -152,10 +189,64 @@ const Etiqueta: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose 
   );
 };
 
+// ── Modal observación de faltantes ──────────────────────────────────────────
+const ModalFaltantes: React.FC<{
+  faltantes: { nombre: string; ov: string; faltante: number }[];
+  onConfirmar: (obs: string) => void;
+  onCancelar: () => void;
+}> = ({ faltantes, onConfirmar, onCancelar }) => {
+  const [obs, setObs] = useState('');
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+        <h3 className="font-bold text-lg mb-3 text-amber-700">Unidades faltantes</h3>
+        <p className="text-sm text-gray-600 mb-3">
+          Se detectaron faltantes en los siguientes productos. Ingrese una observación obligatoria para continuar:
+        </p>
+        <div className="bg-amber-50 border border-amber-200 rounded p-3 mb-4 space-y-1">
+          {faltantes.map((f, i) => (
+            <div key={i} className="text-sm flex justify-between">
+              <span className="text-gray-700">
+                {f.nombre} <span className="text-xs text-gray-400">(OV {f.ov})</span>
+              </span>
+              <span className="font-bold text-red-600">−{f.faltante} und</span>
+            </div>
+          ))}
+        </div>
+        <label className="block text-sm font-semibold text-gray-700 mb-1">
+          Observación <span className="text-red-500">*</span>
+        </label>
+        <textarea
+          value={obs}
+          onChange={e => setObs(e.target.value)}
+          rows={3}
+          placeholder="Ej: 15 unidades quemadas en horno, se dejaron solo 170 paquetes para OV 343..."
+          className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-amber-400 resize-none"
+        />
+        <div className="flex gap-2 mt-4">
+          <button
+            onClick={() => { if (obs.trim()) onConfirmar(obs.trim()); }}
+            disabled={!obs.trim()}
+            className="flex-1 bg-amber-600 text-white py-2 rounded hover:bg-amber-700 disabled:opacity-40 font-medium"
+          >
+            Confirmar y completar
+          </button>
+          <button onClick={onCancelar} className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50">
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ── Modal MO ─────────────────────────────────────────────────────────────────
 const ModalMO: React.FC<{
-  masaId: number; fase: string; tiposMO: any[];
-  onClose: () => void; onSave: () => void;
+  masaId: number;
+  fase: string;
+  tiposMO: any[];
+  onClose: () => void;
+  onSave: () => void;
 }> = ({ masaId, fase, tiposMO, onClose, onSave }) => {
   const [tipoId, setTipoId] = useState('');
   const [horas, setHoras] = useState('');
@@ -227,10 +318,395 @@ const ModalMO: React.FC<{
   );
 };
 
+// ── Panel: lista de masas pendientes ─────────────────────────────────────────
+const PanelPendientes: React.FC<{
+  masas: MasaPendiente[];
+  onSeleccionar: (masa: MasaPendiente) => void;
+}> = ({ masas, onSeleccionar }) => {
+  if (!masas.length)
+    return (
+      <div className="text-center py-8 text-gray-400 text-sm">
+        No hay masas pendientes de empaque en este momento.
+      </div>
+    );
+  return (
+    <div className="space-y-3">
+      {masas.map(masa => {
+        const totalOVs = masa.ovs.filter(o => o.doc_num !== 'SIN_OV').length;
+        const totalProductos = masa.ovs.reduce((s, o) => s + o.productos.length, 0);
+        return (
+          <div
+            key={masa.id}
+            onClick={() => onSeleccionar(masa)}
+            className="border border-gray-200 rounded-lg p-4 hover:border-blue-400 hover:bg-blue-50 cursor-pointer transition-all group"
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="font-bold text-gray-800 group-hover:text-blue-700">
+                    {masa.nombre_masa}
+                  </span>
+                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-mono">
+                    {masa.codigo_masa}
+                  </span>
+                  {masa.empaque_iniciado && (
+                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium">
+                      En progreso
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-3 text-xs text-gray-500">
+                  <span>{masa.tipo_masa}</span>
+                  <span>{masa.total_kilos_con_merma.toFixed(2)} kg</span>
+                  <span>{fmtFecha(masa.fecha_produccion)}</span>
+                  <span>{totalOVs > 0 ? `${totalOVs} OV${totalOVs > 1 ? 's' : ''}` : 'Sin OV asignada'}</span>
+                  <span>{totalProductos} producto{totalProductos !== 1 ? 's' : ''}</span>
+                </div>
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {masa.ovs
+                    .filter(o => o.doc_num !== 'SIN_OV')
+                    .map(o => (
+                      <span key={o.doc_num}
+                        className="text-xs bg-blue-50 border border-blue-200 text-blue-700 px-2 py-0.5 rounded font-mono">
+                        OV {o.doc_num}
+                      </span>
+                    ))}
+                </div>
+              </div>
+              <div className="text-blue-400 group-hover:text-blue-600 text-lg ml-3">→</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+// ── Panel: formulario de empaque por masa ────────────────────────────────────
+const PanelEmpaqueMasa: React.FC<{
+  masa: MasaPendiente;
+  onVolver: () => void;
+  onCompletado: () => void;
+  tiposMO: any[];
+}> = ({ masa, onVolver, onCompletado, tiposMO }) => {
+  const qc = useQueryClient();
+
+  const [detalles, setDetalles] = useState<Record<number, { emp: string; merma: string }>>(() => {
+    const init: Record<number, { emp: string; merma: string }> = {};
+    masa.ovs.forEach(ov => ov.productos.forEach(p => {
+      init[p.id] = { emp: String(p.unidades_ajustadas ?? '0'), merma: '0' };
+    }));
+    return init;
+  });
+
+  const [fechaVenc, setFechaVenc] = useState(masa.fecha_vencimiento || '');
+  const [saving, setSaving] = useState(false);
+  const [savingId, setSavingId] = useState<number | null>(null);
+  const [msg, setMsg] = useState<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
+  const [modalMO, setModalMO] = useState(false);
+  const [modalFaltantes, setModalFaltantes] = useState<{ faltantes: any[] } | null>(null);
+  const [etiquetaData, setEtiquetaData] = useState<any>(null);
+
+  const mostrar = (tipo: 'ok' | 'err', texto: string) => {
+    setMsg({ tipo, texto });
+    setTimeout(() => setMsg(null), 4000);
+  };
+
+  const iniciar = async () => {
+    if (!fechaVenc) return mostrar('err', 'Ingrese la fecha de vencimiento');
+    setSaving(true);
+    try {
+      await api(`/empaque/${masa.id}/iniciar`, {
+        method: 'POST',
+        body: JSON.stringify({ fecha_vencimiento: fechaVenc }),
+      });
+      qc.invalidateQueries({ queryKey: ['empaque-pendientes'] });
+      mostrar('ok', 'Empaque iniciado');
+    } catch (e: any) { mostrar('err', e.message); }
+    finally { setSaving(false); }
+  };
+
+  const guardarDetalle = async (productoId: number) => {
+    const vals = detalles[productoId];
+    if (!vals) return;
+    setSavingId(productoId);
+    try {
+      await api(`/empaque/${masa.id}/detalle/${productoId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          unidades_empacadas: parseInt(vals.emp) || 0,
+          unidades_merma:     parseInt(vals.merma) || 0,
+        }),
+      });
+      mostrar('ok', 'Guardado');
+    } catch (e: any) { mostrar('err', e.message); }
+    finally { setSavingId(null); }
+  };
+
+  const handleCompletar = async (obsOverride?: string) => {
+    const faltantes: { nombre: string; ov: string; faltante: number }[] = [];
+    masa.ovs.forEach(ov => {
+      ov.productos.forEach(p => {
+        const empacadas = parseInt(detalles[p.id]?.emp || '0') || 0;
+        const faltante = p.unidades_ajustadas - empacadas;
+        if (faltante > 0) faltantes.push({ nombre: p.producto_nombre, ov: ov.doc_num, faltante });
+      });
+    });
+
+    if (faltantes.length && !obsOverride) {
+      setModalFaltantes({ faltantes });
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await api(`/empaque/${masa.id}/completar`, {
+        method: 'POST',
+        body: JSON.stringify({ observaciones: obsOverride || null }),
+      });
+      qc.invalidateQueries({ queryKey: ['empaque-pendientes'] });
+      mostrar('ok', 'Empaque completado');
+      setTimeout(() => onCompletado(), 1500);
+    } catch (e: any) { mostrar('err', e.message); }
+    finally { setSaving(false); }
+  };
+
+  const verEtiqueta = async (productoId: number) => {
+    try {
+      const d = await api(`/empaque/${masa.id}/etiqueta/${productoId}`);
+      setEtiquetaData(d.data);
+    } catch (e: any) { mostrar('err', e.message); }
+  };
+
+  const totalProductos = masa.ovs.reduce((s, o) => s + o.productos.length, 0);
+  const totalProgramadas = masa.ovs.reduce((s, o) =>
+    s + o.productos.reduce((ss, p) => ss + (p.unidades_ajustadas || 0), 0), 0);
+  const totalEmpacadas = Object.values(detalles).reduce((s, v) => s + (parseInt(v.emp) || 0), 0);
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center gap-3">
+        <button onClick={onVolver} className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1">
+          ← Volver
+        </button>
+        <div className="flex-1">
+          <h2 className="text-lg font-bold text-gray-800">{masa.nombre_masa}</h2>
+          <p className="text-xs text-gray-500 font-mono">{masa.codigo_masa} · {masa.total_kilos_con_merma.toFixed(2)} kg</p>
+        </div>
+        <button
+          onClick={() => setModalMO(true)}
+          className="text-xs px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50 text-gray-600"
+        >
+          + Mano de obra
+        </button>
+      </div>
+
+      {msg && (
+        <div className={`px-4 py-2 rounded text-sm font-medium ${
+          msg.tipo === 'ok'
+            ? 'bg-green-100 text-green-800 border border-green-200'
+            : 'bg-red-100 text-red-800 border border-red-200'
+        }`}>{msg.texto}</div>
+      )}
+
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-gray-50 rounded-lg p-3 text-center">
+          <div className="text-2xl font-bold text-gray-800">{totalProductos}</div>
+          <div className="text-xs text-gray-500">Productos</div>
+        </div>
+        <div className="bg-blue-50 rounded-lg p-3 text-center">
+          <div className="text-2xl font-bold text-blue-700">{totalProgramadas}</div>
+          <div className="text-xs text-blue-500">Programadas</div>
+        </div>
+        <div className={`rounded-lg p-3 text-center ${
+          totalEmpacadas >= totalProgramadas ? 'bg-green-50' : 'bg-amber-50'
+        }`}>
+          <div className={`text-2xl font-bold ${
+            totalEmpacadas >= totalProgramadas ? 'text-green-700' : 'text-amber-700'
+          }`}>{totalEmpacadas}</div>
+          <div className={`text-xs ${
+            totalEmpacadas >= totalProgramadas ? 'text-green-500' : 'text-amber-500'
+          }`}>Empacadas</div>
+        </div>
+      </div>
+
+      {!masa.empaque_iniciado && (
+        <Card className="p-4">
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Fecha de vencimiento del lote <span className="text-red-500">*</span>
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="date"
+              value={fechaVenc}
+              onChange={e => setFechaVenc(e.target.value)}
+              className="border border-gray-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400"
+            />
+            <button
+              onClick={iniciar}
+              disabled={saving || !fechaVenc}
+              className="bg-blue-600 text-white px-5 py-2 rounded hover:bg-blue-700 disabled:opacity-50 font-medium text-sm"
+            >
+              {saving ? 'Iniciando...' : 'Iniciar empaque'}
+            </button>
+          </div>
+        </Card>
+      )}
+
+      {masa.ovs.map(ov => (
+        <Card key={ov.doc_num} className="p-4">
+          <div className="flex items-center gap-2 mb-4">
+            <span className={`text-sm font-bold px-3 py-1 rounded-full ${
+              ov.doc_num === 'SIN_OV'
+                ? 'bg-gray-100 text-gray-600'
+                : 'bg-blue-100 text-blue-800'
+            }`}>
+              {ov.doc_num === 'SIN_OV' ? 'Sin OV asignada' : `OV ${ov.doc_num}`}
+            </span>
+            <span className="text-xs text-gray-400">
+              {ov.productos.length} producto{ov.productos.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="bg-gray-50 text-gray-600 text-xs">
+                  <th className="text-left p-2 border-b">Producto</th>
+                  <th className="text-right p-2 border-b">Programadas</th>
+                  <th className="text-right p-2 border-b">Empacadas</th>
+                  <th className="text-right p-2 border-b">Merma</th>
+                  <th className="text-right p-2 border-b">Faltante</th>
+                  <th className="p-2 border-b"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {ov.productos.map(p => {
+                  const det = detalles[p.id] ?? { emp: '0', merma: '0' };
+                  const empacadas = parseInt(det.emp) || 0;
+                  const faltante = p.unidades_ajustadas - empacadas;
+                  return (
+                    <tr key={p.id} className="border-b hover:bg-gray-50">
+                      <td className="p-2">
+                        <div className="font-medium text-gray-800">{p.producto_nombre}</div>
+                        <div className="text-xs text-gray-400 font-mono">
+                          {p.sap_item_code} · {p.presentacion}
+                        </div>
+                      </td>
+                      <td className="p-2 text-right font-mono font-medium">
+                        {p.unidades_ajustadas}
+                      </td>
+                      <td className="p-2 text-right">
+                        {masa.empaque_iniciado ? (
+                          <input
+                            type="number" min="0"
+                            value={det.emp}
+                            onChange={e => setDetalles(prev => ({
+                              ...prev, [p.id]: { ...det, emp: e.target.value }
+                            }))}
+                            className="w-20 border border-gray-300 rounded px-2 py-1 text-right text-sm focus:ring-1 focus:ring-blue-400"
+                          />
+                        ) : (
+                          <span className="text-gray-400 font-mono">—</span>
+                        )}
+                      </td>
+                      <td className="p-2 text-right">
+                        {masa.empaque_iniciado ? (
+                          <input
+                            type="number" min="0"
+                            value={det.merma}
+                            onChange={e => setDetalles(prev => ({
+                              ...prev, [p.id]: { ...det, merma: e.target.value }
+                            }))}
+                            className="w-16 border border-gray-300 rounded px-2 py-1 text-right text-sm focus:ring-1 focus:ring-orange-400"
+                          />
+                        ) : (
+                          <span className="text-gray-400 font-mono">—</span>
+                        )}
+                      </td>
+                      <td className="p-2 text-right">
+                        {masa.empaque_iniciado ? (
+                          <span className={`font-mono text-sm font-bold ${
+                            faltante > 0 ? 'text-red-600' : faltante < 0 ? 'text-blue-600' : 'text-green-600'
+                          }`}>
+                            {faltante > 0 ? `−${faltante}` : faltante < 0 ? `+${Math.abs(faltante)}` : '✓'}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="p-2">
+                        <div className="flex gap-1 justify-end">
+                          {masa.empaque_iniciado && (
+                            <button
+                              onClick={() => guardarDetalle(p.id)}
+                              disabled={savingId === p.id}
+                              className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                            >
+                              {savingId === p.id ? '...' : 'Guardar'}
+                            </button>
+                          )}
+                          <button
+                            onClick={() => verEtiqueta(p.id)}
+                            className="text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-50"
+                            title="Ver etiqueta INVIMA"
+                          >
+                            Etiqueta
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      ))}
+
+      {masa.empaque_iniciado && (
+        <div className="flex justify-end">
+          <button
+            onClick={() => handleCompletar()}
+            disabled={saving}
+            className="bg-green-600 text-white px-6 py-2.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium"
+          >
+            {saving ? 'Completando...' : 'Completar empaque'}
+          </button>
+        </div>
+      )}
+
+      {modalMO && (
+        <ModalMO
+          masaId={masa.id}
+          fase="EMPAQUE"
+          tiposMO={tiposMO}
+          onClose={() => setModalMO(false)}
+          onSave={() => {}}
+        />
+      )}
+      {modalFaltantes && (
+        <ModalFaltantes
+          faltantes={modalFaltantes.faltantes}
+          onConfirmar={(obs) => { setModalFaltantes(null); handleCompletar(obs); }}
+          onCancelar={() => setModalFaltantes(null)}
+        />
+      )}
+      {etiquetaData && (
+        <Etiqueta data={etiquetaData} onClose={() => setEtiquetaData(null)} />
+      )}
+    </div>
+  );
+};
+
 // ── Componente principal ─────────────────────────────────────────────────────
 export const EmpaqueMasa: React.FC = () => {
   const qc = useQueryClient();
 
+  const [modo, setModo] = useState<'lista' | 'masa' | 'ov'>('lista');
+  const [masaSeleccionada, setMasaSeleccionada] = useState<MasaPendiente | null>(null);
+
+  // Búsqueda por OV (modo legado)
   const [docNumInput, setDocNumInput] = useState('');
   const [docNumBuscar, setDocNumBuscar] = useState('');
   const [etiquetaData, setEtiquetaData] = useState<any>(null);
@@ -245,7 +721,15 @@ export const EmpaqueMasa: React.FC = () => {
     setTimeout(() => setMsg(null), 4000);
   };
 
-  const { data: ovData, isLoading, error: ovError } = useQuery<{ data: OVData[] }>({
+  const { data: pendientesData, isLoading: loadingPendientes, refetch: refetchPendientes } =
+    useQuery<{ data: MasaPendiente[] }>({
+      queryKey: ['empaque-pendientes'],
+      queryFn: () => api('/empaque/pendientes'),
+      refetchInterval: 30000,
+    });
+  const masasPendientes = pendientesData?.data || [];
+
+  const { data: ovData, isLoading: loadingOV, error: ovError } = useQuery<{ data: OVData[] }>({
     queryKey: ['empaque-ov', docNumBuscar],
     queryFn: () => api(`/empaque/ov/${docNumBuscar}`),
     enabled: !!docNumBuscar,
@@ -265,11 +749,14 @@ export const EmpaqueMasa: React.FC = () => {
       method: 'POST',
       body: JSON.stringify({ fecha_vencimiento: fechaVenc }),
     }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['empaque-ov', docNumBuscar] }); mostrarMsg('ok', 'Empaque iniciado'); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['empaque-ov', docNumBuscar] });
+      mostrarMsg('ok', 'Empaque iniciado');
+    },
     onError: (e: any) => mostrarMsg('err', e.message),
   });
 
-  const guardarDetalle = async (masaId: number, productoId: number) => {
+  const guardarDetalleOV = async (masaId: number, productoId: number) => {
     const vals = detallesEdit[productoId];
     if (!vals) return;
     setSavingEmpaque(productoId);
@@ -278,7 +765,7 @@ export const EmpaqueMasa: React.FC = () => {
         method: 'PATCH',
         body: JSON.stringify({
           unidades_empacadas: parseInt(vals.emp) || 0,
-          unidades_merma: parseInt(vals.merma) || 0,
+          unidades_merma:     parseInt(vals.merma) || 0,
         }),
       });
       qc.invalidateQueries({ queryKey: ['empaque-ov', docNumBuscar] });
@@ -289,7 +776,8 @@ export const EmpaqueMasa: React.FC = () => {
 
   const completarMut = useMutation({
     mutationFn: (masaId: number) => api(`/empaque/${masaId}/completar`, {
-      method: 'POST', body: JSON.stringify({}),
+      method: 'POST',
+      body: JSON.stringify({}),
     }),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['empaque-ov', docNumBuscar] });
@@ -299,338 +787,402 @@ export const EmpaqueMasa: React.FC = () => {
     onError: (e: any) => mostrarMsg('err', e.message),
   });
 
-  const verEtiqueta = async (masaId: number, productoId: number) => {
+  const verEtiquetaOV = async (masaId: number, productoId: number) => {
     try {
       const d = await api(`/empaque/${masaId}/etiqueta/${productoId}`);
       setEtiquetaData(d.data);
     } catch (e: any) { mostrarMsg('err', e.message); }
   };
 
+  // ── Render: formulario de masa seleccionada ──
+  if (modo === 'masa' && masaSeleccionada) {
+    return (
+      <div className="p-4 max-w-5xl mx-auto">
+        <h1 className="text-2xl font-bold mb-5 text-gray-800">Empaque</h1>
+        <PanelEmpaqueMasa
+          masa={masaSeleccionada}
+          tiposMO={tiposMO}
+          onVolver={() => { setModo('lista'); setMasaSeleccionada(null); }}
+          onCompletado={() => { setModo('lista'); setMasaSeleccionada(null); refetchPendientes(); }}
+        />
+      </div>
+    );
+  }
+
+  // ── Render: vista principal (lista + búsqueda OV) ──
   return (
     <div className="p-4 max-w-5xl mx-auto">
-      <h1 className="text-2xl font-bold mb-2 text-gray-800">Empaque</h1>
+      <h1 className="text-2xl font-bold mb-5 text-gray-800">Empaque</h1>
 
-      {msg && (
-        <div className={`mb-4 px-4 py-2 rounded text-sm font-medium ${
-          msg.tipo === 'ok' ? 'bg-green-100 text-green-800 border border-green-200'
-                           : 'bg-red-100 text-red-800 border border-red-200'
-        }`}>
-          {msg.texto}
+      <div className="flex gap-1 mb-5 border-b border-gray-200">
+        <button
+          onClick={() => setModo('lista')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            modo === 'lista'
+              ? 'border-blue-600 text-blue-700'
+              : 'border-transparent text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          Masas listas para empacar
+          {masasPendientes.length > 0 && (
+            <span className="ml-2 bg-blue-600 text-white text-xs rounded-full px-1.5 py-0.5">
+              {masasPendientes.length}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setModo('ov')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            modo === 'ov'
+              ? 'border-blue-600 text-blue-700'
+              : 'border-transparent text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          Buscar por OV
+        </button>
+      </div>
+
+      {/* Tab: lista de masas pendientes */}
+      {modo === 'lista' && (
+        <div>
+          {loadingPendientes ? (
+            <div className="text-center py-10 text-gray-400 text-sm">Cargando masas...</div>
+          ) : (
+            <PanelPendientes
+              masas={masasPendientes}
+              onSeleccionar={(masa) => { setMasaSeleccionada(masa); setModo('masa'); }}
+            />
+          )}
         </div>
       )}
 
-      <Card className="mb-6 p-4">
-        <label className="block text-sm font-semibold text-gray-700 mb-2">
-          Buscar por numero de Orden de Venta SAP
-        </label>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={docNumInput}
-            onChange={e => setDocNumInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && setDocNumBuscar(docNumInput.trim())}
-            placeholder="Ej: 20001"
-            className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400"
-          />
-          <button
-            onClick={() => setDocNumBuscar(docNumInput.trim())}
-            className="bg-blue-600 text-white px-5 py-2 rounded hover:bg-blue-700 font-medium text-sm"
-          >
-            Buscar
-          </button>
-        </div>
-      </Card>
+      {/* Tab: búsqueda por OV (flujo original) */}
+      {modo === 'ov' && (
+        <div>
+          {msg && (
+            <div className={`mb-4 px-4 py-2 rounded text-sm font-medium ${
+              msg.tipo === 'ok'
+                ? 'bg-green-100 text-green-800 border border-green-200'
+                : 'bg-red-100 text-red-800 border border-red-200'
+            }`}>{msg.texto}</div>
+          )}
 
-      {isLoading && <p className="text-gray-500 text-sm">Buscando OV {docNumBuscar}...</p>}
-      {ovError && (
-        <div className="bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm">
-          No se encontro la OV <strong>{docNumBuscar}</strong>. Verifique el numero.
-        </div>
-      )}
-
-      {ov && (
-        <div className="space-y-6">
-          {/* Cabecera OV */}
-          <Card className="p-4 border-l-4 border-blue-500">
-            <div className="flex items-start justify-between">
-              <div>
-                <h2 className="text-lg font-bold text-gray-800">OV {docNumBuscar}</h2>
-                <p className="text-sm text-gray-500 mt-0.5">
-                  {ov.masa_padre.tipo} — {ov.masa_padre.codigo} — {ov.masa_padre.total_kg.toFixed(2)} kg
-                </p>
-              </div>
-              {!ov.todas_horneadas ? (
-                <span className="bg-amber-100 text-amber-800 text-xs font-medium px-2 py-1 rounded">
-                  Pendiente de hornear
-                </span>
-              ) : (
-                <span className="bg-green-100 text-green-800 text-xs font-medium px-2 py-1 rounded">
-                  Lista para empacar
-                </span>
-              )}
-            </div>
-
-            <div className="mt-3 grid grid-cols-2 md:grid-cols-3 gap-2">
-              {ov.sub_masas.map(sm => (
-                <div key={sm.id} className={`rounded p-2 text-xs border ${
-                  sm.estado_horneado === 'COMPLETADA'
-                    ? 'bg-green-50 border-green-200 text-green-800'
-                    : 'bg-gray-50 border-gray-200 text-gray-500'
-                }`}>
-                  <div className="font-mono font-bold">{sm.codigo_masa}</div>
-                  <div>HORNEADO: {sm.estado_horneado === 'COMPLETADA' ? 'OK' : sm.estado_horneado}</div>
-                  <div>EMPAQUE: {sm.estado_empaque || 'BLOQUEADA'}</div>
-                  <div>{sm.total_kilos_con_merma} kg</div>
-                </div>
-              ))}
+          <Card className="mb-6 p-4">
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Número de Orden de Venta SAP
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={docNumInput}
+                onChange={e => setDocNumInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && setDocNumBuscar(docNumInput.trim())}
+                placeholder="Ej: 20001"
+                className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400"
+              />
+              <button
+                onClick={() => setDocNumBuscar(docNumInput.trim())}
+                className="bg-blue-600 text-white px-5 py-2 rounded hover:bg-blue-700 font-medium text-sm"
+              >
+                Buscar
+              </button>
             </div>
           </Card>
 
-          {/* Fecha de vencimiento */}
-          {ov.todas_horneadas && (
-            <Card className="p-4">
-              <label className="block text-sm font-semibold text-gray-700 mb-1">
-                Fecha de vencimiento del lote
-              </label>
-              <input type="date" value={fechaVenc} onChange={e => setFechaVenc(e.target.value)}
-                className="border border-gray-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400" />
-            </Card>
+          {loadingOV && <p className="text-gray-500 text-sm">Buscando OV {docNumBuscar}...</p>}
+          {ovError && (
+            <div className="bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm">
+              No se encontró la OV <strong>{docNumBuscar}</strong>. Verifique el número.
+            </div>
           )}
 
-          {/* Productos por sub-masa */}
-          {ov.sub_masas.map(sm => {
-            const prodsSM = ov.productos.filter(p => p.masa_id === sm.id);
-            const tieneEmpaque = prodsSM.some(p => p.empaque_id !== null);
-            const empaqueCompleto = prodsSM.some(p => p.empaque_estado === 'COMPLETADO');
-
-            return (
-              <Card key={sm.id} className="p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-bold text-gray-800">
-                    Tanda: <span className="font-mono text-blue-700">{sm.codigo_masa}</span>
-                    <span className="ml-2 text-sm text-gray-500 font-normal">({sm.total_kilos_con_merma} kg)</span>
-                  </h3>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setModalMO({ masaId: sm.id, fase: 'EMPAQUE' })}
-                      className="text-xs px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 text-gray-600"
-                    >
-                      MO
-                    </button>
-                    {!tieneEmpaque && sm.estado_horneado === 'COMPLETADA' && (
-                      <button
-                        onClick={() => {
-                          if (!fechaVenc) return mostrarMsg('err', 'Ingrese fecha de vencimiento');
-                          iniciarMut.mutate(sm.id);
-                        }}
-                        className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
-                      >
-                        Iniciar empaque
-                      </button>
-                    )}
-                    {tieneEmpaque && !empaqueCompleto && (
-                      <button
-                        onClick={() => completarMut.mutate(sm.id)}
-                        disabled={completarMut.isPending}
-                        className="text-xs px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
-                      >
-                        {completarMut.isPending ? 'Completando...' : 'Completar empaque'}
-                      </button>
-                    )}
-                    {empaqueCompleto && (
-                      <span className="text-xs px-3 py-1 bg-green-100 text-green-800 rounded font-medium">
-                        Empacado
-                      </span>
-                    )}
+          {ov && (
+            <div className="space-y-6">
+              <Card className="p-4 border-l-4 border-blue-500">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h2 className="text-lg font-bold text-gray-800">OV {docNumBuscar}</h2>
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      {ov.masa_padre.tipo} — {ov.masa_padre.codigo} — {ov.masa_padre.total_kg.toFixed(2)} kg
+                    </p>
                   </div>
+                  {!ov.todas_horneadas ? (
+                    <span className="bg-amber-100 text-amber-800 text-xs font-medium px-2 py-1 rounded">
+                      Pendiente de hornear
+                    </span>
+                  ) : (
+                    <span className="bg-green-100 text-green-800 text-xs font-medium px-2 py-1 rounded">
+                      Lista para empacar
+                    </span>
+                  )}
                 </div>
+                <div className="mt-3 grid grid-cols-2 md:grid-cols-3 gap-2">
+                  {ov.sub_masas.map(sm => (
+                    <div key={sm.id} className={`rounded p-2 text-xs border ${
+                      sm.estado_horneado === 'COMPLETADA'
+                        ? 'bg-green-50 border-green-200 text-green-800'
+                        : 'bg-gray-50 border-gray-200 text-gray-500'
+                    }`}>
+                      <div className="font-mono font-bold">{sm.codigo_masa}</div>
+                      <div>HORNEADO: {sm.estado_horneado === 'COMPLETADA' ? 'OK' : sm.estado_horneado}</div>
+                      <div>EMPAQUE: {sm.estado_empaque || 'BLOQUEADA'}</div>
+                      <div>{sm.total_kilos_con_merma} kg</div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm border-collapse">
+              {ov.todas_horneadas && (
+                <Card className="p-4">
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    Fecha de vencimiento del lote
+                  </label>
+                  <input
+                    type="date"
+                    value={fechaVenc}
+                    onChange={e => setFechaVenc(e.target.value)}
+                    className="border border-gray-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400"
+                  />
+                </Card>
+              )}
+
+              {ov.sub_masas.map(sm => {
+                const prodsSM = ov.productos.filter(p => p.masa_id === sm.id);
+                const tieneEmpaque = prodsSM.some(p => p.empaque_id !== null);
+                const empaqueCompleto = prodsSM.some(p => p.empaque_estado === 'COMPLETADO');
+
+                return (
+                  <Card key={sm.id} className="p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-bold text-gray-800">
+                        Tanda: <span className="font-mono text-blue-700">{sm.codigo_masa}</span>
+                        <span className="ml-2 text-sm text-gray-500 font-normal">({sm.total_kilos_con_merma} kg)</span>
+                      </h3>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setModalMO({ masaId: sm.id, fase: 'EMPAQUE' })}
+                          className="text-xs px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 text-gray-600"
+                        >
+                          MO
+                        </button>
+                        {!tieneEmpaque && sm.estado_horneado === 'COMPLETADA' && (
+                          <button
+                            onClick={() => {
+                              if (!fechaVenc) return mostrarMsg('err', 'Ingrese fecha de vencimiento');
+                              iniciarMut.mutate(sm.id);
+                            }}
+                            className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                          >
+                            Iniciar empaque
+                          </button>
+                        )}
+                        {tieneEmpaque && !empaqueCompleto && (
+                          <button
+                            onClick={() => completarMut.mutate(sm.id)}
+                            disabled={completarMut.isPending}
+                            className="text-xs px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                          >
+                            {completarMut.isPending ? 'Completando...' : 'Completar empaque'}
+                          </button>
+                        )}
+                        {empaqueCompleto && (
+                          <span className="text-xs px-3 py-1 bg-green-100 text-green-800 rounded font-medium">
+                            Empacado
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm border-collapse">
+                        <thead>
+                          <tr className="bg-gray-50 text-gray-600 text-xs">
+                            <th className="text-left p-2 border-b">Producto</th>
+                            <th className="text-right p-2 border-b">Programadas</th>
+                            <th className="text-right p-2 border-b">Empacadas</th>
+                            <th className="text-right p-2 border-b">Merma</th>
+                            <th className="text-right p-2 border-b">Costo MP</th>
+                            <th className="p-2 border-b"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {prodsSM.map(p => {
+                            const edit = detallesEdit[p.id] ?? {
+                              emp: String(p.unidades_empacadas ?? p.unidades_ajustadas ?? ''),
+                              merma: String(p.unidades_merma ?? '0'),
+                            };
+                            const faltantes = p.unidades_ajustadas - (parseInt(edit.emp) || 0);
+                            return (
+                              <tr key={p.id} className="border-b hover:bg-gray-50">
+                                <td className="p-2">
+                                  <div className="font-medium">{p.producto_nombre}</div>
+                                  <div className="text-xs text-gray-400">{p.sap_item_code} · {p.presentacion}</div>
+                                </td>
+                                <td className="p-2 text-right font-mono">{p.unidades_ajustadas}</td>
+                                <td className="p-2 text-right">
+                                  {tieneEmpaque && !empaqueCompleto ? (
+                                    <input
+                                      type="number" min="0"
+                                      value={edit.emp}
+                                      onChange={e => setDetallesEdit(prev => ({
+                                        ...prev, [p.id]: { ...edit, emp: e.target.value }
+                                      }))}
+                                      className="w-20 border border-gray-300 rounded px-2 py-1 text-right text-sm"
+                                    />
+                                  ) : (
+                                    <span className={`font-mono ${faltantes > 0 ? 'text-red-600 font-bold' : 'text-green-700'}`}>
+                                      {p.unidades_empacadas ?? '-'}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="p-2 text-right">
+                                  {tieneEmpaque && !empaqueCompleto ? (
+                                    <input
+                                      type="number" min="0"
+                                      value={edit.merma}
+                                      onChange={e => setDetallesEdit(prev => ({
+                                        ...prev, [p.id]: { ...edit, merma: e.target.value }
+                                      }))}
+                                      className="w-16 border border-gray-300 rounded px-2 py-1 text-right text-sm"
+                                    />
+                                  ) : (
+                                    <span className="font-mono text-orange-600">{p.unidades_merma ?? '-'}</span>
+                                  )}
+                                </td>
+                                <td className="p-2 text-right text-xs text-gray-600">
+                                  ${COP(parseFloat(p.costo_mp_total_prod?.toString() || '0'))}
+                                </td>
+                                <td className="p-2 text-right">
+                                  <div className="flex gap-1 justify-end">
+                                    {tieneEmpaque && !empaqueCompleto && (
+                                      <button
+                                        onClick={() => guardarDetalleOV(p.masa_id, p.id)}
+                                        disabled={savingEmpaque === p.id}
+                                        className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                                      >
+                                        {savingEmpaque === p.id ? '...' : 'Guardar'}
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() => verEtiquetaOV(p.masa_id, p.id)}
+                                      className="text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-50"
+                                      title="Ver etiqueta INVIMA"
+                                    >
+                                      Etiqueta
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {empaqueCompleto && prodsSM.some(p => (p.unidades_ajustadas - (p.unidades_empacadas ?? 0)) > 0) && (
+                      <div className="mt-2 bg-red-50 border border-red-200 rounded p-2 text-xs text-red-700">
+                        Hay unidades faltantes en esta tanda
+                      </div>
+                    )}
+                  </Card>
+                );
+              })}
+
+              {ov.materiales_empaque.length > 0 && (
+                <Card className="p-4">
+                  <h3 className="font-bold text-gray-800 mb-3">Materiales de empaque (BOM)</h3>
+                  <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-gray-50 text-gray-600 text-xs">
-                        <th className="text-left p-2 border-b">Producto</th>
-                        <th className="text-right p-2 border-b">Programadas</th>
-                        <th className="text-right p-2 border-b">Empacadas</th>
-                        <th className="text-right p-2 border-b">Merma</th>
-                        <th className="text-right p-2 border-b">Costo MP</th>
-                        <th className="p-2 border-b"></th>
+                        <th className="text-left p-2 border-b">Material</th>
+                        <th className="text-left p-2 border-b">Producto padre</th>
+                        <th className="text-right p-2 border-b">Cant/ud</th>
+                        <th className="text-right p-2 border-b">Stock</th>
+                        <th className="text-right p-2 border-b">Precio unit.</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {prodsSM.map(p => {
-                        const edit = detallesEdit[p.id] ?? {
-                          emp: String(p.unidades_empacadas ?? p.unidades_ajustadas ?? ''),
-                          merma: String(p.unidades_merma ?? '0'),
-                        };
-                        const faltantes = p.unidades_ajustadas - (parseInt(edit.emp) || 0);
-                        return (
-                          <tr key={p.id} className="border-b hover:bg-gray-50">
-                            <td className="p-2">
-                              <div className="font-medium">{p.producto_nombre}</div>
-                              <div className="text-xs text-gray-400">{p.sap_item_code} · {p.presentacion}</div>
-                            </td>
-                            <td className="p-2 text-right font-mono">{p.unidades_ajustadas}</td>
-                            <td className="p-2 text-right">
-                              {tieneEmpaque && !empaqueCompleto ? (
-                                <input
-                                  type="number" min="0"
-                                  value={edit.emp}
-                                  onChange={e => setDetallesEdit(prev => ({
-                                    ...prev, [p.id]: { ...edit, emp: e.target.value }
-                                  }))}
-                                  className="w-20 border border-gray-300 rounded px-2 py-1 text-right text-sm"
-                                />
-                              ) : (
-                                <span className={`font-mono ${faltantes > 0 ? 'text-red-600 font-bold' : 'text-green-700'}`}>
-                                  {p.unidades_empacadas ?? '-'}
-                                </span>
-                              )}
-                            </td>
-                            <td className="p-2 text-right">
-                              {tieneEmpaque && !empaqueCompleto ? (
-                                <input
-                                  type="number" min="0"
-                                  value={edit.merma}
-                                  onChange={e => setDetallesEdit(prev => ({
-                                    ...prev, [p.id]: { ...edit, merma: e.target.value }
-                                  }))}
-                                  className="w-16 border border-gray-300 rounded px-2 py-1 text-right text-sm"
-                                />
-                              ) : (
-                                <span className="font-mono text-orange-600">{p.unidades_merma ?? '-'}</span>
-                              )}
-                            </td>
-                            <td className="p-2 text-right text-xs text-gray-600">
-                              ${COP(parseFloat(p.costo_mp_total_prod?.toString() || '0'))}
-                            </td>
-                            <td className="p-2 text-right">
-                              <div className="flex gap-1 justify-end">
-                                {tieneEmpaque && !empaqueCompleto && (
-                                  <button
-                                    onClick={() => guardarDetalle(p.masa_id, p.id)}
-                                    disabled={savingEmpaque === p.id}
-                                    className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-                                  >
-                                    {savingEmpaque === p.id ? '...' : 'Guardar'}
-                                  </button>
-                                )}
-                                <button
-                                  onClick={() => verEtiqueta(p.masa_id, p.id)}
-                                  className="text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-50"
-                                  title="Ver etiqueta INVIMA"
-                                >
-                                  Etiqueta
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
+                      {ov.materiales_empaque.map((m, i) => (
+                        <tr key={i} className="border-b hover:bg-gray-50">
+                          <td className="p-2">
+                            <div className="font-medium">{m.item_name_comp}</div>
+                            <div className="text-xs text-gray-400 font-mono">{m.item_code_comp}</div>
+                          </td>
+                          <td className="p-2 text-xs text-gray-500 font-mono">{m.item_code_padre}</td>
+                          <td className="p-2 text-right font-mono">{m.cantidad_por_unidad} {m.uom}</td>
+                          <td className={`p-2 text-right font-mono text-xs ${m.stock_disponible < 10 ? 'text-red-600 font-bold' : 'text-gray-700'}`}>
+                            {m.stock_disponible} {m.uom}
+                            {m.stock_disponible < 10 && ' (bajo)'}
+                          </td>
+                          <td className="p-2 text-right text-xs">
+                            ${COP(parseFloat(m.precio_unitario.toString()))}
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
-                </div>
+                  <button
+                    onClick={() => api('/config/sync-empaque', { method: 'POST' })
+                      .then(() => {
+                        qc.invalidateQueries({ queryKey: ['empaque-ov', docNumBuscar] });
+                        mostrarMsg('ok', 'Precios sincronizados desde SAP');
+                      })
+                      .catch((e: any) => mostrarMsg('err', e.message))}
+                    className="mt-3 text-xs px-3 py-1.5 border border-blue-300 text-blue-600 rounded hover:bg-blue-50"
+                  >
+                    Sincronizar precios desde SAP
+                  </button>
+                </Card>
+              )}
 
-                {empaqueCompleto && prodsSM.some(p => (p.unidades_ajustadas - (p.unidades_empacadas ?? 0)) > 0) && (
-                  <div className="mt-2 bg-red-50 border border-red-200 rounded p-2 text-xs text-red-700">
-                    Hay unidades faltantes en esta tanda
-                  </div>
-                )}
-              </Card>
-            );
-          })}
-
-          {/* Materiales de empaque */}
-          {ov.materiales_empaque.length > 0 && (
-            <Card className="p-4">
-              <h3 className="font-bold text-gray-800 mb-3">Materiales de empaque (BOM)</h3>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-50 text-gray-600 text-xs">
-                    <th className="text-left p-2 border-b">Material</th>
-                    <th className="text-left p-2 border-b">Producto padre</th>
-                    <th className="text-right p-2 border-b">Cant/ud</th>
-                    <th className="text-right p-2 border-b">Stock</th>
-                    <th className="text-right p-2 border-b">Precio unit.</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ov.materiales_empaque.map((m, i) => (
-                    <tr key={i} className="border-b hover:bg-gray-50">
-                      <td className="p-2">
-                        <div className="font-medium">{m.item_name_comp}</div>
-                        <div className="text-xs text-gray-400 font-mono">{m.item_code_comp}</div>
-                      </td>
-                      <td className="p-2 text-xs text-gray-500 font-mono">{m.item_code_padre}</td>
-                      <td className="p-2 text-right font-mono">{m.cantidad_por_unidad} {m.uom}</td>
-                      <td className={`p-2 text-right font-mono text-xs ${m.stock_disponible < 10 ? 'text-red-600 font-bold' : 'text-gray-700'}`}>
-                        {m.stock_disponible} {m.uom}
-                        {m.stock_disponible < 10 && ' (bajo)'}
-                      </td>
-                      <td className="p-2 text-right text-xs">${COP(parseFloat(m.precio_unitario.toString()))}</td>
-                    </tr>
+              <Card className="p-4 border-l-4 border-green-500">
+                <h3 className="font-bold text-gray-800 mb-3">Resumen de costos consolidado</h3>
+                <div className="space-y-1 text-sm">
+                  {([
+                    ['Materias primas (MP)', ov.resumen_costos.costo_mp],
+                    ['Mano de obra (MO)', ov.resumen_costos.costo_mo],
+                    ['Materiales de empaque', ov.resumen_costos.costo_empaque],
+                    ['Costos indirectos', ov.resumen_costos.costo_indirecto],
+                  ] as [string, number][]).map(([label, val]) => (
+                    <div key={label} className="flex justify-between py-1 border-b border-gray-100">
+                      <span className="text-gray-600">{label}</span>
+                      <span className="font-mono">${COP(val)}</span>
+                    </div>
                   ))}
-                </tbody>
-              </table>
-              <button
-                onClick={() => api('/config/sync-empaque', { method: 'POST' })
-                  .then(() => { qc.invalidateQueries({ queryKey: ['empaque-ov', docNumBuscar] }); mostrarMsg('ok', 'Precios sincronizados desde SAP'); })
-                  .catch((e: any) => mostrarMsg('err', e.message))}
-                className="mt-3 text-xs px-3 py-1.5 border border-blue-300 text-blue-600 rounded hover:bg-blue-50"
-              >
-                Sincronizar precios desde SAP
-              </button>
-            </Card>
+                  <div className="flex justify-between py-2 font-bold text-gray-800">
+                    <span>COSTO TOTAL</span>
+                    <span className="font-mono text-green-700">${COP(ov.resumen_costos.costo_total)}</span>
+                  </div>
+                  {ov.productos.length > 0 && ov.resumen_costos.costo_total > 0 && (
+                    <div className="flex justify-between text-xs text-gray-500">
+                      <span>Costo estimado por unidad</span>
+                      <span className="font-mono">
+                        ${COP(ov.resumen_costos.costo_total /
+                          ov.productos.reduce((s, p) => s + (p.unidades_ajustadas || 0), 0))}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 mt-2">
+                  * Los costos finales se calculan al completar el empaque de cada tanda.
+                </p>
+              </Card>
+            </div>
           )}
 
-          {/* Resumen de costos */}
-          <Card className="p-4 border-l-4 border-green-500">
-            <h3 className="font-bold text-gray-800 mb-3">Resumen de costos consolidado</h3>
-            <div className="space-y-1 text-sm">
-              {([
-                ['Materias primas (MP)', ov.resumen_costos.costo_mp],
-                ['Mano de obra (MO)', ov.resumen_costos.costo_mo],
-                ['Materiales de empaque', ov.resumen_costos.costo_empaque],
-                ['Costos indirectos', ov.resumen_costos.costo_indirecto],
-              ] as [string, number][]).map(([label, val]) => (
-                <div key={label} className="flex justify-between py-1 border-b border-gray-100">
-                  <span className="text-gray-600">{label}</span>
-                  <span className="font-mono">${COP(val)}</span>
-                </div>
-              ))}
-              <div className="flex justify-between py-2 font-bold text-gray-800">
-                <span>COSTO TOTAL</span>
-                <span className="font-mono text-green-700">${COP(ov.resumen_costos.costo_total)}</span>
-              </div>
-              {ov.productos.length > 0 && ov.resumen_costos.costo_total > 0 && (
-                <div className="flex justify-between text-xs text-gray-500">
-                  <span>Costo estimado por unidad</span>
-                  <span className="font-mono">
-                    ${COP(ov.resumen_costos.costo_total /
-                      ov.productos.reduce((s, p) => s + (p.unidades_ajustadas || 0), 0))}
-                  </span>
-                </div>
-              )}
-            </div>
-            <p className="text-xs text-gray-400 mt-2">
-              * Los costos finales se calculan al completar el empaque de cada tanda.
-            </p>
-          </Card>
+          {modalMO && (
+            <ModalMO
+              masaId={modalMO.masaId}
+              fase={modalMO.fase}
+              tiposMO={tiposMO}
+              onClose={() => setModalMO(null)}
+              onSave={() => qc.invalidateQueries({ queryKey: ['empaque-ov', docNumBuscar] })}
+            />
+          )}
+          {etiquetaData && (
+            <Etiqueta data={etiquetaData} onClose={() => setEtiquetaData(null)} />
+          )}
         </div>
-      )}
-
-      {modalMO && (
-        <ModalMO
-          masaId={modalMO.masaId}
-          fase={modalMO.fase}
-          tiposMO={tiposMO}
-          onClose={() => setModalMO(null)}
-          onSave={() => qc.invalidateQueries({ queryKey: ['empaque-ov', docNumBuscar] })}
-        />
-      )}
-
-      {etiquetaData && (
-        <Etiqueta data={etiquetaData} onClose={() => setEtiquetaData(null)} />
       )}
     </div>
   );
