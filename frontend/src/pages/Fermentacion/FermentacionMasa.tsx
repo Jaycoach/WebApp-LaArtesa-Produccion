@@ -51,6 +51,7 @@ export const FermentacionMasa: React.FC = () => {
   const [humedad, setHumedad] = useState('');
   const [observaciones, setObservaciones] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [horaSalidaReal, setHoraSalidaReal] = useState('');
 
   const { data, isLoading } = useQuery({
     queryKey: ['fermentacion', masaId],
@@ -214,12 +215,23 @@ export const FermentacionMasa: React.FC = () => {
                 </div>
               )}
               <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Hora real de salida <span className="text-gray-400 font-normal">(opcional — por defecto hora actual)</span>
+                </label>
+                <input
+                  type="datetime-local"
+                  value={horaSalidaReal}
+                  onChange={e => setHoraSalidaReal(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Observaciones</label>
                 <textarea value={observaciones} onChange={e => setObservaciones(e.target.value)}
                   rows={2} className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none" />
               </div>
               <button
-                onClick={() => avanzar('camara/salida')}
+                onClick={() => avanzar('camara/salida', { hora_salida_real: horaSalidaReal || undefined })}
                 disabled={mutacion.isPending}
                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-semibold py-3 rounded-lg transition-colors"
               >
@@ -253,12 +265,23 @@ export const FermentacionMasa: React.FC = () => {
             <>
               <h2 className="text-lg font-semibold text-gray-800">Salida de Cámara de Frío</h2>
               <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Hora real de salida <span className="text-gray-400 font-normal">(opcional — por defecto hora actual)</span>
+                </label>
+                <input
+                  type="datetime-local"
+                  value={horaSalidaReal}
+                  onChange={e => setHoraSalidaReal(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Observaciones</label>
                 <textarea value={observaciones} onChange={e => setObservaciones(e.target.value)}
                   rows={2} className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none" />
               </div>
               <button
-                onClick={() => avanzar('frio/salida')}
+                onClick={() => avanzar('frio/salida', { hora_salida_real: horaSalidaReal || undefined })}
                 disabled={mutacion.isPending}
                 className="w-full bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white font-semibold py-3 rounded-lg transition-colors"
               >

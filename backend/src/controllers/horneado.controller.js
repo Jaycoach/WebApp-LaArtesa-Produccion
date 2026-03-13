@@ -350,14 +350,14 @@ exports.iniciarHorneado = async (req, res) => {
     `;
 
     const result = await client.query(insertQuery, [
-      masaId,
-      tipo_horno_id,
+      Number(masaId),
+      Number(tipo_horno_id),
       horno.nombre,
-      programa_horneo_id || null,
-      numeroPrograma,
-      temperatura_inicial_real || null,
-      uso_damper_real || false,
-      usuario.id,
+      programa_horneo_id ? Number(programa_horneo_id) : null,
+      numeroPrograma ? Number(numeroPrograma) : null,
+      temperatura_inicial_real ? parseFloat(temperatura_inicial_real) : null,
+      uso_damper_real === true || uso_damper_real === 'true',
+      Number(usuario.id),
       usuario.nombre_completo,
       observaciones || null
     ]);
