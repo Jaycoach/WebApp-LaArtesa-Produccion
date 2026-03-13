@@ -97,19 +97,19 @@ export const Sidebar: React.FC = () => {
         </h3>
         <ul className="mt-4 space-y-1">
           {[
-            { key: 'pesaje',       label: 'Pesaje',       color: 'bg-blue-500'   },
-            { key: 'amasado',      label: 'Amasado',      color: 'bg-purple-500' },
-            { key: 'division',     label: 'División',     color: 'bg-yellow-500' },
-            { key: 'formado',      label: 'Formado',      color: 'bg-green-500'  },
-            { key: 'fermentacion', label: 'Fermentación', color: 'bg-orange-500' },
-            { key: 'horneado',     label: 'Horneado',     color: 'bg-red-500'    },
-            { key: 'empaque',      label: 'Empaque',      color: 'bg-amber-500'  },
-          ].map(({ key, label, color }) => {
-            const isActive = location.pathname === `/fase/${key}`;
+            { key: 'pesaje',       label: 'Pesaje',       color: 'bg-blue-500',   path: '/fase/pesaje'       },
+            { key: 'amasado',      label: 'Amasado',      color: 'bg-purple-500', path: '/fase/amasado'      },
+            { key: 'division',     label: 'División',     color: 'bg-yellow-500', path: '/fase/division'     },
+            { key: 'formado',      label: 'Formado',      color: 'bg-green-500',  path: '/fase/formado'      },
+            { key: 'fermentacion', label: 'Fermentación', color: 'bg-orange-500', path: '/fase/fermentacion' },
+            { key: 'horneado',     label: 'Horneado',     color: 'bg-red-500',    path: '/fase/horneado'     },
+            { key: 'empaque',      label: 'Empaque',      color: 'bg-amber-500',  path: '/empaque'           },
+          ].map(({ key, label, color, path }) => {
+            const isActive = location.pathname.startsWith(path);
             return (
               <li key={key}>
                 <Link
-                  to={`/fase/${key}`}
+                  to={path}
                   className={clsx(
                     'flex items-center gap-3 px-4 py-2 text-sm rounded-lg transition-colors',
                     isActive
