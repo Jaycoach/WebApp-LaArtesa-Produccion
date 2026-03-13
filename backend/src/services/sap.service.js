@@ -693,60 +693,125 @@ class SAPService {
     if (!itemCodes || itemCodes.length === 0) return {};
     await this.ensureSession();
 
-    // Llamadas paralelas a BatchNumberDetails — una por ítem, ~1-2s c/u
-    // Sin SQLQuery: evita timeouts 502 del Service Layer de Heinsohn
-    const LOTE_BATCH_SIZE = 10; // máximo en paralelo para no saturar SAP
+    // Estrategia: OBTN+OBTQ via SQLQuery filtrado por ítem + WhsCode='ALMP'
+    // Devuelve cantidades reales por lote en bodega ALMP — no distribución uniforme.
+    // Filtrar por ítem individual evita el timeout 502 que ocurre al escanear la tabla completa.
+    // Fallback a BatchNumberDetails (distribución uniforme) si SQLQuery falla para un ítem.
+    const LOTE_BATCH_SIZE = 5; // paralelo conservador — cada ítem hace 2 calls SAP
     const resultado = {};
+
+    const obtenerLotesReales = async (itemCode) => {
+      // Código único por ítem — alfanumérico, sin caracteres especiales
+      const sqlCode = `artlot_${itemCode.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      const sqlText = `SELECT "OBTN"."DistNumber", "OBTQ"."Quantity", "OBTN"."ExpDate", "OBTN"."MnfDate", "OBTN"."CreateDate" FROM "OBTN" INNER JOIN "OBTQ" ON "OBTN"."ItemCode" = "OBTQ"."ItemCode" AND "OBTN"."SysNumber" = "OBTQ"."SysNumber" WHERE "OBTN"."ItemCode" = '${itemCode}' AND "OBTQ"."WhsCode" = 'ALMP' AND "OBTQ"."Quantity" > 0`;
+
+      // GET-before-POST: verificar si ya existe el query guardado
+      let existe = false;
+      try {
+        await this.client.get(`/SQLQueries('${sqlCode}')`, { timeout: 10000 });
+        existe = true;
+      } catch {
+        existe = false;
+      }
+
+      if (!existe) {
+        await this.client.post('/SQLQueries', {
+          SqlCode: sqlCode,
+          SqlName: sqlCode,
+          SqlText: sqlText,
+        }, { timeout: 10000 });
+      } else {
+        // Actualizar el SQL por si el ítem cambió (PUT no soportado → DELETE + POST)
+        try {
+          await this.client.delete(`/SQLQueries('${sqlCode}')`, { timeout: 10000 });
+          await this.client.post('/SQLQueries', {
+            SqlCode: sqlCode,
+            SqlName: sqlCode,
+            SqlText: sqlText,
+          }, { timeout: 10000 });
+        } catch {
+          // Si falla el recreate, intentar usar el existente tal como está
+        }
+      }
+
+      const listResp = await this.client.get(
+        `/SQLQueries('${sqlCode}')/List`,
+        { timeout: 30000 }
+      );
+      return listResp.data?.value || [];
+    };
+
+    const obtenerLotesFallback = async (itemCode) => {
+      // Fallback: BatchNumberDetails con distribución uniforme del stock ALMP
+      const response = await this.client.get(
+        `/BatchNumberDetails?$filter=ItemCode eq '${itemCode}'&$select=ItemCode,Batch,AdmissionDate,ManufacturingDate,ExpirationDate,Status`,
+        { timeout: 30000 }
+      );
+      const lotes = response.data?.value || [];
+      if (lotes.length === 0) return [];
+      const stockTotal = parseFloat(stockPorItem[itemCode]?.stockAlmp || 0);
+      const cantidadPorLote = lotes.length > 0 ? stockTotal / lotes.length : 0;
+      return lotes.map(lote => ({
+        batch:               lote.Batch,
+        cantidad_disponible: parseFloat(cantidadPorLote.toFixed(3)),
+        admissionDate:       lote.AdmissionDate ? lote.AdmissionDate.substring(0, 10) : null,
+        expirationDate:      lote.ExpirationDate ? lote.ExpirationDate.substring(0, 10) : null,
+        manufacturingDate:   lote.ManufacturingDate ? lote.ManufacturingDate.substring(0, 10) : null,
+        status:              'released',
+      }));
+    };
+
+    // Parsear fecha YYYYMMDD de OBTQ/OBTN → 'YYYY-MM-DD' o null
+    const parseFechaSAP = (val) => {
+      if (!val) return null;
+      const s = String(val).replace(/\D/g, '');
+      if (s.length === 8) return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;
+      return null;
+    };
 
     for (let i = 0; i < itemCodes.length; i += LOTE_BATCH_SIZE) {
       const chunk = itemCodes.slice(i, i + LOTE_BATCH_SIZE);
       await Promise.all(chunk.map(async (itemCode) => {
         try {
-          const response = await this.client.get(
-            `/BatchNumberDetails?$filter=ItemCode eq '${itemCode}'&$select=ItemCode,Batch,AdmissionDate,ManufacturingDate,ExpirationDate,Status`,
-            { timeout: 30000 }
-          );
-          const lotes = response.data?.value || [];
-          if (lotes.length === 0) return;
+          const rows = await obtenerLotesReales(itemCode);
+          if (rows.length === 0) return;
 
-          // Distribuir stock total proporcionalmente entre lotes
-          // stockPorItem viene de getStockMateriaPrima (ya llamado antes en sincronizarInventarioMP)
-          const stockTotal = parseFloat(stockPorItem[itemCode]?.stockAlmp || 0);
-          const numLotes = lotes.length;
-
-          // Distribución uniforme como fallback — la sync anterior en sap_lotes_mp
-          // tiene las cantidades reales; aquí mantenemos proporciones hasta próxima sync completa
-          const cantidadPorLote = numLotes > 0 ? stockTotal / numLotes : 0;
-
-          resultado[itemCode] = lotes.map(lote => ({
-            batch:               lote.Batch,
-            cantidad_disponible: parseFloat(cantidadPorLote.toFixed(3)),
-            admissionDate:       lote.AdmissionDate
-                                   ? lote.AdmissionDate.substring(0, 10)
-                                   : null,
-            expirationDate:      lote.ExpirationDate
-                                   ? lote.ExpirationDate.substring(0, 10)
-                                   : null,
-            manufacturingDate:   lote.ManufacturingDate
-                                   ? lote.ManufacturingDate.substring(0, 10)
-                                   : null,
-            status:              lote.Status === 'bdsStatus_Released' ? 'released' : 'locked',
+          resultado[itemCode] = rows.map(row => ({
+            batch:               row.DistNumber,
+            cantidad_disponible: parseFloat(parseFloat(row.Quantity).toFixed(3)),
+            admissionDate:       parseFechaSAP(row.CreateDate),
+            expirationDate:      parseFechaSAP(row.ExpDate),
+            manufacturingDate:   parseFechaSAP(row.MnfDate),
+            status:              'released',
           }));
 
-          // Ordenar por admissionDate ASC — lote más antiguo primero
           resultado[itemCode].sort((a, b) => {
             if (!a.admissionDate) return 1;
             if (!b.admissionDate) return -1;
             return a.admissionDate.localeCompare(b.admissionDate);
           });
+
+          logger.info(`SAP: lotes reales ALMP para ${itemCode}: ${rows.length} lotes via OBTQ`);
         } catch (err) {
-          logger.warn(`SAP BatchNumberDetails error para ${itemCode}: ${err?.message}`);
-          // No abortar — continuar con otros ítems
+          logger.warn(`SAP OBTQ falló para ${itemCode}, usando fallback BatchNumberDetails: ${err?.message}`);
+          try {
+            const lotesFallback = await obtenerLotesFallback(itemCode);
+            if (lotesFallback.length > 0) {
+              resultado[itemCode] = lotesFallback;
+              lotesFallback.sort((a, b) => {
+                if (!a.admissionDate) return 1;
+                if (!b.admissionDate) return -1;
+                return a.admissionDate.localeCompare(b.admissionDate);
+              });
+            }
+          } catch (fallbackErr) {
+            logger.warn(`SAP fallback también falló para ${itemCode}: ${fallbackErr?.message}`);
+          }
         }
       }));
     }
 
-    logger.info(`SAP: lotes obtenidos via BatchNumberDetails para ${Object.keys(resultado).length} ítems`);
+    logger.info(`SAP: lotes obtenidos para ${Object.keys(resultado).length} ítems (OBTQ + fallback BatchNumberDetails)`);
     return resultado;
   }
 }
