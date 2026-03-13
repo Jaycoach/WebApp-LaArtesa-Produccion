@@ -345,7 +345,7 @@ exports.iniciarHorneado = async (req, res) => {
         usuario_id,
         usuario_nombre,
         observaciones
-      ) VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9, $10)
+      ) VALUES ($1::integer, $2::integer, $3::text, $4::integer, $5::integer, NOW(), $6::numeric, $7::boolean, $8::integer, $9::text, $10::text)
       RETURNING *
     `;
 
