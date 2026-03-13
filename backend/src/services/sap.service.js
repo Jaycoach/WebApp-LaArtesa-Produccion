@@ -705,34 +705,18 @@ class SAPService {
       const sqlCode = `artlot_${itemCode.replace(/[^a-zA-Z0-9]/g, '_')}`;
       const sqlText = `SELECT "OBTN"."DistNumber", "OBTQ"."Quantity", "OBTN"."ExpDate", "OBTN"."MnfDate", "OBTN"."CreateDate" FROM "OBTN" INNER JOIN "OBTQ" ON "OBTN"."ItemCode" = "OBTQ"."ItemCode" AND "OBTN"."SysNumber" = "OBTQ"."SysNumber" WHERE "OBTN"."ItemCode" = '${itemCode}' AND "OBTQ"."WhsCode" = 'ALMP' AND "OBTQ"."Quantity" > 0`;
 
-      // GET-before-POST: verificar si ya existe el query guardado
-      let existe = false;
+      // DELETE + POST siempre — más simple y confiable que GET-before-POST
+      // El GET por clave en esta instancia de Heinsohn no es confiable con >20 queries
       try {
-        await this.client.get(`/SQLQueries('${sqlCode}')`, { timeout: 10000 });
-        existe = true;
+        await this.client.delete(`/SQLQueries('${sqlCode}')`, { timeout: 10000 });
       } catch {
-        existe = false;
+        // No existe aún — ignorar error del DELETE
       }
-
-      if (!existe) {
-        await this.client.post('/SQLQueries', {
-          SqlCode: sqlCode,
-          SqlName: sqlCode,
-          SqlText: sqlText,
-        }, { timeout: 10000 });
-      } else {
-        // Actualizar el SQL por si el ítem cambió (PUT no soportado → DELETE + POST)
-        try {
-          await this.client.delete(`/SQLQueries('${sqlCode}')`, { timeout: 10000 });
-          await this.client.post('/SQLQueries', {
-            SqlCode: sqlCode,
-            SqlName: sqlCode,
-            SqlText: sqlText,
-          }, { timeout: 10000 });
-        } catch {
-          // Si falla el recreate, intentar usar el existente tal como está
-        }
-      }
+      await this.client.post('/SQLQueries', {
+        SqlCode: sqlCode,
+        SqlName: sqlCode,
+        SqlText: sqlText,
+      }, { timeout: 10000 });
 
       const listResp = await this.client.get(
         `/SQLQueries('${sqlCode}')/List`,
