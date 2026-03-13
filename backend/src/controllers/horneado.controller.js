@@ -557,7 +557,8 @@ exports.completarHorneado = async (req, res) => {
     const {
       calidad_color,
       calidad_coccion,
-      observaciones
+      observaciones,
+      fecha_vencimiento_sugerida
     } = req.body;
 
     const usuario = req.user;
@@ -593,6 +594,7 @@ exports.completarHorneado = async (req, res) => {
         calidad_color = $3,
         calidad_coccion = $4,
         observaciones = COALESCE($5, observaciones),
+        fecha_vencimiento_sugerida = $6,
         fecha_actualizacion = NOW()
       WHERE id = $1
       RETURNING *
@@ -603,7 +605,8 @@ exports.completarHorneado = async (req, res) => {
       registro.hora_entrada,
       calidad_color || null,
       calidad_coccion || null,
-      observaciones || null
+      observaciones || null,
+      fecha_vencimiento_sugerida || null
     ]);
 
     // Marcar fase HORNEADO como COMPLETADA
@@ -613,10 +616,15 @@ exports.completarHorneado = async (req, res) => {
         estado = 'COMPLETADA',
         porcentaje_completado = 100,
         fecha_completado = NOW(),
-        observaciones = $2
+        observaciones = $2,
+        datos_fase = datos_fase || $3::jsonb
       WHERE masa_id = $1 AND fase = 'HORNEADO'
     `;
-    await client.query(updateFaseQuery, [masaId, observaciones || null]);
+    await client.query(updateFaseQuery, [
+      masaId,
+      observaciones || null,
+      JSON.stringify({ fecha_vencimiento_sugerida: fecha_vencimiento_sugerida || null })
+    ]);
 
     // Avanzar masa a fase EMPAQUE
     const updateMasaQuery = `

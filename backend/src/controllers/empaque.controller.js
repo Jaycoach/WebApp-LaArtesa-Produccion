@@ -169,8 +169,13 @@ exports.getEmpaqueInfo = async (req, res) => {
     const { masaId } = req.params;
     const masaR = await db.query(
       `SELECT mp.id, mp.uuid, mp.codigo_masa, mp.tipo_masa, mp.nombre_masa,
-              mp.estado, mp.fase_actual, mp.lote_produccion, mp.fecha_produccion
-       FROM masas_produccion mp WHERE mp.id = $1`,
+              mp.estado, mp.fase_actual, mp.lote_produccion, mp.fecha_produccion,
+              rh.fecha_vencimiento_sugerida
+       FROM masas_produccion mp
+       LEFT JOIN registros_horneado rh ON rh.masa_id = mp.id
+       WHERE mp.id = $1
+       ORDER BY rh.fecha_registro DESC
+       LIMIT 1`,
       [masaId]
     );
     if (!masaR.rows.length)
@@ -184,7 +189,8 @@ exports.getEmpaqueInfo = async (req, res) => {
               COALESCE(unidades_excedente, 0) AS unidades_excedente,
               sap_doc_entry, sap_doc_num,
               COALESCE(unidades_por_paquete, 1) AS unidades_por_paquete,
-              costo_mp_total_prod, costo_unitario_final
+              COALESCE(unidades_pan_por_paquete, 1) AS unidades_pan_por_paquete,
+              costo_mp_total_prod, costo_unitario_final, costo_pan_unitario
        FROM productos_por_masa WHERE masa_id = $1 ORDER BY producto_nombre`,
       [masaId]
     );
@@ -331,6 +337,7 @@ exports.completarEmpaque = async (req, res) => {
     // 1. Productos y unidades empacadas
     const prodsR = await client.query(
       `SELECT ppm.id, ppm.sap_item_code, ppm.gramaje_unitario,
+              COALESCE(ppm.unidades_pan_por_paquete, 1) AS unidades_pan_por_paquete,
               COALESCE(ed.unidades_empacadas, 0) AS uds_empacadas
        FROM productos_por_masa ppm
        LEFT JOIN empaque_detalles ed ON ed.empaque_id = $2 AND ed.producto_masa_id = ppm.id
@@ -338,10 +345,32 @@ exports.completarEmpaque = async (req, res) => {
       [masaId, empaqueId]
     );
 
-    // 2. Kg producidos reales
+    // 1b. Lote de producción y fecha de vencimiento
+    const masaDatosR = await client.query(
+      `SELECT mp.lote_produccion,
+              re.fecha_vencimiento,
+              rh.fecha_vencimiento_sugerida
+       FROM masas_produccion mp
+       LEFT JOIN registros_empaque re ON re.masa_id = mp.id
+       LEFT JOIN registros_horneado rh ON rh.masa_id = mp.id
+       WHERE mp.id = $1
+       ORDER BY rh.fecha_registro DESC
+       LIMIT 1`,
+      [masaId]
+    );
+    const loteProduccion   = masaDatosR.rows[0]?.lote_produccion || `LOTE-${masaId}`;
+    const fechaVencimiento = masaDatosR.rows[0]?.fecha_vencimiento
+      || masaDatosR.rows[0]?.fecha_vencimiento_sugerida
+      || null;
+
+    // 2. Kg producidos reales + total panes individuales
     const totalUdsProducidas = prodsR.rows.reduce((s, p) => s + parseInt(p.uds_empacadas), 0);
     const totalKgProducidos = prodsR.rows.reduce(
       (s, p) => s + (parseInt(p.uds_empacadas) * parseFloat(p.gramaje_unitario) / 1000), 0
+    );
+    // Total panes individuales para calcular costo real por unidad de pan
+    const totalPanesProducidos = prodsR.rows.reduce(
+      (s, p) => s + (parseInt(p.uds_empacadas) * parseFloat(p.unidades_pan_por_paquete || 1)), 0
     );
 
     // 3. Costo MO total (esta masa + sub-masas)
@@ -390,6 +419,9 @@ exports.completarEmpaque = async (req, res) => {
     const costoTotalFinal = costoMPTotal + costoMOTotal + costoEmpaqueTotal + costoIndirectoTotal;
     const costoUnitarioFinal = totalUdsProducidas > 0
       ? costoTotalFinal / totalUdsProducidas : 0;
+    // Costo por pan individual (para reportería y etiqueta interna)
+    const costoPanUnitario = totalPanesProducidos > 0
+      ? costoTotalFinal / totalPanesProducidos : 0;
 
     // 8. Actualizar costos finales en productos_por_masa
     await client.query(
@@ -398,10 +430,11 @@ exports.completarEmpaque = async (req, res) => {
          costo_empaque_total   = $3,
          costo_indirecto_total = $4,
          costo_total_final     = $5,
-         costo_unitario_final  = $6
+         costo_unitario_final  = $6,
+         costo_pan_unitario    = $7
        WHERE masa_id = $1`,
       [masaId, costoMOTotal, costoEmpaqueTotal, costoIndirectoTotal,
-       costoTotalFinal, costoUnitarioFinal]
+       costoTotalFinal, costoUnitarioFinal, costoPanUnitario]
     );
 
     // 9. Marcar empaque y fase completados
@@ -432,19 +465,28 @@ exports.completarEmpaque = async (req, res) => {
       const entradaLines = [];
       for (const prod of prodsR.rows) {
         if (!prod.sap_item_code || !prod.uds_empacadas || parseInt(prod.uds_empacadas) <= 0) continue;
-        const costoUnitario = totalUdsProducidas > 0 ? costoTotalFinal / totalUdsProducidas : 0;
-        entradaLines.push({
+        const costoUnitarioProd = totalUdsProducidas > 0 ? costoTotalFinal / totalUdsProducidas : 0;
+        const linea = {
           ItemCode:      prod.sap_item_code,
           Quantity:      parseInt(prod.uds_empacadas),
-          Price:         parseFloat(costoUnitario.toFixed(2)),
-          WarehouseCode: 'ALMP',
-        });
+          Price:         parseFloat(costoUnitarioProd.toFixed(2)),
+          WarehouseCode: 'PROTERMI',
+          BatchNumbers: [{
+            BatchNumber:       loteProduccion,
+            Quantity:          parseInt(prod.uds_empacadas),
+            ExpiryDate:        fechaVencimiento
+              ? new Date(fechaVencimiento).toISOString().split('T')[0]
+              : null,
+            ManufacturingDate: new Date().toISOString().split('T')[0],
+          }],
+        };
+        entradaLines.push(linea);
       }
 
       if (entradaLines.length) {
         const sapRespEntrada = await sapServiceEntrada.client.post('/InventoryGenEntries', {
           DocDate:       new Date().toISOString().split('T')[0],
-          Comments:      `Producción terminada masa ${masaId}`,
+          Comments:      `Producción terminada masa ${masaId} - Lote ${loteProduccion}`,
           DocumentLines: entradaLines,
         });
         sapEntradaResult = { doc_entry: sapRespEntrada.data.DocEntry, lineas: entradaLines.length };
@@ -657,9 +699,10 @@ exports.getEtiqueta = async (req, res) => {
     const { masaId, productoId } = req.params;
 
     const prodR = await db.query(
-      `SELECT ppm.*, re.fecha_vencimiento
+      `SELECT ppm.*, re.fecha_vencimiento, mp.lote_produccion
        FROM productos_por_masa ppm
        LEFT JOIN registros_empaque re ON re.masa_id = ppm.masa_id
+       LEFT JOIN masas_produccion mp ON mp.id = ppm.masa_id
        WHERE ppm.id = $1 AND ppm.masa_id = $2`,
       [productoId, masaId]
     );
@@ -688,8 +731,9 @@ exports.getEtiqueta = async (req, res) => {
         registro_invima:  etq.registro_invima || '',
         fabricante_txt:   etq.fabricante_txt || 'La Artesa SAS – Bogotá, Colombia',
         fecha_vencimiento: prod.fecha_vencimiento,
-        lote:             prod.sap_doc_num || '',
+        lote:                 prod.lote_produccion || prod.sap_doc_num || '',
         costo_unitario_final: prod.costo_unitario_final,
+        costo_pan_unitario:   prod.costo_pan_unitario,
       },
     });
   } catch (error) {

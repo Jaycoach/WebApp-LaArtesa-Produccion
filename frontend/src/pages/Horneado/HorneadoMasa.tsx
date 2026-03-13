@@ -47,6 +47,7 @@ export const HorneadoMasa: React.FC = () => {
   // Form completar — claves coinciden con el campo del controller (calidad_color, calidad_coccion)
   const [calidadColor, setCalidadColor] = useState('PERFECTO');
   const [calidadCoccion, setCalidadCoccion] = useState('PERFECTO');
+  const [fechaVencimientoSugerida, setFechaVencimientoSugerida] = useState('');
 
   const { data, isLoading } = useQuery({
     queryKey: ['horneado', masaId],
@@ -92,7 +93,12 @@ export const HorneadoMasa: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         // Controller espera calidad_color y calidad_coccion (snake_case)
-        body: JSON.stringify({ calidad_color: calidadColor, calidad_coccion: calidadCoccion, observaciones })
+        body: JSON.stringify({
+          calidad_color: calidadColor,
+          calidad_coccion: calidadCoccion,
+          observaciones,
+          fecha_vencimiento_sugerida: fechaVencimientoSugerida || null
+        })
       });
       const d = await res.json();
       if (!d.success) throw new Error(d.message);
@@ -252,6 +258,18 @@ export const HorneadoMasa: React.FC = () => {
                   {['PERFECTO', 'ACEPTABLE', 'CRUDO', 'SOBRECOCIDO'].map(v => <option key={v}>{v}</option>)}
                 </select>
               </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Fecha de vencimiento sugerida
+              </label>
+              <input
+                type="date"
+                value={fechaVencimientoSugerida}
+                onChange={e => setFechaVencimientoSugerida(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-400"
+              />
             </div>
 
             <div>

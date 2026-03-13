@@ -340,3 +340,50 @@ exports.syncPreciosEmpaque = async (req, res, next) => {
     });
   } catch (e) { next(e); }
 };
+
+exports.getCatalogoTiposMasa = async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT id, codigo_sap, tipo_masa, nombre_masa,
+              unidades_pan_por_paquete, dias_vida_util, activo
+       FROM catalogo_tipos_masa
+       WHERE activo = true
+       ORDER BY tipo_masa, nombre_masa`
+    );
+    res.json({ success: true, data: r.rows });
+  } catch (e) {
+    logger.error('Error getCatalogoTiposMasa:', e);
+    res.status(500).json({ success: false, message: e.message });
+  }
+};
+
+exports.updateCatalogoTiposMasa = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { unidades_pan_por_paquete, dias_vida_util } = req.body;
+
+    if (unidades_pan_por_paquete !== undefined && Number(unidades_pan_por_paquete) < 1)
+      return res.status(400).json({ success: false, message: 'unidades_pan_por_paquete debe ser >= 1' });
+    if (dias_vida_util !== undefined && Number(dias_vida_util) < 1)
+      return res.status(400).json({ success: false, message: 'dias_vida_util debe ser >= 1' });
+
+    const r = await db.query(
+      `UPDATE catalogo_tipos_masa
+       SET unidades_pan_por_paquete = COALESCE($2, unidades_pan_por_paquete),
+           dias_vida_util           = COALESCE($3, dias_vida_util),
+           fecha_actualizacion      = NOW()
+       WHERE id = $1
+       RETURNING id, codigo_sap, tipo_masa, nombre_masa,
+                 unidades_pan_por_paquete, dias_vida_util`,
+      [id, unidades_pan_por_paquete ?? null, dias_vida_util ?? null]
+    );
+
+    if (!r.rows.length)
+      return res.status(404).json({ success: false, message: 'Tipo de masa no encontrado' });
+
+    res.json({ success: true, data: r.rows[0] });
+  } catch (e) {
+    logger.error('Error updateCatalogoTiposMasa:', e);
+    res.status(500).json({ success: false, message: e.message });
+  }
+};
