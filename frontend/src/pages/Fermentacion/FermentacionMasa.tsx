@@ -9,6 +9,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { ModalMO } from '../../components/common/ModalMO';
 
 // ─────────────────────────────────────────────
 const getToken = () => {
@@ -46,6 +47,7 @@ export const FermentacionMasa: React.FC = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  const [showMO, setShowMO] = useState(false);
   const [subEtapa, setSubEtapa] = useState<SubEtapa>('entrada_camara');
   const [temperatura, setTemperatura] = useState('');
   const [humedad, setHumedad] = useState('');
@@ -299,14 +301,23 @@ export const FermentacionMasa: React.FC = () => {
                   <p className="text-green-600 text-sm">La fase de fermentación ha sido registrada.</p>
                 </div>
               </div>
-              <button
-                onClick={() => navigate(`/horneado/${masaId}`)}
-                className="bg-orange-600 hover:bg-orange-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
-              >
-                🔥 Ir a Horneado →
-              </button>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowMO(true)}
+                  className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 text-sm font-medium"
+                >
+                  + Mano de obra
+                </button>
+                <button
+                  onClick={() => navigate(`/horneado/${masaId}`)}
+                  className="bg-orange-600 hover:bg-orange-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
+                >
+                  🔥 Ir a Horneado →
+                </button>
+              </div>
             </div>
           )}
+          {showMO && <ModalMO masaId={Number(masaId)} fase="FERMENTACION" onClose={() => setShowMO(false)} />}
         </div>
       </div>
     </div>

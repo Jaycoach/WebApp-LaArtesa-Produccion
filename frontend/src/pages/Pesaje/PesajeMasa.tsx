@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card } from '@/components/common';
 import { useChecklist, useUpdateIngrediente, useConfirmarPesaje } from '../../hooks/useChecklist';
+import { ModalMO } from '../../components/common/ModalMO';
 
 export const PesajeMasa: React.FC = () => {
   const { masaId } = useParams<{ masaId: string }>();
@@ -12,6 +13,7 @@ export const PesajeMasa: React.FC = () => {
   const updateMutation = useUpdateIngrediente();
   const confirmarMutation = useConfirmarPesaje();
 
+  const [showMO, setShowMO] = useState(false);
   const [editando, setEditando] = useState<number | null>(null);
 
   const parseFechaVencimiento = (raw: string): string | null => {
@@ -687,16 +689,25 @@ export const PesajeMasa: React.FC = () => {
             ← Volver
           </button>
 
-          {checklist.todosPesados && (
+          <div className="flex gap-3">
             <button
-              onClick={handleConfirmar}
-              disabled={confirmarMutation.isPending}
-              className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-semibold"
+              onClick={() => setShowMO(true)}
+              className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 text-sm font-medium"
             >
-              {confirmarMutation.isPending ? 'Confirmando...' : 'Confirmar Pesaje Completo'}
+              + Mano de obra
             </button>
-          )}
+            {checklist.todosPesados && (
+              <button
+                onClick={handleConfirmar}
+                disabled={confirmarMutation.isPending}
+                className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-semibold"
+              >
+                {confirmarMutation.isPending ? 'Confirmando...' : 'Confirmar Pesaje Completo'}
+              </button>
+            )}
+          </div>
         </div>
+        {showMO && <ModalMO masaId={Number(masaId)} fase="PESAJE" onClose={() => setShowMO(false)} />}
       </div>
     </div>
   );

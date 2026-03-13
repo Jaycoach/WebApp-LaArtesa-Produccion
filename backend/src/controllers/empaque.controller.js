@@ -423,7 +423,56 @@ exports.completarEmpaque = async (req, res) => {
       [masaId]
     );
 
-    // 10. GoodsIssues SAP para materiales de empaque
+    // 10. Entrada de mercancía SAP (InventoryGenEntries) — producto terminado con costo real
+    let sapEntradaResult = null;
+    try {
+      const sapServiceEntrada = require('../services/sap.service');
+      await sapServiceEntrada.ensureSession();
+
+      const entradaLines = [];
+      for (const prod of prodsR.rows) {
+        if (!prod.sap_item_code || !prod.uds_empacadas || parseInt(prod.uds_empacadas) <= 0) continue;
+        const costoUnitario = totalUdsProducidas > 0 ? costoTotalFinal / totalUdsProducidas : 0;
+        entradaLines.push({
+          ItemCode:      prod.sap_item_code,
+          Quantity:      parseInt(prod.uds_empacadas),
+          Price:         parseFloat(costoUnitario.toFixed(2)),
+          WarehouseCode: 'ALMP',
+        });
+      }
+
+      if (entradaLines.length) {
+        const sapRespEntrada = await sapServiceEntrada.client.post('/InventoryGenEntries', {
+          DocDate:       new Date().toISOString().split('T')[0],
+          Comments:      `Producción terminada masa ${masaId}`,
+          DocumentLines: entradaLines,
+        });
+        sapEntradaResult = { doc_entry: sapRespEntrada.data.DocEntry, lineas: entradaLines.length };
+        logger.info(`InventoryGenEntries masa ${masaId}: DocEntry ${sapRespEntrada.data.DocEntry}`);
+
+        await client.query(`
+          UPDATE costos_masa SET
+            costo_mo_total      = $2,
+            costo_cif_total     = $3,
+            costo_total_masa    = $4,
+            costo_por_kilo      = $5,
+            fecha_calculo_final = NOW(),
+            updated_at          = NOW()
+          WHERE masa_id = $1
+        `, [
+          masaId,
+          costoMOTotal,
+          costoIndirectoTotal,
+          costoTotalFinal,
+          totalKgProducidos > 0 ? costoTotalFinal / totalKgProducidos : 0,
+        ]);
+      }
+    } catch (sapErr) {
+      logger.error(`Error InventoryGenEntries masa ${masaId}: ${sapErr.message}`);
+      sapEntradaResult = { error: sapErr.message };
+    }
+
+    // 11. GoodsIssues SAP para materiales de empaque
     let sapResult = null;
     try {
       const sapService = require('../services/sap.service');
@@ -482,7 +531,8 @@ exports.completarEmpaque = async (req, res) => {
           total: costoTotalFinal,
           unitario: costoUnitarioFinal,
         },
-        sap: sapResult,
+        sap_salida: sapResult,
+        sap_entrada: sapEntradaResult,
       },
     });
   } catch (error) {

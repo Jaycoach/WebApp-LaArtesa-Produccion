@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { ModalMO } from '../../components/common/ModalMO';
 
 // ─────────────────────────────────────────────
 // Tipos
@@ -54,6 +55,7 @@ export const FormadoMasa: React.FC = () => {
   const [maquinaId, setMaquinaId] = useState<number | null>(null);
   const [observaciones, setObservaciones] = useState('');
   const [etapa, setEtapa] = useState<'inicio' | 'progreso' | 'completar'>('inicio');
+  const [showMO, setShowMO] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
   const { data, isLoading, error } = useQuery({
@@ -285,14 +287,23 @@ export const FormadoMasa: React.FC = () => {
             <p className="text-green-700 text-sm mb-4">
               El proceso de formado ha sido registrado exitosamente.
             </p>
-            <button
-              onClick={() => navigate(`/fermentacion/${masaId}`)}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg transition-colors"
-            >
-              Ir a Fermentación →
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowMO(true)}
+                className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 text-sm font-medium"
+              >
+                + Mano de obra
+              </button>
+              <button
+                onClick={() => navigate(`/fermentacion/${masaId}`)}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg transition-colors"
+              >
+                Ir a Fermentación →
+              </button>
+            </div>
           </div>
         )}
+        {showMO && <ModalMO masaId={Number(masaId)} fase="FORMADO" onClose={() => setShowMO(false)} />}
       </div>
     </div>
   );

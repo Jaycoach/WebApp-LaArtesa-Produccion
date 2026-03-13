@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Card } from '@/components/common';
 import { useMasaDetail, useProductos } from '../../hooks/useMasas';
 import { useCompletarFase } from '../../hooks/useFases';
+import { ModalMO } from '../../components/common/ModalMO';
 
 export const DivisionMasa: React.FC = () => {
   const { masaId } = useParams<{ masaId: string }>();
@@ -13,6 +14,7 @@ export const DivisionMasa: React.FC = () => {
   const { data: productos, isLoading: loadingProductos } = useProductos(masaIdNum);
   const completarMutation = useCompletarFase();
 
+  const [showMO, setShowMO] = useState(false);
   const [formData, setFormData] = useState({
     maquina_corte_id: '1',
     temperatura_entrada: '',
@@ -539,14 +541,23 @@ export const DivisionMasa: React.FC = () => {
             ← Volver
           </button>
 
-          <button
-            onClick={handleCompletar}
-            disabled={completarMutation.isPending || hayErroresValidacion() || !todasTienenCantidad()}
-            className="px-6 py-3 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50 font-semibold"
-          >
-            {completarMutation.isPending ? 'Completando...' : 'Completar División ✓'}
-          </button>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setShowMO(true)}
+              className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 text-sm font-medium"
+            >
+              + Mano de obra
+            </button>
+            <button
+              onClick={handleCompletar}
+              disabled={completarMutation.isPending || hayErroresValidacion() || !todasTienenCantidad()}
+              className="px-6 py-3 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50 font-semibold"
+            >
+              {completarMutation.isPending ? 'Completando...' : 'Completar División ✓'}
+            </button>
+          </div>
         </div>
+        {showMO && <ModalMO masaId={Number(masaId)} fase="DIVISION" onClose={() => setShowMO(false)} />}
 
       </div>
     </div>

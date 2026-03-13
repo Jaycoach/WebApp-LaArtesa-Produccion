@@ -37,6 +37,24 @@ const navItems: NavItem[] = [
     ),
   },
   {
+    name: 'Empaque',
+    path: '/empaque',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+      </svg>
+    ),
+  },
+  {
+    name: 'Reporte de Costos',
+    path: '/reportes/costos',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+      </svg>
+    ),
+  },
+  {
     name: 'Configuración',
     path: '/configuracion',
     icon: (
@@ -94,6 +112,7 @@ export const Sidebar: React.FC = () => {
             { key: 'formado',      label: 'Formado',      color: 'bg-green-500'  },
             { key: 'fermentacion', label: 'Fermentación', color: 'bg-orange-500' },
             { key: 'horneado',     label: 'Horneado',     color: 'bg-red-500'    },
+            { key: 'empaque',      label: 'Empaque',      color: 'bg-amber-500'  },
           ].map(({ key, label, color }) => {
             const isActive = location.pathname === `/fase/${key}`;
             return (
