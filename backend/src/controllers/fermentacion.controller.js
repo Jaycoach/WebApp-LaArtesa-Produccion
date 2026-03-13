@@ -244,7 +244,7 @@ exports.registrarSalidaCamara = async (req, res) => {
 
   try {
     const { masaId } = req.params;
-    const { observaciones } = req.body;
+    const { observaciones, hora_salida_real } = req.body;
 
     const usuario = req.user;
 
@@ -274,7 +274,7 @@ exports.registrarSalidaCamara = async (req, res) => {
     const updateQuery = `
       UPDATE registros_fermentacion
       SET
-        hora_salida_camara_real = NOW(),
+        hora_salida_camara_real = COALESCE($3::timestamptz, NOW()),
         observaciones = COALESCE($2, observaciones)
       WHERE id = $1
       RETURNING *
@@ -282,7 +282,8 @@ exports.registrarSalidaCamara = async (req, res) => {
 
     const result = await client.query(updateQuery, [
       registro.id,
-      observaciones || null
+      observaciones || null,
+      hora_salida_real || null
     ]);
 
     // Si no requiere cámara de frío, completar la fase
@@ -420,7 +421,7 @@ exports.registrarSalidaFrio = async (req, res) => {
 
   try {
     const { masaId } = req.params;
-    const { observaciones } = req.body;
+    const { observaciones, hora_salida_real } = req.body;
 
     const usuario = req.user;
 
@@ -445,13 +446,13 @@ exports.registrarSalidaFrio = async (req, res) => {
     }
 
     const registro = registroResult.rows[0];
-
+    const horaSalida = hora_salida_real || null;
     // Calcular tiempo en frío
     const updateQuery = `
       UPDATE registros_fermentacion
       SET
-        hora_salida_frio = NOW(),
-        tiempo_frio_minutos = EXTRACT(EPOCH FROM (NOW() - $2)) / 60,
+        hora_salida_frio = COALESCE($4::timestamptz, NOW()),
+        tiempo_frio_minutos = EXTRACT(EPOCH FROM (COALESCE($4::timestamptz, NOW()) - $2)) / 60,
         observaciones = COALESCE($3, observaciones)
       WHERE id = $1
       RETURNING *
@@ -460,7 +461,8 @@ exports.registrarSalidaFrio = async (req, res) => {
     const result = await client.query(updateQuery, [
       registro.id,
       registro.hora_entrada_frio,
-      observaciones || null
+      observaciones || null,
+      horaSalida
     ]);
 
     // Completar fase FERMENTACION
