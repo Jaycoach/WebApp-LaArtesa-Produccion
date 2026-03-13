@@ -42,6 +42,10 @@ router.delete('/mano-obra/:id',  checkRole(['admin']), c.deleteTipoMO);
 router.get('/etiquetas',                     c.getEtiquetas);
 router.post('/etiquetas',        checkRole(['admin']), c.upsertEtiqueta);
 
+// Catálogo tipos de masa — configuración de unidades y vida útil
+router.get('/catalogo-tipos-masa',     c.getCatalogoTiposMasa);
+router.put('/catalogo-tipos-masa/:id', checkRole(['admin', 'supervisor']), c.updateCatalogoTiposMasa);
+
 // Sync precios empaque SAP
 router.post('/sync-empaque',     checkRole(['admin']), c.syncPreciosEmpaque);
 
