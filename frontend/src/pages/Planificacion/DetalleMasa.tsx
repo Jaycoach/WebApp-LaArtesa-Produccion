@@ -125,6 +125,7 @@ export const DetalleMasa: React.FC = () => {
       FORMADO:      `/formado/${masaId}`,
       FERMENTACION: `/fermentacion/${masaId}`,
       HORNEADO:     `/horneado/${masaId}`,
+      EMPAQUE:      `/empaque/${masaId}`,
     };
     if (rutas[fase]) navigate(rutas[fase]);
   };
