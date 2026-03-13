@@ -373,13 +373,12 @@ exports.iniciarHorneado = async (req, res) => {
           'horno', $3,
           'programa', $4,
           'hora_entrada', NOW()
-        ),
-        fecha_actualizacion = NOW()
+        )
       WHERE masa_id = $1 AND fase = 'HORNEADO'
     `;
     await client.query(updateFaseQuery, [
       masaId,
-      usuario.nombre_completo,
+      usuario.id,
       horno.nombre,
       numeroPrograma
     ]);
@@ -617,8 +616,7 @@ exports.completarHorneado = async (req, res) => {
         estado = 'COMPLETADA',
         porcentaje_completado = 100,
         fecha_completado = NOW(),
-        observaciones = $2,
-        fecha_actualizacion = NOW()
+        observaciones = $2
       WHERE masa_id = $1 AND fase = 'HORNEADO'
     `;
     await client.query(updateFaseQuery, [masaId, observaciones || null]);

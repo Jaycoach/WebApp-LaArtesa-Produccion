@@ -200,11 +200,10 @@ exports.registrarEntradaCamara = async (req, res) => {
         datos_fase = jsonb_build_object(
           'entrada_camara', NOW(),
           'salida_sugerida', NOW() + INTERVAL '${tiempoEstandar} minutes'
-        ),
-        fecha_actualizacion = NOW()
+        )
       WHERE masa_id = $1 AND fase = 'FERMENTACION'
     `;
-    await client.query(updateFaseQuery, [masaId, usuario.nombre_completo]);
+    await client.query(updateFaseQuery, [masaId, usuario.id]);
 
     // Actualizar fase_actual de la masa
     const updateMasaQuery = `
@@ -294,8 +293,7 @@ exports.registrarSalidaCamara = async (req, res) => {
           estado = 'COMPLETADA',
           porcentaje_completado = 100,
           fecha_completado = NOW(),
-          observaciones = $2,
-          fecha_actualizacion = NOW()
+          observaciones = $2
         WHERE masa_id = $1 AND fase = 'FERMENTACION'
       `;
       await client.query(updateFaseQuery, [masaId, observaciones || null]);
@@ -472,8 +470,7 @@ exports.registrarSalidaFrio = async (req, res) => {
         estado = 'COMPLETADA',
         porcentaje_completado = 100,
         fecha_completado = NOW(),
-        observaciones = $2,
-        fecha_actualizacion = NOW()
+        observaciones = $2
       WHERE masa_id = $1 AND fase = 'FERMENTACION'
     `;
     await client.query(updateFaseQuery, [masaId, observaciones || null]);
