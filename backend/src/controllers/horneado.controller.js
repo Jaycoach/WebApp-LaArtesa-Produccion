@@ -368,19 +368,19 @@ exports.iniciarHorneado = async (req, res) => {
       SET
         estado = 'EN_PROGRESO',
         fecha_inicio = NOW(),
-        usuario_responsable = $2,
+        usuario_responsable = $2::text,
         datos_fase = jsonb_build_object(
-          'horno', $3,
-          'programa', $4,
+          'horno', $3::text,
+          'programa', $4::integer,
           'hora_entrada', NOW()
         )
-      WHERE masa_id = $1 AND fase = 'HORNEADO'
+      WHERE masa_id = $1::integer AND fase = 'HORNEADO'
     `;
     await client.query(updateFaseQuery, [
-      masaId,
-      usuario.id,
+      Number(masaId),
+      String(usuario.id),
       horno.nombre,
-      numeroPrograma
+      numeroPrograma ? Number(numeroPrograma) : null
     ]);
 
     // Actualizar fase_actual y estado de la masa
