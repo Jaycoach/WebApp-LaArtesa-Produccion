@@ -94,6 +94,8 @@ export const ListaMasas: React.FC = () => {
       FORMADO:       'bg-pink-100 text-pink-800',
       FERMENTACION:  'bg-orange-100 text-orange-800',
       HORNEADO:      'bg-red-100 text-red-800',
+      EMPAQUE:       'bg-yellow-100 text-yellow-800',
+      COMPLETADA:    'bg-green-100 text-green-800',
       COMPLETADO:    'bg-green-100 text-green-800',
     };
     return badges[estado] || 'bg-gray-100 text-gray-800';
@@ -111,6 +113,8 @@ export const ListaMasas: React.FC = () => {
       FORMADO:       'Formado',
       FERMENTACION:  'Fermentación',
       HORNEADO:      'Horneado',
+      EMPAQUE:       'Empaque',
+      COMPLETADA:    'Completada',
       COMPLETADO:    'Completado',
     };
     return labels[estado] || estado;
