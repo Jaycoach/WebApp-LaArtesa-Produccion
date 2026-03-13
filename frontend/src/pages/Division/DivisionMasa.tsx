@@ -51,13 +51,10 @@ export const DivisionMasa: React.FC = () => {
   const validarCantidad = (producto: any, cantidad: number): string | null => {
     if (cantidad <= 0) return null; // Aún no ingresó nada
 
-    const minimoRequerido = getMinimoRequerido(producto);
     const divisor = parseInt(producto.multiplo_divisor || 0);
 
-    if (cantidad < minimoRequerido) {
-      return `Mínimo ${minimoRequerido} unidades`;
-    }
-
+    // Solo validar múltiplo cuando aplica — cantidad menor al proyectado
+    // es válida (cubre OVs de repetición y producción parcial)
     if (divisor > 0 && cantidad % divisor !== 0) {
       const inferior = Math.floor(cantidad / divisor) * divisor;
       const superior = inferior + divisor;
@@ -118,22 +115,34 @@ export const DivisionMasa: React.FC = () => {
         erroresFinal.push(`"${nombre}": debe ingresar la cantidad a cortar (mínimo ${minimo}).`);
         continue;
       }
+      // Advertencia informativa si se cortan menos del proyectado (no bloquea)
       if (cantidad < minimo) {
-        erroresFinal.push(`"${nombre}": ingresó ${cantidad}, debe cortar mínimo ${minimo}.`);
-        continue;
+        erroresFinal.push(`⚠️ "${nombre}": se cortaron ${cantidad} de ${minimo} proyectadas (faltante: ${minimo - cantidad}). Esto se registrará como división parcial.`);
       }
       if (divisor > 0 && cantidad % divisor !== 0) {
         const inferior = Math.floor(cantidad / divisor) * divisor;
         const superior = inferior + divisor;
         erroresFinal.push(
-          `"${nombre}": ${cantidad} no es múltiplo de ${divisor}. Valores válidos: ${inferior} o ${superior}.`
+          `❌ "${nombre}": ${cantidad} no es múltiplo de ${divisor}. Valores válidos: ${inferior} o ${superior}.`
         );
       }
     }
 
-    if (erroresFinal.length > 0) {
-      alert('No se puede completar la división:\n\n' + erroresFinal.join('\n'));
+    const erroresBlockeantes = erroresFinal.filter(e => e.startsWith('❌'));
+    const advertencias = erroresFinal.filter(e => e.startsWith('⚠️'));
+
+    if (erroresBlockeantes.length > 0) {
+      alert('No se puede completar la división:\n\n' + erroresBlockeantes.join('\n'));
       return;
+    }
+
+    if (advertencias.length > 0) {
+      const confirmar = window.confirm(
+        'Atención — división con faltantes:\n\n' +
+        advertencias.join('\n') +
+        '\n\n¿Confirmar y registrar como división parcial?'
+      );
+      if (!confirmar) return;
     }
 
     const tiempoReposo = calcularTiempoReposo();
