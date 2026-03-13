@@ -775,24 +775,24 @@ const sincronizarDesdeOV = async (req, res, next) => {
       // Verificar qué docEntries de este grupo ya están importados para esta fecha
       const docEntriesGrupo = [...new Set(grupo.productos.map(p => p.docEntry))];
       const docEntriesImportadosResult = await client.query(
-        `SELECT DISTINCT p.sap_doc_entry
+        `SELECT p.sap_doc_entry, p.sap_item_code
          FROM productos_por_masa p
          JOIN masas_produccion m ON p.masa_id = m.id
          WHERE DATE(m.fecha_produccion) = $1
            AND p.sap_doc_entry = ANY($2::int[])`,
         [fechaProduccion, docEntriesGrupo]
       );
-      const docEntriesYaImportados = new Set(
-        docEntriesImportadosResult.rows.map(r => r.sap_doc_entry)
+      const itemsYaImportados = new Set(
+        docEntriesImportadosResult.rows.map(r => `${r.sap_doc_entry}::${r.sap_item_code}`)
       );
 
-      // Filtrar solo los productos con docEntry NO importado aún
+      // Filtrar solo los productos con par docEntry+itemCode NO importado aún
       const productosNuevos = grupo.productos.filter(
-        p => !docEntriesYaImportados.has(p.docEntry)
+        p => !itemsYaImportados.has(`${p.docEntry}::${p.itemCode}`)
       );
 
       if (productosNuevos.length === 0) {
-        logger.info(`Tipo ${tipoMasa} — todos los docEntries ya importados, omitiendo`);
+        logger.info(`Tipo ${tipoMasa} — todos los items (docEntry+itemCode) ya importados, omitiendo`);
         ordenCounter++;
         continue;
       }
