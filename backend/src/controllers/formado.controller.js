@@ -219,11 +219,10 @@ exports.iniciarFormado = async (req, res) => {
       SET
         estado = 'EN_PROGRESO',
         fecha_inicio = NOW(),
-        usuario_responsable = $2,
-        fecha_actualizacion = NOW()
+        usuario_responsable = $2
       WHERE masa_id = $1 AND fase = 'FORMADO'
     `;
-    await client.query(updateFaseQuery, [masaId, usuario.nombre_completo]);
+    await client.query(updateFaseQuery, [masaId, usuario.id]);
 
     // Actualizar fase_actual de la masa
     const updateMasaQuery = `
@@ -314,8 +313,7 @@ exports.completarFormado = async (req, res) => {
         estado = 'COMPLETADA',
         porcentaje_completado = 100,
         fecha_completado = NOW(),
-        observaciones = $2,
-        fecha_actualizacion = NOW()
+        observaciones = $2
       WHERE masa_id = $1 AND fase = 'FORMADO'
     `;
     await client.query(updateFaseQuery, [masaId, observaciones || null]);
