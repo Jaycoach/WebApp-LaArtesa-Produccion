@@ -363,25 +363,22 @@ exports.iniciarHorneado = async (req, res) => {
     ]);
 
     // Actualizar progreso de fase HORNEADO a EN_PROGRESO
-    const updateFaseQuery = `
-      UPDATE progreso_fases
-      SET
-        estado = 'EN_PROGRESO',
-        fecha_inicio = NOW(),
-        usuario_responsable = $2::integer,
-        datos_fase = jsonb_build_object(
-          'horno', $3::text,
-          'programa', $4::integer,
-          'hora_entrada', NOW()
-        )
-      WHERE masa_id = $1::integer AND fase = 'HORNEADO'
-    `;
-    await client.query(updateFaseQuery, [
-      Number(masaId),
-      Number(usuario.id),
-      horno.nombre,
-      numeroPrograma ? Number(numeroPrograma) : null
-    ]);
+    await client.query(
+      `UPDATE progreso_fases
+       SET estado = 'EN_PROGRESO', fecha_inicio = NOW(), usuario_responsable = $2
+       WHERE masa_id = $1 AND fase = 'HORNEADO'`,
+      [Number(masaId), Number(usuario.id)]
+    );
+    await client.query(
+      `UPDATE progreso_fases
+       SET datos_fase = $2
+       WHERE masa_id = $1 AND fase = 'HORNEADO'`,
+      [Number(masaId), JSON.stringify({
+        horno: horno.nombre,
+        programa: numeroPrograma,
+        hora_entrada: new Date().toISOString()
+      })]
+    );
 
     // Actualizar fase_actual y estado de la masa
     const updateMasaQuery = `
