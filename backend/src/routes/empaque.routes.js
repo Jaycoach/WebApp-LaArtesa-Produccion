@@ -8,6 +8,9 @@ const { verifyToken } = require('../middleware/auth');
 
 router.use(verifyToken);
 
+// Lista masas con horneado completo y empaque pendiente (ANTES de /:masaId)
+router.get('/pendientes',                    c.getMasasPendientesEmpaque);
+
 // Vista consolidada por OV (ANTES de /:masaId para evitar colisión)
 router.get('/ov/:docNum',                    c.getEmpaqueByOV);
 
