@@ -522,7 +522,7 @@ exports.getMasasPendientesEmpaque = async (req, res) => {
       const prodsR = await db.query(`
         SELECT ppm.id, ppm.sap_item_code, ppm.producto_nombre, ppm.presentacion,
                ppm.gramaje_unitario, ppm.unidades_pedidas,
-               COALESCE(ppm.unidades_ajustadas, ppm.unidades_programadas) AS unidades_ajustadas,
+               GREATEST(COALESCE(ppm.unidades_ajustadas, 0), COALESCE(ppm.unidades_programadas, 0)) AS unidades_ajustadas,
                COALESCE(ppm.unidades_producidas, 0) AS unidades_producidas,
                ppm.sap_doc_num, ppm.sap_doc_entry
         FROM productos_por_masa ppm
