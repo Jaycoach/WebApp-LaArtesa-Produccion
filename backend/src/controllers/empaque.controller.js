@@ -471,6 +471,7 @@ exports.completarEmpaque = async (req, res) => {
           Quantity:      parseInt(prod.uds_empacadas),
           Price:         parseFloat(costoUnitarioProd.toFixed(2)),
           WarehouseCode: 'PROTERMI',
+          AccountCode:   '14050501',
           BatchNumbers: [{
             BatchNumber:       loteProduccion,
             Quantity:          parseInt(prod.uds_empacadas),
