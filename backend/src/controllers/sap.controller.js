@@ -1589,7 +1589,7 @@ const sincronizarInventarioMP = async (_req, res, next) => {
     });
 
     const lotesMap = itemCodesConLotes.length > 0
-      ? await sapService.getLotesMateriaPrima(itemCodesConLotes)
+      ? await sapService.getLotesMateriaPrima(itemCodesConLotes, stocks)
       : {};
     let lotesSincronizados = 0;
 
