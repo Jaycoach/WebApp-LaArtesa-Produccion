@@ -618,15 +618,22 @@ exports.completarHorneado = async (req, res) => {
     `;
     await client.query(updateFaseQuery, [masaId, observaciones || null]);
 
-    // Actualizar estado de la masa a COMPLETADA
+    // Avanzar masa a fase EMPAQUE
     const updateMasaQuery = `
       UPDATE masas_produccion
       SET
-        estado = 'COMPLETADA',
-        fase_actual = 'HORNEADO'
+        estado = 'EN_PROCESO',
+        fase_actual = 'EMPAQUE'
       WHERE id = $1
     `;
     await client.query(updateMasaQuery, [masaId]);
+
+    // Desbloquear fase EMPAQUE
+    await client.query(`
+      UPDATE progreso_fases
+      SET estado = 'EN_PROGRESO', updated_at = NOW()
+      WHERE masa_id = $1 AND fase = 'EMPAQUE'
+    `, [masaId]);
 
     await client.query('COMMIT');
 
@@ -634,7 +641,7 @@ exports.completarHorneado = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Horneado completado correctamente. Producción finalizada.',
+      message: 'Horneado completado correctamente. Masa lista para empaque.',
       data: result.rows[0]
     });
   } catch (error) {
