@@ -706,16 +706,11 @@ class SAPService {
       'WHERE "OBTQ"."WhsCode" = \'ALMP\' ' +
       'AND "OBTQ"."Quantity" > 0';
 
-    // Asegurar que la SQLQuery existe con el SQL fijo — solo PATCH/POST si cambia
+    // Asegurar que la SQLQuery existe — PATCH directo, si no existe POST
     try {
-      const existeResp = await this.client.get(`/SQLQueries('${SQL_CODE}')`);
-      const sqlActual = existeResp.data?.SqlText || '';
-      if (sqlActual.trim() !== SQL_TEXT.trim()) {
-        await this.client.patch(`/SQLQueries('${SQL_CODE}')`, { SqlText: SQL_TEXT });
-        logger.info(`SAP SQLQuery '${SQL_CODE}' actualizada a query fija.`);
-      }
-    } catch (getErr) {
-      if (getErr?.response?.status === 404) {
+      await this.client.patch(`/SQLQueries('${SQL_CODE}')`, { SqlText: SQL_TEXT });
+    } catch (patchErr) {
+      if (patchErr?.response?.status === 404) {
         try {
           await this.client.post('/SQLQueries', {
             SqlCode: SQL_CODE,
@@ -728,7 +723,7 @@ class SAPService {
           return {};
         }
       } else {
-        logger.warn(`SAP SQLQuery verificación error: ${getErr?.message}. Continuando sin lotes.`);
+        logger.warn(`SAP SQLQuery PATCH error: ${patchErr?.message}. Continuando sin lotes.`);
         return {};
       }
     }
@@ -739,7 +734,7 @@ class SAPService {
       `/SQLQueries('${SQL_CODE}')/List`,
       {
         headers: { 'Prefer': 'odata.maxpagesize=500' },
-        timeout: 30000,
+        timeout: 60000,
       }
     );
     const rows = response.data?.value || [];
