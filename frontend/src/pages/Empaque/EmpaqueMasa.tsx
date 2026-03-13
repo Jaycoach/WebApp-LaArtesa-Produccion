@@ -33,7 +33,9 @@ interface ProductoPendiente {
   producto_nombre: string;
   presentacion: string;
   gramaje_unitario: number;
-  unidades_ajustadas: number;
+  unidades_programadas: number;
+  unidades_referencia: number;
+  division_completada: boolean;
   unidades_producidas: number;
   sap_doc_num: string | null;
   sap_doc_entry: number | null;
@@ -394,7 +396,7 @@ const PanelEmpaqueMasa: React.FC<{
   const [detalles, setDetalles] = useState<Record<number, { emp: string; merma: string }>>(() => {
     const init: Record<number, { emp: string; merma: string }> = {};
     masa.ovs.forEach(ov => ov.productos.forEach(p => {
-      init[p.id] = { emp: String(p.unidades_ajustadas ?? '0'), merma: '0' };
+      init[p.id] = { emp: String(p.unidades_referencia ?? p.unidades_programadas ?? '0'), merma: '0' };
     }));
     return init;
   });
@@ -448,7 +450,7 @@ const PanelEmpaqueMasa: React.FC<{
     masa.ovs.forEach(ov => {
       ov.productos.forEach(p => {
         const empacadas = parseInt(detalles[p.id]?.emp || '0') || 0;
-        const faltante = p.unidades_ajustadas - empacadas;
+        const faltante = p.unidades_referencia - empacadas;
         if (faltante > 0) faltantes.push({ nombre: p.producto_nombre, ov: ov.doc_num, faltante });
       });
     });
@@ -480,7 +482,9 @@ const PanelEmpaqueMasa: React.FC<{
 
   const totalProductos = masa.ovs.reduce((s, o) => s + o.productos.length, 0);
   const totalProgramadas = masa.ovs.reduce((s, o) =>
-    s + o.productos.reduce((ss, p) => ss + (p.unidades_ajustadas || 0), 0), 0);
+    s + o.productos.reduce((ss, p) => ss + (p.unidades_programadas || 0), 0), 0);
+  const totalDivision = masa.ovs.reduce((s, o) =>
+    s + o.productos.reduce((ss, p) => ss + (p.unidades_referencia || 0), 0), 0);
   const totalEmpacadas = Object.values(detalles).reduce((s, v) => s + (parseInt(v.emp) || 0), 0);
 
   return (
@@ -509,23 +513,27 @@ const PanelEmpaqueMasa: React.FC<{
         }`}>{msg.texto}</div>
       )}
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-4 gap-3">
         <div className="bg-gray-50 rounded-lg p-3 text-center">
           <div className="text-2xl font-bold text-gray-800">{totalProductos}</div>
           <div className="text-xs text-gray-500">Productos</div>
         </div>
+        <div className="bg-gray-50 rounded-lg p-3 text-center">
+          <div className="text-2xl font-bold text-gray-600">{totalProgramadas}</div>
+          <div className="text-xs text-gray-400">Programadas</div>
+        </div>
         <div className="bg-blue-50 rounded-lg p-3 text-center">
-          <div className="text-2xl font-bold text-blue-700">{totalProgramadas}</div>
-          <div className="text-xs text-blue-500">Programadas</div>
+          <div className="text-2xl font-bold text-blue-700">{totalDivision}</div>
+          <div className="text-xs text-blue-500">De división</div>
         </div>
         <div className={`rounded-lg p-3 text-center ${
-          totalEmpacadas >= totalProgramadas ? 'bg-green-50' : 'bg-amber-50'
+          totalEmpacadas >= totalDivision ? 'bg-green-50' : 'bg-amber-50'
         }`}>
           <div className={`text-2xl font-bold ${
-            totalEmpacadas >= totalProgramadas ? 'text-green-700' : 'text-amber-700'
+            totalEmpacadas >= totalDivision ? 'text-green-700' : 'text-amber-700'
           }`}>{totalEmpacadas}</div>
           <div className={`text-xs ${
-            totalEmpacadas >= totalProgramadas ? 'text-green-500' : 'text-amber-500'
+            totalEmpacadas >= totalDivision ? 'text-green-500' : 'text-amber-500'
           }`}>Empacadas</div>
         </div>
       </div>
@@ -574,6 +582,7 @@ const PanelEmpaqueMasa: React.FC<{
                 <tr className="bg-gray-50 text-gray-600 text-xs">
                   <th className="text-left p-2 border-b">Producto</th>
                   <th className="text-right p-2 border-b">Programadas</th>
+                  <th className="text-right p-2 border-b">De división</th>
                   <th className="text-right p-2 border-b">Empacadas</th>
                   <th className="text-right p-2 border-b">Merma</th>
                   <th className="text-right p-2 border-b">Faltante</th>
@@ -584,7 +593,7 @@ const PanelEmpaqueMasa: React.FC<{
                 {ov.productos.map(p => {
                   const det = detalles[p.id] ?? { emp: '0', merma: '0' };
                   const empacadas = parseInt(det.emp) || 0;
-                  const faltante = p.unidades_ajustadas - empacadas;
+                  const faltante = p.unidades_referencia - empacadas;
                   return (
                     <tr key={p.id} className="border-b hover:bg-gray-50">
                       <td className="p-2">
@@ -593,8 +602,18 @@ const PanelEmpaqueMasa: React.FC<{
                           {p.sap_item_code} · {p.presentacion}
                         </div>
                       </td>
-                      <td className="p-2 text-right font-mono font-medium">
-                        {p.unidades_ajustadas}
+                      <td className="p-2 text-right font-mono text-gray-500">
+                        {p.unidades_programadas}
+                      </td>
+                      <td className="p-2 text-right">
+                        <span className={`font-mono font-medium ${
+                          p.division_completada ? 'text-blue-700' : 'text-gray-400'
+                        }`}>
+                          {p.division_completada ? p.unidades_referencia : '—'}
+                        </span>
+                        {!p.division_completada && (
+                          <div className="text-xs text-gray-400">Sin división</div>
+                        )}
                       </td>
                       <td className="p-2 text-right">
                         {masa.empaque_iniciado ? (
