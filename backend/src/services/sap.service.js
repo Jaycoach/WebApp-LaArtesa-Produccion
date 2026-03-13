@@ -734,42 +734,34 @@ class SAPService {
       }
     }
 
-    // Traer todos los lotes Released en ALMP y filtrar en memoria por itemCodes
+    // Una sola llamada con Prefer: odata.maxpagesize=0 — SAP entrega todos los registros sin paginar
     const resultado = {};
-    const PAGE_SIZE = 20; // SAP fuerza máximo 20 por página en SQLQueries
-    let skip = 0;
-
-    while (true) {
-      const response = await this.client.get(
-        `/SQLQueries('${SQL_CODE}')/List`,
-        { params: { $skip: skip, $top: PAGE_SIZE }, timeout: 120000 }
-      );
-      const rows = response.data?.value || [];
-      if (rows.length === 0) break;
-
-      for (const row of rows) {
-        if (parseFloat(row.Quantity || 0) <= 0) continue;
-        if (!resultado[row.ItemCode]) resultado[row.ItemCode] = [];
-        resultado[row.ItemCode].push({
-          batch:               row.BatchNum,
-          cantidad_disponible: parseFloat(row.Quantity || 0),
-          admissionDate:       row.CreateDate
-                                 ? `${row.CreateDate.substring(0,4)}-${row.CreateDate.substring(4,6)}-${row.CreateDate.substring(6,8)}`
-                                 : null,
-          expirationDate:      row.ExpDate
-                                 ? `${row.ExpDate.substring(0,4)}-${row.ExpDate.substring(4,6)}-${row.ExpDate.substring(6,8)}`
-                                 : null,
-          manufacturingDate:   row.MnfDate
-                                 ? `${row.MnfDate.substring(0,4)}-${row.MnfDate.substring(4,6)}-${row.MnfDate.substring(6,8)}`
-                                 : null,
-          status:              'released',
-        });
+    const response = await this.client.get(
+      `/SQLQueries('${SQL_CODE}')/List`,
+      {
+        headers: { 'Prefer': 'odata.maxpagesize=0' },
+        timeout: 60000,
       }
+    );
+    const rows = response.data?.value || [];
 
-      // Si hay nextLink hay más páginas; si vino menos de PAGE_SIZE ya terminamos
-      const hasMore = !!response.data?.['@odata.nextLink'];
-      if (!hasMore && rows.length < PAGE_SIZE) break;
-      skip += PAGE_SIZE;
+    for (const row of rows) {
+      if (parseFloat(row.Quantity || 0) <= 0) continue;
+      if (!resultado[row.ItemCode]) resultado[row.ItemCode] = [];
+      resultado[row.ItemCode].push({
+        batch:               row.BatchNum,
+        cantidad_disponible: parseFloat(row.Quantity || 0),
+        admissionDate:       row.CreateDate
+                               ? `${row.CreateDate.substring(0,4)}-${row.CreateDate.substring(4,6)}-${row.CreateDate.substring(6,8)}`
+                               : null,
+        expirationDate:      row.ExpDate
+                               ? `${row.ExpDate.substring(0,4)}-${row.ExpDate.substring(4,6)}-${row.ExpDate.substring(6,8)}`
+                               : null,
+        manufacturingDate:   row.MnfDate
+                               ? `${row.MnfDate.substring(0,4)}-${row.MnfDate.substring(4,6)}-${row.MnfDate.substring(6,8)}`
+                               : null,
+        status:              'released',
+      });
     }
 
     // Ordenar por fecha de admisión ASC → lote más antiguo primero (sugerido en pesaje)
