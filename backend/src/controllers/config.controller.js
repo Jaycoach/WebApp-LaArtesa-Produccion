@@ -1,231 +1,342 @@
 /**
- * Controlador para configuración del sistema
+ * config.controller.js — ARTESA
+ * Configuración del sistema: factor absorción, correos, costos agua,
+ * tipos de mano de obra, costos indirectos, etiquetas, precios empaque SAP.
  */
-
 const fasesModel = require('../models/fases.model');
 const db = require('../database/connection');
 const logger = require('../utils/logger');
 
-/**
- * @desc    Obtener factor de absorción
- * @route   GET /api/config/factor-absorcion
- * @access  Private
- */
-const getFactorAbsorcion = async (req, res, next) => {
+// ── helpers ──────────────────────────────────────────────────────────────────
+const getConfig = async (clave) => {
+  const r = await db.query(
+    `SELECT valor FROM configuracion_sistema WHERE clave = $1`, [clave]
+  );
+  return r.rows[0]?.valor ?? null;
+};
+const setConfig = async (clave, valor, usuarioId) => {
+  await db.query(
+    `INSERT INTO configuracion_sistema (clave, valor, actualizado_por)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (clave) DO UPDATE SET valor = $2, actualizado_por = $3, fecha_actualizacion = NOW()`,
+    [clave, String(valor), usuarioId]
+  );
+};
+
+// ── FACTOR ABSORCIÓN ─────────────────────────────────────────────────────────
+exports.getFactorAbsorcion = async (req, res, next) => {
   try {
     const config = await fasesModel.getFactorAbsorcion();
-
-    if (!config) {
-      return res.status(404).json({
-        success: false,
-        message: 'Configuración no encontrada',
-      });
-    }
-
-    res.json({
-      success: true,
-      data: {
-        factor: parseFloat(config.valor),
-        updated_at: config.updated_at,
-      },
-    });
-  } catch (error) {
-    logger.error('Error al obtener factor de absorción:', error);
-    next(error);
-  }
+    if (!config) return res.status(404).json({ success: false, message: 'Configuración no encontrada' });
+    res.json({ success: true, data: { factor: parseFloat(config.valor), updated_at: config.updated_at } });
+  } catch (e) { next(e); }
 };
 
-/**
- * @desc    Actualizar factor de absorción
- * @route   PUT /api/config/factor-absorcion
- * @access  Private (Admin only)
- */
-const updateFactorAbsorcion = async (req, res, next) => {
+exports.updateFactorAbsorcion = async (req, res, next) => {
   try {
     const { factorAbsorcion } = req.body;
-
-    if (!factorAbsorcion || factorAbsorcion <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Factor de absorción inválido',
-      });
-    }
-
+    if (!factorAbsorcion || factorAbsorcion <= 0)
+      return res.status(400).json({ success: false, message: 'Factor de absorción inválido' });
     const config = await fasesModel.updateFactorAbsorcion(factorAbsorcion, req.user.id);
-
-    res.json({
-      success: true,
-      data: {
-        factor: parseFloat(config.valor),
-        updated_at: config.updated_at,
-        updated_by: config.updated_by,
-      },
-      message: 'Factor de absorción actualizado correctamente',
-    });
-  } catch (error) {
-    logger.error('Error al actualizar factor de absorción:', error);
-    next(error);
-  }
+    res.json({ success: true, data: { factor: parseFloat(config.valor) }, message: 'Factor actualizado' });
+  } catch (e) { next(e); }
 };
 
-/**
- * @desc    Obtener correos de empaque (configuración)
- * @route   GET /api/config/correos
- * @access  Private
- */
-const getCorreos = async (req, res, next) => {
+// ── CORREOS ──────────────────────────────────────────────────────────────────
+exports.getCorreos = async (req, res, next) => {
   try {
-    // TODO: Implementar modelo para obtener correos de configuración
-    // Por ahora retornamos un placeholder
-    res.json({
-      success: true,
-      data: {
-        correos: ['empaque@artesa.com'],
-      },
-    });
-  } catch (error) {
-    logger.error('Error al obtener correos:', error);
-    next(error);
-  }
+    const valor = await getConfig('correos_empaque');
+    res.json({ success: true, data: { correos: valor || '' } });
+  } catch (e) { next(e); }
 };
 
-/**
- * @desc    Actualizar correos de empaque
- * @route   PUT /api/config/correos
- * @access  Private (Admin only)
- */
-const updateCorreos = async (req, res, next) => {
+exports.updateCorreos = async (req, res, next) => {
   try {
-    const { emailNotificaciones } = req.body;
-
-    if (!Array.isArray(emailNotificaciones) || emailNotificaciones.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Debe proporcionar al menos un correo electrónico',
-      });
-    }
-
-    // TODO: Implementar modelo para actualizar correos en configuración
-    // Por ahora retornamos los correos recibidos
-
-    res.json({
-      success: true,
-      data: {
-        correos: emailNotificaciones,
-      },
-      message: 'Correos actualizados correctamente',
-    });
-  } catch (error) {
-    logger.error('Error al actualizar correos:', error);
-    next(error);
-  }
+    const { correos } = req.body;
+    await setConfig('correos_empaque', correos, req.user.id);
+    res.json({ success: true, message: 'Correos actualizados' });
+  } catch (e) { next(e); }
 };
 
-/**
- * @desc    Obtener costo del agua por litro
- * @route   GET /api/config/costo-agua
- * @access  Private
- */
-const getCostoAgua = async (req, res, next) => {
+// ── COSTOS AGUA ──────────────────────────────────────────────────────────────
+exports.getCostoAgua = async (req, res, next) => {
   try {
-    const result = await db.query(
-      `SELECT valor, fecha_actualizacion AS updated_at
-       FROM configuracion_sistema WHERE clave = 'costo_agua_litro'`
-    );
-    const costo = result.rows.length > 0 ? parseFloat(result.rows[0].valor) || 0 : 0;
-    res.json({ success: true, data: { costo, updated_at: result.rows[0]?.updated_at } });
-  } catch (error) {
-    logger.error('Error al obtener costo del agua:', error);
-    next(error);
-  }
+    const valor = await getConfig('costo_agua_litro');
+    res.json({ success: true, data: { costo: parseFloat(valor || '0') } });
+  } catch (e) { next(e); }
 };
-
-/**
- * @desc    Actualizar costo del agua por litro
- * @route   PUT /api/config/costo-agua
- * @access  Private (Admin only)
- */
-const updateCostoAgua = async (req, res, next) => {
+exports.updateCostoAgua = async (req, res, next) => {
   try {
     const { costo } = req.body;
-    if (costo === undefined || costo === null || isNaN(parseFloat(costo)) || parseFloat(costo) < 0) {
+    if (costo === undefined || costo === null || isNaN(parseFloat(costo)) || parseFloat(costo) < 0)
       return res.status(400).json({ success: false, message: 'Costo inválido. Debe ser un número >= 0' });
-    }
-    const result = await db.query(
-      `INSERT INTO configuracion_sistema
-         (clave, valor, tipo, categoria, descripcion, es_publica, actualizado_por)
-       VALUES ('costo_agua_litro', $1, 'NUMBER', 'PRODUCCION',
-               'Costo por litro de agua en COP (insumo propio, no se compra directamente)',
-               false, $2)
-       ON CONFLICT (clave) DO UPDATE SET
-         valor           = EXCLUDED.valor,
-         actualizado_por = EXCLUDED.actualizado_por,
-         fecha_actualizacion = NOW()
-       RETURNING valor, fecha_actualizacion AS updated_at`,
-      [String(parseFloat(costo)), req.user.id]
-    );
-    res.json({
-      success: true,
-      data: { costo: parseFloat(result.rows[0].valor), updated_at: result.rows[0].updated_at },
-      message: 'Costo del agua actualizado correctamente',
-    });
-  } catch (error) {
-    logger.error('Error al actualizar costo del agua:', error);
-    next(error);
-  }
+    await setConfig('costo_agua_litro', parseFloat(costo), req.user.id);
+    res.json({ success: true, message: 'Costo agua actualizado' });
+  } catch (e) { next(e); }
 };
-
-const getCostoAgua2 = async (req, res, next) => {
+exports.getCostoAgua2 = async (req, res, next) => {
   try {
-    const result = await db.query(
-      `SELECT valor, fecha_actualizacion AS updated_at
-       FROM configuracion_sistema WHERE clave = 'costo_agua2_litro'`
-    );
-    const costo = result.rows.length > 0 ? parseFloat(result.rows[0].valor) || 0 : 0;
-    res.json({ success: true, data: { costo, updated_at: result.rows[0]?.updated_at } });
-  } catch (error) {
-    logger.error('Error al obtener costo del agua 2:', error);
-    next(error);
-  }
+    const valor = await getConfig('costo_agua2_litro');
+    res.json({ success: true, data: { costo: parseFloat(valor || '0') } });
+  } catch (e) { next(e); }
 };
-
-const updateCostoAgua2 = async (req, res, next) => {
+exports.updateCostoAgua2 = async (req, res, next) => {
   try {
     const { costo } = req.body;
-    if (costo === undefined || costo === null || isNaN(parseFloat(costo)) || parseFloat(costo) < 0) {
+    if (costo === undefined || costo === null || isNaN(parseFloat(costo)) || parseFloat(costo) < 0)
       return res.status(400).json({ success: false, message: 'Costo inválido. Debe ser un número >= 0' });
-    }
-    const result = await db.query(
-      `INSERT INTO configuracion_sistema
-         (clave, valor, tipo, categoria, descripcion, es_publica, actualizado_por)
-       VALUES ('costo_agua2_litro', $1, 'NUMBER', 'PRODUCCION',
-               'Costo por litro de Agua 2 (MP0008) en COP (insumo propio, no se compra directamente)',
-               false, $2)
-       ON CONFLICT (clave) DO UPDATE SET
-         valor           = EXCLUDED.valor,
-         actualizado_por = EXCLUDED.actualizado_por,
-         fecha_actualizacion = NOW()
-       RETURNING valor, fecha_actualizacion AS updated_at`,
-      [String(parseFloat(costo)), req.user.id]
-    );
-    res.json({
-      success: true,
-      data: { costo: parseFloat(result.rows[0].valor), updated_at: result.rows[0].updated_at },
-      message: 'Costo del Agua 2 actualizado correctamente',
-    });
-  } catch (error) {
-    logger.error('Error al actualizar costo del agua 2:', error);
-    next(error);
-  }
+    await setConfig('costo_agua2_litro', parseFloat(costo), req.user.id);
+    res.json({ success: true, message: 'Costo agua 2 actualizado' });
+  } catch (e) { next(e); }
 };
 
-module.exports = {
-  getFactorAbsorcion,
-  updateFactorAbsorcion,
-  getCorreos,
-  updateCorreos,
-  getCostoAgua,
-  updateCostoAgua,
-  getCostoAgua2,
-  updateCostoAgua2,
+// ── COSTOS INDIRECTOS ────────────────────────────────────────────────────────
+exports.getCostosIndirectos = async (req, res, next) => {
+  try {
+    const [ind, dep] = await Promise.all([
+      getConfig('costo_indirecto_por_kg'),
+      getConfig('costo_depreciacion_por_kg'),
+    ]);
+    res.json({ success: true, data: {
+      costo_indirecto_por_kg:    parseFloat(ind || '0'),
+      costo_depreciacion_por_kg: parseFloat(dep || '0'),
+    }});
+  } catch (e) { next(e); }
+};
+exports.updateCostosIndirectos = async (req, res, next) => {
+  try {
+    const { costo_indirecto_por_kg, costo_depreciacion_por_kg } = req.body;
+    if (costo_indirecto_por_kg !== undefined)
+      await setConfig('costo_indirecto_por_kg', costo_indirecto_por_kg, req.user.id);
+    if (costo_depreciacion_por_kg !== undefined)
+      await setConfig('costo_depreciacion_por_kg', costo_depreciacion_por_kg, req.user.id);
+    res.json({ success: true, message: 'Costos indirectos actualizados' });
+  } catch (e) { next(e); }
+};
+
+// ── TIPOS MANO DE OBRA ───────────────────────────────────────────────────────
+exports.getTiposMO = async (req, res, next) => {
+  try {
+    const r = await db.query(
+      `SELECT id, nombre, descripcion, costo_hora, activo
+       FROM tipos_mano_obra WHERE activo = true ORDER BY nombre`
+    );
+    res.json({ success: true, data: r.rows });
+  } catch (e) { next(e); }
+};
+
+exports.createTipoMO = async (req, res, next) => {
+  try {
+    const { nombre, descripcion, costo_hora } = req.body;
+    if (!nombre || costo_hora === undefined)
+      return res.status(400).json({ success: false, message: 'nombre y costo_hora son requeridos' });
+    const r = await db.query(
+      `INSERT INTO tipos_mano_obra (nombre, descripcion, costo_hora)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [nombre, descripcion || null, costo_hora]
+    );
+    res.status(201).json({ success: true, data: r.rows[0] });
+  } catch (e) { next(e); }
+};
+
+exports.updateTipoMO = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { nombre, descripcion, costo_hora, activo } = req.body;
+    const r = await db.query(
+      `UPDATE tipos_mano_obra
+       SET nombre = COALESCE($2, nombre),
+           descripcion = COALESCE($3, descripcion),
+           costo_hora = COALESCE($4, costo_hora),
+           activo = COALESCE($5, activo),
+           updated_at = NOW()
+       WHERE id = $1 RETURNING *`,
+      [id, nombre, descripcion, costo_hora, activo]
+    );
+    if (!r.rows.length) return res.status(404).json({ success: false, message: 'No encontrado' });
+    res.json({ success: true, data: r.rows[0] });
+  } catch (e) { next(e); }
+};
+
+exports.deleteTipoMO = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    await db.query(`UPDATE tipos_mano_obra SET activo = false WHERE id = $1`, [id]);
+    res.json({ success: true, message: 'Tipo de MO desactivado' });
+  } catch (e) { next(e); }
+};
+
+// ── REGISTROS MANO DE OBRA ───────────────────────────────────────────────────
+exports.getRegistrosMO = async (req, res, next) => {
+  try {
+    const { masaId } = req.params;
+    const r = await db.query(
+      `SELECT rmo.id, rmo.fase, rmo.horas, rmo.costo_calculado, rmo.observaciones,
+              rmo.created_at, tmo.nombre AS tipo_nombre, tmo.costo_hora,
+              u.nombre_completo AS usuario_nombre
+       FROM registros_mano_obra rmo
+       JOIN tipos_mano_obra tmo ON tmo.id = rmo.tipo_mo_id
+       LEFT JOIN usuarios u ON u.id = rmo.usuario_id
+       WHERE rmo.masa_id = $1
+       ORDER BY rmo.created_at`,
+      [masaId]
+    );
+    const total = r.rows.reduce((s, x) => s + parseFloat(x.costo_calculado), 0);
+    res.json({ success: true, data: { registros: r.rows, total_mo: total } });
+  } catch (e) { next(e); }
+};
+
+exports.createRegistroMO = async (req, res, next) => {
+  try {
+    const { masaId } = req.params;
+    const { fase, tipo_mo_id, horas, observaciones } = req.body;
+    if (!fase || !tipo_mo_id || !horas)
+      return res.status(400).json({ success: false, message: 'fase, tipo_mo_id y horas son requeridos' });
+
+    const tipoR = await db.query(
+      `SELECT costo_hora FROM tipos_mano_obra WHERE id = $1 AND activo = true`, [tipo_mo_id]
+    );
+    if (!tipoR.rows.length)
+      return res.status(404).json({ success: false, message: 'Tipo de MO no encontrado' });
+
+    const costo = parseFloat(tipoR.rows[0].costo_hora) * parseFloat(horas);
+    const client = await db.getClient();
+    try {
+      await client.query('BEGIN');
+      const r = await client.query(
+        `INSERT INTO registros_mano_obra (masa_id, fase, tipo_mo_id, horas, costo_calculado, observaciones, usuario_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        [masaId, fase.toUpperCase(), tipo_mo_id, horas, costo, observaciones || null, req.user.id]
+      );
+      await client.query(
+        `UPDATE masas_produccion
+         SET costo_mo_total = COALESCE(costo_mo_total, 0) + $2
+         WHERE id = $1`,
+        [masaId, costo]
+      );
+      await client.query('COMMIT');
+      res.status(201).json({ success: true, data: r.rows[0], costo_calculado: costo });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+};
+
+exports.deleteRegistroMO = async (req, res, next) => {
+  try {
+    const { masaId, registroId } = req.params;
+    const client = await db.getClient();
+    try {
+      await client.query('BEGIN');
+      const r = await client.query(
+        `DELETE FROM registros_mano_obra WHERE id = $1 AND masa_id = $2 RETURNING costo_calculado`,
+        [registroId, masaId]
+      );
+      if (!r.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ success: false, message: 'No encontrado' });
+      }
+      await client.query(
+        `UPDATE masas_produccion SET costo_mo_total = GREATEST(0, COALESCE(costo_mo_total, 0) - $2) WHERE id = $1`,
+        [masaId, r.rows[0].costo_calculado]
+      );
+      await client.query('COMMIT');
+      res.json({ success: true, message: 'Registro eliminado' });
+    } catch (err) { await client.query('ROLLBACK'); throw err; }
+    finally { client.release(); }
+  } catch (e) { next(e); }
+};
+
+// ── CONFIGURACIÓN ETIQUETAS ──────────────────────────────────────────────────
+exports.getEtiquetas = async (req, res, next) => {
+  try {
+    const r = await db.query(`SELECT * FROM configuracion_etiqueta ORDER BY nombre_producto`);
+    res.json({ success: true, data: r.rows });
+  } catch (e) { next(e); }
+};
+
+exports.upsertEtiqueta = async (req, res, next) => {
+  try {
+    const {
+      sap_item_code, nombre_producto, ingredientes_txt,
+      alergenos_txt, condiciones_txt, registro_invima,
+      peso_neto_txt, fabricante_txt
+    } = req.body;
+    if (!sap_item_code || !nombre_producto)
+      return res.status(400).json({ success: false, message: 'sap_item_code y nombre_producto son requeridos' });
+    const r = await db.query(
+      `INSERT INTO configuracion_etiqueta
+         (sap_item_code, nombre_producto, ingredientes_txt, alergenos_txt,
+          condiciones_txt, registro_invima, peso_neto_txt, fabricante_txt)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (sap_item_code) DO UPDATE SET
+         nombre_producto  = EXCLUDED.nombre_producto,
+         ingredientes_txt = EXCLUDED.ingredientes_txt,
+         alergenos_txt    = EXCLUDED.alergenos_txt,
+         condiciones_txt  = EXCLUDED.condiciones_txt,
+         registro_invima  = EXCLUDED.registro_invima,
+         peso_neto_txt    = EXCLUDED.peso_neto_txt,
+         fabricante_txt   = EXCLUDED.fabricante_txt,
+         updated_at       = NOW()
+       RETURNING *`,
+      [sap_item_code, nombre_producto, ingredientes_txt, alergenos_txt,
+       condiciones_txt, registro_invima, peso_neto_txt, fabricante_txt]
+    );
+    res.json({ success: true, data: r.rows[0] });
+  } catch (e) { next(e); }
+};
+
+// ── SYNC PRECIOS EMPAQUE DESDE SAP ───────────────────────────────────────────
+exports.syncPreciosEmpaque = async (req, res, next) => {
+  try {
+    const itemsR = await db.query(
+      `SELECT DISTINCT item_code_comp FROM sap_bom_componentes WHERE es_empaque = true`
+    );
+    const items = itemsR.rows.map(r => r.item_code_comp);
+    if (!items.length)
+      return res.json({ success: true, message: 'No hay items de empaque en BOM', actualizados: 0 });
+
+    const sapService = require('../services/sap.service');
+    await sapService.ensureSession();
+
+    let actualizados = 0;
+    const errores = [];
+
+    for (const itemCode of items) {
+      try {
+        const resp = await sapService.client.get(
+          `/Items('${itemCode}')?$select=ItemCode,ItemName,ItemsGroupCode,ItemWarehouseInfoCollection`
+        );
+        const item = resp.data;
+        const warehouseInfo = (item.ItemWarehouseInfoCollection || [])
+          .find(w => w.WarehouseCode === 'ALMP');
+        const precio = parseFloat(warehouseInfo?.StandardAveragePrice || 0);
+        const stock  = parseFloat(warehouseInfo?.InStock || 0);
+
+        await db.query(
+          `INSERT INTO sap_inventario_mp (item_code, item_name, manage_batch_numbers, stock_almp, costo_unitario)
+           VALUES ($1, $2, false, $3, $4)
+           ON CONFLICT (item_code) DO UPDATE SET
+             item_name      = EXCLUDED.item_name,
+             stock_almp     = $3,
+             costo_unitario = $4,
+             updated_at     = NOW()`,
+          [itemCode, item.ItemName, stock, precio]
+        );
+        actualizados++;
+      } catch (err) {
+        errores.push({ itemCode, error: err.message });
+        logger.warn(`syncPreciosEmpaque: error en ${itemCode}: ${err.message}`);
+      }
+    }
+
+    logger.info(`syncPreciosEmpaque: ${actualizados}/${items.length} items actualizados`);
+    res.json({
+      success: true,
+      message: `${actualizados} items de empaque sincronizados desde SAP`,
+      actualizados,
+      errores: errores.length ? errores : undefined,
+    });
+  } catch (e) { next(e); }
 };

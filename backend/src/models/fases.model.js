@@ -302,6 +302,7 @@ const getProgresoFases = async (masaId) => {
         WHEN 'FORMADO' THEN 5
         WHEN 'FERMENTACION' THEN 6
         WHEN 'HORNEADO' THEN 7
+        WHEN 'EMPAQUE' THEN 8
       END
   `, [masaIdNum]);
 
@@ -360,6 +361,7 @@ const desbloquearSiguienteFase = async (masaId, faseActual) => {
     DIVISION: 'FORMADO',
     FORMADO: 'FERMENTACION',
     FERMENTACION: 'HORNEADO',
+    HORNEADO: 'EMPAQUE',
   };
 
   const siguienteFase = fasesOrden[faseActual];

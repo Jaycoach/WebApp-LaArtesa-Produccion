@@ -24,6 +24,7 @@ import FermentacionMasa from '@/pages/Fermentacion/FermentacionMasa';
 import HorneadoMasa from '@/pages/Horneado/HorneadoMasa';
 import EmpaqueMasa from '@/pages/Empaque/EmpaqueMasa';
 import ConfiguracionSistema from '@/pages/Configuracion/ConfiguracionSistema';
+import CostosConfig from '@/pages/Configuracion/CostosConfig';
 import FaseListado from '@/pages/Fases/FaseListado';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -88,8 +89,9 @@ function App() {
             <Route path=":masaId" element={<HorneadoMasa />} />
           </Route>
 
-          {/* Empaque */}
+          {/* Empaque — búsqueda por OV, sin masaId en URL */}
           <Route path="empaque">
+            <Route index element={<EmpaqueMasa />} />
             <Route path=":masaId" element={<EmpaqueMasa />} />
           </Route>
 
@@ -98,6 +100,7 @@ function App() {
 
           {/* Configuración */}
           <Route path="configuracion" element={<ConfiguracionSistema />} />
+          <Route path="configuracion/costos" element={<CostosConfig />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

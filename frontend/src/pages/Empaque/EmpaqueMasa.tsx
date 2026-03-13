@@ -1,518 +1,636 @@
 /**
- * EmpaqueMasa.tsx
- * Módulo de EMPAQUE — ARTESA
- * 2026-03-02
- *
- * Funcionalidades:
- * 1. Registrar fecha de vencimiento (lote ya viene de pesaje)
- * 2. Tabla de productos con OV SAP de origen
- * 3. Ingresar unidades empacadas / merma por producto
- * 4. Generar etiquetas imprimibles con código de barras (simulado)
- * 5. Completar empaque
+ * EmpaqueMasa.tsx — ARTESA
+ * Vista consolidada de empaque por OV
+ * Busca por número de OV, muestra todas las sub-masas,
+ * costeo completo y generación de etiqueta INVIMA.
  */
-import React, { useState, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Card } from '@/components/common';
 
-// ─────────────────────────────────────────────
+// ── auth helper ──────────────────────────────────────────────────────────────
 const getToken = () => {
   try {
-    const auth = JSON.parse(localStorage.getItem('auth-storage') || '{}');
-    return auth?.state?.token || auth?.state?.accessToken || '';
+    const a = JSON.parse(localStorage.getItem('auth-storage') || '{}');
+    return a?.state?.token || a?.state?.accessToken || '';
   } catch { return ''; }
 };
+const H = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` });
+const api = async (path: string, opts?: RequestInit) => {
+  const r = await fetch(`/api${path}`, { headers: H(), ...opts });
+  const d = await r.json();
+  if (!r.ok) throw Object.assign(new Error(d.message || 'Error'), { status: r.status, data: d });
+  return d;
+};
 
-const authHeaders = () => ({
-  'Content-Type': 'application/json',
-  Authorization: `Bearer ${getToken()}`
-});
-
-// ─────────────────────────────────────────────
-// Tipos
-// ─────────────────────────────────────────────
-interface ProductoEmpaque {
+// ── tipos ────────────────────────────────────────────────────────────────────
+interface SubMasa {
   id: number;
+  codigo_masa: string;
+  estado_horneado: string;
+  estado_empaque: string;
+  total_kilos_con_merma: number;
+}
+interface Producto {
+  id: number;
+  masa_id: number;
   sap_item_code: string;
   producto_nombre: string;
   presentacion: string;
   gramaje_unitario: number;
-  unidades_pedidas: number;
   unidades_ajustadas: number;
   unidades_producidas: number;
-  unidades_excedente: number;
-  sap_doc_entry: number | null;
-  sap_doc_num: string | null;
-  unidades_por_paquete: number;
-  cantidad_paquetes: number;
-  // Si ya hay empaque iniciado
-  empaque_detalle_id?: number;
-  unidades_empacadas?: number;
-  unidades_merma?: number;
+  sap_doc_num: string;
+  detalle_id: number | null;
+  unidades_empacadas: number | null;
+  unidades_merma: number | null;
+  empaque_id: number | null;
+  empaque_estado: string | null;
+  fecha_vencimiento: string | null;
+  costo_mp_total_prod: number;
+  costo_unitario_final: number;
+}
+interface MaterialEmpaque {
+  item_code_padre: string;
+  item_code_comp: string;
+  item_name_comp: string;
+  cantidad_por_unidad: number;
+  uom: string;
+  precio_unitario: number;
+  stock_disponible: number;
+}
+interface ResumenCostos {
+  costo_mp: number; costo_mo: number;
+  costo_empaque: number; costo_indirecto: number; costo_total: number;
+}
+interface OVData {
+  masa_padre: { id: number; codigo: string; tipo: string; total_kg: number };
+  sub_masas: SubMasa[];
+  todas_horneadas: boolean;
+  productos: Producto[];
+  materiales_empaque: MaterialEmpaque[];
+  resumen_costos: ResumenCostos;
 }
 
-interface EmpaqueData {
-  masa: {
-    id: number;
-    codigo: string;
-    tipo: string;
-    nombre: string;
-    lote_produccion: string;
-    fecha_produccion: string;
-  };
-  productos: ProductoEmpaque[];
-  registro_empaque: {
-    id: number;
-    fecha_vencimiento: string;
-    estado: string;
-  } | null;
-}
+const COP = (v: number) => v.toLocaleString('es-CO', { minimumFractionDigits: 0 });
 
-// ─────────────────────────────────────────────
-// Barcode visual simple (CSS) para impresión
-// ─────────────────────────────────────────────
-const BarcodeDisplay: React.FC<{ code: string }> = ({ code }) => {
-  const bars = code.split('').map((c, i) => {
-    const n = parseInt(c) || 0;
-    return { width: 1 + (n % 3), isBlack: (n + i) % 3 !== 2 };
-  });
-  return (
-    <div className="flex items-end gap-0" style={{ height: 40 }}>
-      <div style={{ width: 1, height: 40, background: '#000' }} />
-      <div style={{ width: 1, height: 40, background: '#fff' }} />
-      <div style={{ width: 1, height: 40, background: '#000' }} />
-      {bars.map((b, i) => (
-        <div key={i} style={{ width: b.width, height: b.isBlack ? 36 : 28, background: b.isBlack ? '#000' : '#fff', alignSelf: 'flex-end' }} />
-      ))}
-      <div style={{ width: 1, height: 40, background: '#000' }} />
-      <div style={{ width: 1, height: 40, background: '#fff' }} />
-      <div style={{ width: 1, height: 40, background: '#000' }} />
-    </div>
-  );
-};
-
-// ─────────────────────────────────────────────
-// Modal de Etiqueta
-// ─────────────────────────────────────────────
-const ModalEtiqueta: React.FC<{
-  producto: ProductoEmpaque;
-  lote: string;
-  fechaVencimiento: string;
-  onClose: () => void;
-}> = ({ producto, lote, fechaVencimiento, onClose }) => {
-  const etiquetaRef = useRef<HTMLDivElement>(null);
-
-  const formatFecha = (iso: string) => {
-    if (!iso) return '';
-    const d = new Date(iso + 'T00:00:00');
-    return d.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  };
-
-  const gramaje = Math.round(producto.gramaje_unitario);
-  const itemSuffix = producto.sap_item_code.replace(/\D/g, '').slice(-4).padStart(4, '0');
-  const eanBase = `7709898${itemSuffix}${gramaje.toString().padStart(3, '0')}`;
-  const ean = eanBase.slice(0, 12);
-
-  const imprimirEtiqueta = () => {
-    const contenido = etiquetaRef.current?.innerHTML;
-    if (!contenido) return;
-    const win = window.open('', '_blank');
-    if (!win) return;
-    win.document.write(`
-      <html>
-        <head>
-          <title>Etiqueta - ${producto.producto_nombre}</title>
-          <style>
-            body { margin: 0; padding: 10px; font-family: Arial, sans-serif; }
-            @media print { body { margin: 0; } @page { size: 60mm 40mm; margin: 2mm; } }
-          </style>
-        </head>
-        <body onload="window.print(); window.close();">${contenido}</body>
-      </html>
+// ── Etiqueta imprimible ──────────────────────────────────────────────────────
+const Etiqueta: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose }) => {
+  const imprimir = () => {
+    const w = window.open('', '_blank', 'width=400,height=220');
+    if (!w) return;
+    w.document.write(`
+      <html><head><title>Etiqueta</title>
+      <style>
+        @page { size: 10cm 5cm; margin: 0; }
+        body { font-family: Arial, sans-serif; font-size: 7pt; margin: 0; padding: 4mm; width: 10cm; height: 5cm; box-sizing: border-box; }
+        .nombre { font-size: 10pt; font-weight: bold; margin-bottom: 1mm; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1mm; }
+        .lbl { font-weight: bold; }
+        .sep { border-top: 0.5pt solid #333; margin: 1mm 0; }
+        .footer { font-size: 6pt; color: #555; margin-top: 1mm; }
+      </style></head><body>
+      <div class="nombre">${data.nombre_producto}</div>
+      <div class="grid">
+        <div><span class="lbl">Peso neto:</span> ${data.peso_neto_txt}</div>
+        <div><span class="lbl">Vence:</span> ${data.fecha_vencimiento ? new Date(data.fecha_vencimiento + 'T12:00').toLocaleDateString('es-CO') : '--'}</div>
+      </div>
+      <div class="sep"></div>
+      <div><span class="lbl">Ingredientes:</span> ${data.ingredientes_txt || 'N/D'}</div>
+      <div><span class="lbl">Alergenos:</span> ${data.alergenos_txt || 'N/D'}</div>
+      <div><span class="lbl">Conservacion:</span> ${data.condiciones_txt}</div>
+      <div class="sep"></div>
+      <div class="footer">
+        ${data.fabricante_txt}
+        ${data.registro_invima ? ` | Reg. INVIMA: ${data.registro_invima}` : ''}
+        ${data.lote ? ` | Lote: ${data.lote}` : ''}
+      </div>
+      </body></html>
     `);
-    win.document.close();
+    w.document.close();
+    w.focus();
+    setTimeout(() => { w.print(); w.close(); }, 300);
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-auto max-h-screen" onClick={e => e.stopPropagation()}>
-        <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-          <h2 className="text-lg font-bold text-gray-900">Etiqueta de Producto</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="font-bold text-lg">Etiqueta INVIMA</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-xl">&times;</button>
         </div>
-
-        <div className="p-6 space-y-6">
-          {/* Preview etiqueta */}
-          <div className="flex justify-center">
-            <div ref={etiquetaRef} style={{ width: '250px', border: '2px solid #1a1a1a', borderRadius: '8px', padding: '10px', fontFamily: 'Arial, sans-serif', background: '#fff' }}>
-              <div style={{ textAlign: 'center', borderBottom: '1px solid #eee', paddingBottom: '6px', marginBottom: '6px' }}>
-                <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#8B4513', letterSpacing: '2px' }}>LA ARTESA</div>
-                <div style={{ fontSize: '8px', color: '#666', letterSpacing: '1px' }}>PANADERÍA ARTESANAL</div>
-              </div>
-              <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#1a1a1a', marginBottom: '4px', lineHeight: '1.2' }}>
-                {producto.producto_nombre}
-              </div>
-              <div style={{ fontSize: '9px', color: '#555', marginBottom: '6px' }}>
-                {producto.presentacion} | {producto.gramaje_unitario}g
-              </div>
-              <div style={{ background: '#f5f0e4', borderRadius: '4px', padding: '4px 6px', marginBottom: '6px' }}>
-                <div style={{ fontSize: '8px', color: '#666', marginBottom: '2px' }}>
-                  <span style={{ fontWeight: 'bold' }}>LOTE:</span> {lote}
-                </div>
-                <div style={{ fontSize: '8px', color: '#666' }}>
-                  <span style={{ fontWeight: 'bold' }}>VENCE:</span> {formatFecha(fechaVencimiento)}
-                </div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-                <BarcodeDisplay code={ean} />
-                <div style={{ fontSize: '8px', color: '#333', letterSpacing: '2px' }}>{ean}</div>
-              </div>
-            </div>
+        <div className="border-2 border-dashed border-gray-300 rounded p-3 text-xs mb-4" style={{ fontFamily: 'Arial' }}>
+          <div className="font-bold text-sm mb-1">{data.nombre_producto}</div>
+          <div className="grid grid-cols-2 gap-1 text-xs">
+            <div><span className="font-bold">Peso neto:</span> {data.peso_neto_txt}</div>
+            <div><span className="font-bold">Vence:</span> {data.fecha_vencimiento ? new Date(data.fecha_vencimiento + 'T12:00').toLocaleDateString('es-CO') : '--'}</div>
           </div>
-
-          {/* Info del código */}
-          <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-600">
-            <p><strong>Código EAN (simulado):</strong> {ean}</p>
-            <p className="text-xs text-gray-400 mt-1">Nota: El dígito verificador se calcula en producción con librería real.</p>
+          <hr className="my-1 border-gray-300" />
+          <div className="text-xs"><span className="font-bold">Ingredientes:</span> {data.ingredientes_txt || 'N/D'}</div>
+          <div className="text-xs"><span className="font-bold">Alergenos:</span> {data.alergenos_txt || 'N/D'}</div>
+          <div className="text-xs"><span className="font-bold">Conservacion:</span> {data.condiciones_txt}</div>
+          <hr className="my-1 border-gray-300" />
+          <div className="text-xs text-gray-500">
+            {data.fabricante_txt}
+            {data.registro_invima && ` | Reg. INVIMA: ${data.registro_invima}`}
+            {data.lote && ` | Lote: ${data.lote}`}
           </div>
-
-          {/* Acciones */}
-          <div className="flex gap-3">
-            <button
-              onClick={imprimirEtiqueta}
-              className="flex-1 bg-gray-800 hover:bg-gray-900 text-white font-semibold py-3 rounded-lg transition-colors"
-            >
-              🖨️ Imprimir Etiqueta
-            </button>
-            <button onClick={onClose} className="px-6 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700 font-medium">
-              Cerrar
-            </button>
-          </div>
+        </div>
+        {!data.ingredientes_txt && (
+          <p className="text-amber-600 text-xs mb-3">Sin ingredientes configurados. Configure en Configuracion &gt; Costos &gt; Etiquetas.</p>
+        )}
+        <div className="flex gap-2">
+          <button onClick={imprimir} className="flex-1 bg-blue-600 text-white py-2 rounded hover:bg-blue-700 font-medium">
+            Imprimir etiqueta
+          </button>
+          <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50">
+            Cerrar
+          </button>
         </div>
       </div>
     </div>
   );
 };
 
-// ─────────────────────────────────────────────
-// Componente Principal
-// ─────────────────────────────────────────────
-export const EmpaqueMasa: React.FC = () => {
-  const { masaId } = useParams<{ masaId: string }>();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
+// ── Modal MO ─────────────────────────────────────────────────────────────────
+const ModalMO: React.FC<{
+  masaId: number; fase: string; tiposMO: any[];
+  onClose: () => void; onSave: () => void;
+}> = ({ masaId, fase, tiposMO, onClose, onSave }) => {
+  const [tipoId, setTipoId] = useState('');
+  const [horas, setHoras] = useState('');
+  const [obs, setObs] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
 
-  const [fechaVencimiento, setFechaVencimiento] = useState('');
-  const [observaciones, setObservaciones] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
-  const [etiquetaProducto, setEtiquetaProducto] = useState<ProductoEmpaque | null>(null);
+  const tipo = tiposMO.find(t => String(t.id) === tipoId);
+  const costo = tipo && horas ? parseFloat(tipo.costo_hora) * parseFloat(horas) : 0;
 
-  // Estado local de unidades por producto (key = producto.id)
-  const [unidadesMap, setUnidadesMap] = useState<Record<number, { empacadas: string; merma: string }>>({});
-
-  const { data, isLoading, error } = useQuery<EmpaqueData>({
-    queryKey: ['empaque', masaId],
-    queryFn: async () => {
-      const res = await fetch(`/api/empaque/${masaId}`, { headers: { Authorization: `Bearer ${getToken()}` } });
-      const d = await res.json();
-      if (!d.success) throw new Error(d.message || 'Error al cargar empaque');
-      return d.data;
-    },
-    enabled: !!masaId,
-  });
-
-  // Inicializar map cuando cargan los datos
-  React.useEffect(() => {
-    if (!data?.productos) return;
-    const inicial: Record<number, { empacadas: string; merma: string }> = {};
-    data.productos.forEach(p => {
-      inicial[p.id] = {
-        empacadas: String(p.unidades_empacadas ?? p.unidades_ajustadas ?? p.unidades_pedidas ?? 0),
-        merma: String(p.unidades_merma ?? 0),
-      };
-    });
-    setUnidadesMap(inicial);
-    if (data.registro_empaque?.fecha_vencimiento) {
-      setFechaVencimiento(data.registro_empaque.fecha_vencimiento.slice(0, 10));
-    }
-  }, [data]);
-
-  const iniciarMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(`/api/empaque/${masaId}/iniciar`, {
+  const handleSave = async () => {
+    if (!tipoId || !horas) return setErr('Seleccione tipo y horas');
+    setSaving(true);
+    try {
+      await api(`/config/mano-obra/masa/${masaId}`, {
         method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ fecha_vencimiento: fechaVencimiento, observaciones })
+        body: JSON.stringify({ fase, tipo_mo_id: Number(tipoId), horas: parseFloat(horas), observaciones: obs }),
       });
-      const d = await res.json();
-      if (!d.success) throw new Error(d.message);
-      return d;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['empaque', masaId] });
-      setErrorMsg('');
-    },
-    onError: (e: any) => setErrorMsg(e.message)
-  });
-
-  const actualizarDetalleMutation = useMutation({
-    mutationFn: async ({ productoId, empacadas, merma }: { productoId: number; empacadas: number; merma: number }) => {
-      const res = await fetch(`/api/empaque/${masaId}/detalle/${productoId}`, {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({ unidades_empacadas: empacadas, unidades_merma: merma })
-      });
-      const d = await res.json();
-      if (!d.success) throw new Error(d.message);
-      return d;
-    },
-    onError: (e: any) => setErrorMsg(e.message)
-  });
-
-  const completarMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(`/api/empaque/${masaId}/completar`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ observaciones })
-      });
-      const d = await res.json();
-      if (!d.success) throw new Error(d.message);
-      return d;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['fases', masaId] });
-      navigate(`/planificacion/masas/${masaId}`);
-    },
-    onError: (e: any) => setErrorMsg(e.message)
-  });
-
-  const guardarDetalle = (productoId: number) => {
-    const vals = unidadesMap[productoId];
-    if (!vals) return;
-    actualizarDetalleMutation.mutate({
-      productoId,
-      empacadas: parseInt(vals.empacadas) || 0,
-      merma: parseInt(vals.merma) || 0,
-    });
+      onSave();
+      onClose();
+    } catch (e: any) { setErr(e.message); }
+    finally { setSaving(false); }
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex justify-center items-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-500"></div>
-      </div>
-    );
-  }
-
-  if (error || !data) {
-    return (
-      <div className="p-6">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-red-800">{(error as any)?.message || 'Error al cargar datos de empaque'}</p>
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">
+        <h3 className="font-bold text-lg mb-4">Registrar Mano de Obra — {fase}</h3>
+        {err && <p className="text-red-600 text-sm mb-2">{err}</p>}
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium mb-1">Tipo de operario</label>
+            <select value={tipoId} onChange={e => setTipoId(e.target.value)}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+              <option value="">Seleccionar...</option>
+              {tiposMO.map(t => (
+                <option key={t.id} value={t.id}>{t.nombre} — ${COP(t.costo_hora)}/h</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Horas trabajadas</label>
+            <input type="number" min="0.25" step="0.25" value={horas}
+              onChange={e => setHoras(e.target.value)}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm" />
+          </div>
+          {costo > 0 && (
+            <div className="bg-blue-50 rounded p-2 text-sm text-blue-800">
+              Costo calculado: <strong>${COP(costo)}</strong>
+            </div>
+          )}
+          <div>
+            <label className="block text-sm font-medium mb-1">Observaciones (opcional)</label>
+            <input type="text" value={obs} onChange={e => setObs(e.target.value)}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm" />
+          </div>
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button onClick={handleSave} disabled={saving}
+            className="flex-1 bg-green-600 text-white py-2 rounded hover:bg-green-700 disabled:opacity-50 font-medium">
+            {saving ? 'Guardando...' : 'Guardar'}
+          </button>
+          <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50">
+            Cancelar
+          </button>
         </div>
       </div>
-    );
-  }
+    </div>
+  );
+};
 
-  const { masa, productos, registro_empaque } = data;
-  const empaqueIniciado = !!registro_empaque;
-  const empaqueCompletado = registro_empaque?.estado === 'COMPLETADO';
-  const lote = masa.lote_produccion || masa.codigo;
+// ── Componente principal ─────────────────────────────────────────────────────
+export const EmpaqueMasa: React.FC = () => {
+  const qc = useQueryClient();
+
+  const [docNumInput, setDocNumInput] = useState('');
+  const [docNumBuscar, setDocNumBuscar] = useState('');
+  const [etiquetaData, setEtiquetaData] = useState<any>(null);
+  const [modalMO, setModalMO] = useState<{ masaId: number; fase: string } | null>(null);
+  const [detallesEdit, setDetallesEdit] = useState<Record<number, { emp: string; merma: string }>>({});
+  const [fechaVenc, setFechaVenc] = useState('');
+  const [savingEmpaque, setSavingEmpaque] = useState<number | null>(null);
+  const [msg, setMsg] = useState<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
+
+  const mostrarMsg = (tipo: 'ok' | 'err', texto: string) => {
+    setMsg({ tipo, texto });
+    setTimeout(() => setMsg(null), 4000);
+  };
+
+  const { data: ovData, isLoading, error: ovError } = useQuery<{ data: OVData[] }>({
+    queryKey: ['empaque-ov', docNumBuscar],
+    queryFn: () => api(`/empaque/ov/${docNumBuscar}`),
+    enabled: !!docNumBuscar,
+    retry: false,
+  });
+
+  const { data: tiposMOData } = useQuery({
+    queryKey: ['tipos-mo'],
+    queryFn: () => api('/config/mano-obra'),
+  });
+  const tiposMO = tiposMOData?.data || [];
+
+  const ov = ovData?.data?.[0];
+
+  const iniciarMut = useMutation({
+    mutationFn: (masaId: number) => api(`/empaque/${masaId}/iniciar`, {
+      method: 'POST',
+      body: JSON.stringify({ fecha_vencimiento: fechaVenc }),
+    }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['empaque-ov', docNumBuscar] }); mostrarMsg('ok', 'Empaque iniciado'); },
+    onError: (e: any) => mostrarMsg('err', e.message),
+  });
+
+  const guardarDetalle = async (masaId: number, productoId: number) => {
+    const vals = detallesEdit[productoId];
+    if (!vals) return;
+    setSavingEmpaque(productoId);
+    try {
+      await api(`/empaque/${masaId}/detalle/${productoId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          unidades_empacadas: parseInt(vals.emp) || 0,
+          unidades_merma: parseInt(vals.merma) || 0,
+        }),
+      });
+      qc.invalidateQueries({ queryKey: ['empaque-ov', docNumBuscar] });
+      mostrarMsg('ok', 'Guardado');
+    } catch (e: any) { mostrarMsg('err', e.message); }
+    finally { setSavingEmpaque(null); }
+  };
+
+  const completarMut = useMutation({
+    mutationFn: (masaId: number) => api(`/empaque/${masaId}/completar`, {
+      method: 'POST', body: JSON.stringify({}),
+    }),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['empaque-ov', docNumBuscar] });
+      const c = data.data?.costos;
+      if (c) mostrarMsg('ok', `Completado — Costo total: $${COP(c.total)} | $/ud: $${COP(c.unitario)}`);
+    },
+    onError: (e: any) => mostrarMsg('err', e.message),
+  });
+
+  const verEtiqueta = async (masaId: number, productoId: number) => {
+    try {
+      const d = await api(`/empaque/${masaId}/etiqueta/${productoId}`);
+      setEtiquetaData(d.data);
+    } catch (e: any) { mostrarMsg('err', e.message); }
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-5xl mx-auto space-y-6">
+    <div className="p-4 max-w-5xl mx-auto">
+      <h1 className="text-2xl font-bold mb-2 text-gray-800">Empaque</h1>
 
-        {/* Header */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-3 mb-1">
-                <span className="text-2xl">📦</span>
-                <h1 className="text-2xl font-bold text-gray-900">Empaque</h1>
-                <span className="px-2 py-1 bg-amber-100 text-amber-700 text-sm rounded-full font-medium">{masa.tipo}</span>
-              </div>
-              <p className="text-gray-500 text-sm">{masa.codigo} — {masa.nombre}</p>
-              <p className="text-gray-400 text-xs mt-0.5">Lote: <strong className="text-gray-600">{lote}</strong></p>
-            </div>
-            <button onClick={() => navigate(`/planificacion/masas/${masaId}`)} className="text-sm text-gray-500 hover:text-gray-800">
-              ← Volver
-            </button>
-          </div>
+      {msg && (
+        <div className={`mb-4 px-4 py-2 rounded text-sm font-medium ${
+          msg.tipo === 'ok' ? 'bg-green-100 text-green-800 border border-green-200'
+                           : 'bg-red-100 text-red-800 border border-red-200'
+        }`}>
+          {msg.texto}
         </div>
+      )}
 
-        {/* Error */}
-        {errorMsg && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-            <p className="text-red-800 text-sm">⚠️ {errorMsg}</p>
-          </div>
-        )}
+      <Card className="mb-6 p-4">
+        <label className="block text-sm font-semibold text-gray-700 mb-2">
+          Buscar por numero de Orden de Venta SAP
+        </label>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={docNumInput}
+            onChange={e => setDocNumInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && setDocNumBuscar(docNumInput.trim())}
+            placeholder="Ej: 20001"
+            className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400"
+          />
+          <button
+            onClick={() => setDocNumBuscar(docNumInput.trim())}
+            className="bg-blue-600 text-white px-5 py-2 rounded hover:bg-blue-700 font-medium text-sm"
+          >
+            Buscar
+          </button>
+        </div>
+      </Card>
 
-        {/* Empaque completado */}
-        {empaqueCompletado && (
-          <div className="bg-green-50 border border-green-200 rounded-xl p-6">
-            <div className="flex items-center gap-3 mb-3">
-              <span className="text-3xl">✅</span>
+      {isLoading && <p className="text-gray-500 text-sm">Buscando OV {docNumBuscar}...</p>}
+      {ovError && (
+        <div className="bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm">
+          No se encontro la OV <strong>{docNumBuscar}</strong>. Verifique el numero.
+        </div>
+      )}
+
+      {ov && (
+        <div className="space-y-6">
+          {/* Cabecera OV */}
+          <Card className="p-4 border-l-4 border-blue-500">
+            <div className="flex items-start justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-green-800">Empaque completado</h2>
-                <p className="text-green-600 text-sm">Producción finalizada y empacada exitosamente.</p>
+                <h2 className="text-lg font-bold text-gray-800">OV {docNumBuscar}</h2>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  {ov.masa_padre.tipo} — {ov.masa_padre.codigo} — {ov.masa_padre.total_kg.toFixed(2)} kg
+                </p>
               </div>
-            </div>
-            <button onClick={() => navigate(`/planificacion/masas/${masaId}`)} className="bg-green-700 hover:bg-green-800 text-white font-semibold px-6 py-2 rounded-lg transition-colors">
-              Ver detalle de masa →
-            </button>
-          </div>
-        )}
-
-        {/* Formulario inicio de empaque */}
-        {!empaqueIniciado && !empaqueCompletado && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-4">
-            <h2 className="text-lg font-semibold text-gray-800">Iniciar Empaque</h2>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Fecha de vencimiento <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="date"
-                value={fechaVencimiento}
-                onChange={e => setFechaVencimiento(e.target.value)}
-                min={new Date().toISOString().slice(0, 10)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-400"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Observaciones</label>
-              <textarea value={observaciones} onChange={e => setObservaciones(e.target.value)}
-                rows={2} className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none" />
-            </div>
-            <button
-              onClick={() => iniciarMutation.mutate()}
-              disabled={iniciarMutation.isPending || !fechaVencimiento}
-              className="w-full bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-white font-semibold py-3 rounded-lg transition-colors"
-            >
-              {iniciarMutation.isPending ? 'Iniciando...' : '📦 Iniciar Empaque'}
-            </button>
-          </div>
-        )}
-
-        {/* Tabla de productos — visible cuando empaque está iniciado */}
-        {empaqueIniciado && !empaqueCompletado && (
-          <>
-            {/* Info del empaque */}
-            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex items-center gap-3">
-              <div className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></div>
-              <div className="text-sm">
-                <span className="font-medium text-amber-800">Empaque en progreso</span>
-                <span className="text-amber-600 ml-2">
-                  Vence: <strong>{new Date(registro_empaque!.fecha_vencimiento + 'T00:00:00').toLocaleDateString('es-CO')}</strong>
+              {!ov.todas_horneadas ? (
+                <span className="bg-amber-100 text-amber-800 text-xs font-medium px-2 py-1 rounded">
+                  Pendiente de hornear
                 </span>
-              </div>
+              ) : (
+                <span className="bg-green-100 text-green-800 text-xs font-medium px-2 py-1 rounded">
+                  Lista para empacar
+                </span>
+              )}
             </div>
 
-            {/* Tabla de productos */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-              <div className="p-5 border-b border-gray-100">
-                <h2 className="text-lg font-semibold text-gray-800">Productos a empacar</h2>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="text-left px-4 py-3 text-gray-500 font-medium">Producto</th>
-                      <th className="text-center px-3 py-3 text-gray-500 font-medium">Pedido</th>
-                      <th className="text-center px-3 py-3 text-gray-500 font-medium">Ajustado</th>
-                      <th className="text-center px-3 py-3 text-gray-500 font-medium">Paquetes</th>
-                      <th className="text-center px-3 py-3 text-gray-500 font-medium">Empacadas</th>
-                      <th className="text-center px-3 py-3 text-gray-500 font-medium">Merma</th>
-                      <th className="text-center px-3 py-3 text-gray-500 font-medium">Acciones</th>
+            <div className="mt-3 grid grid-cols-2 md:grid-cols-3 gap-2">
+              {ov.sub_masas.map(sm => (
+                <div key={sm.id} className={`rounded p-2 text-xs border ${
+                  sm.estado_horneado === 'COMPLETADA'
+                    ? 'bg-green-50 border-green-200 text-green-800'
+                    : 'bg-gray-50 border-gray-200 text-gray-500'
+                }`}>
+                  <div className="font-mono font-bold">{sm.codigo_masa}</div>
+                  <div>HORNEADO: {sm.estado_horneado === 'COMPLETADA' ? 'OK' : sm.estado_horneado}</div>
+                  <div>EMPAQUE: {sm.estado_empaque || 'BLOQUEADA'}</div>
+                  <div>{sm.total_kilos_con_merma} kg</div>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* Fecha de vencimiento */}
+          {ov.todas_horneadas && (
+            <Card className="p-4">
+              <label className="block text-sm font-semibold text-gray-700 mb-1">
+                Fecha de vencimiento del lote
+              </label>
+              <input type="date" value={fechaVenc} onChange={e => setFechaVenc(e.target.value)}
+                className="border border-gray-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400" />
+            </Card>
+          )}
+
+          {/* Productos por sub-masa */}
+          {ov.sub_masas.map(sm => {
+            const prodsSM = ov.productos.filter(p => p.masa_id === sm.id);
+            const tieneEmpaque = prodsSM.some(p => p.empaque_id !== null);
+            const empaqueCompleto = prodsSM.some(p => p.empaque_estado === 'COMPLETADO');
+
+            return (
+              <Card key={sm.id} className="p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-bold text-gray-800">
+                    Tanda: <span className="font-mono text-blue-700">{sm.codigo_masa}</span>
+                    <span className="ml-2 text-sm text-gray-500 font-normal">({sm.total_kilos_con_merma} kg)</span>
+                  </h3>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setModalMO({ masaId: sm.id, fase: 'EMPAQUE' })}
+                      className="text-xs px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 text-gray-600"
+                    >
+                      MO
+                    </button>
+                    {!tieneEmpaque && sm.estado_horneado === 'COMPLETADA' && (
+                      <button
+                        onClick={() => {
+                          if (!fechaVenc) return mostrarMsg('err', 'Ingrese fecha de vencimiento');
+                          iniciarMut.mutate(sm.id);
+                        }}
+                        className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                      >
+                        Iniciar empaque
+                      </button>
+                    )}
+                    {tieneEmpaque && !empaqueCompleto && (
+                      <button
+                        onClick={() => completarMut.mutate(sm.id)}
+                        disabled={completarMut.isPending}
+                        className="text-xs px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                      >
+                        {completarMut.isPending ? 'Completando...' : 'Completar empaque'}
+                      </button>
+                    )}
+                    {empaqueCompleto && (
+                      <span className="text-xs px-3 py-1 bg-green-100 text-green-800 rounded font-medium">
+                        Empacado
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm border-collapse">
+                    <thead>
+                      <tr className="bg-gray-50 text-gray-600 text-xs">
+                        <th className="text-left p-2 border-b">Producto</th>
+                        <th className="text-right p-2 border-b">Programadas</th>
+                        <th className="text-right p-2 border-b">Empacadas</th>
+                        <th className="text-right p-2 border-b">Merma</th>
+                        <th className="text-right p-2 border-b">Costo MP</th>
+                        <th className="p-2 border-b"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {prodsSM.map(p => {
+                        const edit = detallesEdit[p.id] ?? {
+                          emp: String(p.unidades_empacadas ?? p.unidades_ajustadas ?? ''),
+                          merma: String(p.unidades_merma ?? '0'),
+                        };
+                        const faltantes = p.unidades_ajustadas - (parseInt(edit.emp) || 0);
+                        return (
+                          <tr key={p.id} className="border-b hover:bg-gray-50">
+                            <td className="p-2">
+                              <div className="font-medium">{p.producto_nombre}</div>
+                              <div className="text-xs text-gray-400">{p.sap_item_code} · {p.presentacion}</div>
+                            </td>
+                            <td className="p-2 text-right font-mono">{p.unidades_ajustadas}</td>
+                            <td className="p-2 text-right">
+                              {tieneEmpaque && !empaqueCompleto ? (
+                                <input
+                                  type="number" min="0"
+                                  value={edit.emp}
+                                  onChange={e => setDetallesEdit(prev => ({
+                                    ...prev, [p.id]: { ...edit, emp: e.target.value }
+                                  }))}
+                                  className="w-20 border border-gray-300 rounded px-2 py-1 text-right text-sm"
+                                />
+                              ) : (
+                                <span className={`font-mono ${faltantes > 0 ? 'text-red-600 font-bold' : 'text-green-700'}`}>
+                                  {p.unidades_empacadas ?? '-'}
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-2 text-right">
+                              {tieneEmpaque && !empaqueCompleto ? (
+                                <input
+                                  type="number" min="0"
+                                  value={edit.merma}
+                                  onChange={e => setDetallesEdit(prev => ({
+                                    ...prev, [p.id]: { ...edit, merma: e.target.value }
+                                  }))}
+                                  className="w-16 border border-gray-300 rounded px-2 py-1 text-right text-sm"
+                                />
+                              ) : (
+                                <span className="font-mono text-orange-600">{p.unidades_merma ?? '-'}</span>
+                              )}
+                            </td>
+                            <td className="p-2 text-right text-xs text-gray-600">
+                              ${COP(parseFloat(p.costo_mp_total_prod?.toString() || '0'))}
+                            </td>
+                            <td className="p-2 text-right">
+                              <div className="flex gap-1 justify-end">
+                                {tieneEmpaque && !empaqueCompleto && (
+                                  <button
+                                    onClick={() => guardarDetalle(p.masa_id, p.id)}
+                                    disabled={savingEmpaque === p.id}
+                                    className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                                  >
+                                    {savingEmpaque === p.id ? '...' : 'Guardar'}
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => verEtiqueta(p.masa_id, p.id)}
+                                  className="text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-50"
+                                  title="Ver etiqueta INVIMA"
+                                >
+                                  Etiqueta
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {empaqueCompleto && prodsSM.some(p => (p.unidades_ajustadas - (p.unidades_empacadas ?? 0)) > 0) && (
+                  <div className="mt-2 bg-red-50 border border-red-200 rounded p-2 text-xs text-red-700">
+                    Hay unidades faltantes en esta tanda
+                  </div>
+                )}
+              </Card>
+            );
+          })}
+
+          {/* Materiales de empaque */}
+          {ov.materiales_empaque.length > 0 && (
+            <Card className="p-4">
+              <h3 className="font-bold text-gray-800 mb-3">Materiales de empaque (BOM)</h3>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-600 text-xs">
+                    <th className="text-left p-2 border-b">Material</th>
+                    <th className="text-left p-2 border-b">Producto padre</th>
+                    <th className="text-right p-2 border-b">Cant/ud</th>
+                    <th className="text-right p-2 border-b">Stock</th>
+                    <th className="text-right p-2 border-b">Precio unit.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ov.materiales_empaque.map((m, i) => (
+                    <tr key={i} className="border-b hover:bg-gray-50">
+                      <td className="p-2">
+                        <div className="font-medium">{m.item_name_comp}</div>
+                        <div className="text-xs text-gray-400 font-mono">{m.item_code_comp}</div>
+                      </td>
+                      <td className="p-2 text-xs text-gray-500 font-mono">{m.item_code_padre}</td>
+                      <td className="p-2 text-right font-mono">{m.cantidad_por_unidad} {m.uom}</td>
+                      <td className={`p-2 text-right font-mono text-xs ${m.stock_disponible < 10 ? 'text-red-600 font-bold' : 'text-gray-700'}`}>
+                        {m.stock_disponible} {m.uom}
+                        {m.stock_disponible < 10 && ' (bajo)'}
+                      </td>
+                      <td className="p-2 text-right text-xs">${COP(parseFloat(m.precio_unitario.toString()))}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {productos.map((p) => {
-                      const vals = unidadesMap[p.id] || { empacadas: '0', merma: '0' };
-                      return (
-                        <tr key={p.id} className="border-t border-gray-50 hover:bg-gray-50/50">
-                          <td className="px-4 py-3">
-                            <div className="font-medium text-gray-800">{p.producto_nombre}</div>
-                            <div className="text-xs text-gray-400">
-                              {p.sap_item_code} · {p.gramaje_unitario}g
-                              {p.sap_doc_num && <span className="ml-1 text-blue-400">OV#{p.sap_doc_num}</span>}
-                            </div>
-                          </td>
-                          <td className="text-center px-3 py-3 text-gray-600">{p.unidades_pedidas}</td>
-                          <td className="text-center px-3 py-3 text-gray-800 font-medium">{p.unidades_ajustadas || p.unidades_pedidas}</td>
-                          <td className="text-center px-3 py-3 text-gray-600">{p.cantidad_paquetes}</td>
-                          <td className="text-center px-3 py-3">
-                            <input
-                              type="number"
-                              min="0"
-                              value={vals.empacadas}
-                              onChange={e => setUnidadesMap(prev => ({ ...prev, [p.id]: { ...prev[p.id], empacadas: e.target.value } }))}
-                              className="w-20 border border-gray-200 rounded px-2 py-1 text-center focus:outline-none focus:ring-1 focus:ring-amber-400"
-                            />
-                          </td>
-                          <td className="text-center px-3 py-3">
-                            <input
-                              type="number"
-                              min="0"
-                              value={vals.merma}
-                              onChange={e => setUnidadesMap(prev => ({ ...prev, [p.id]: { ...prev[p.id], merma: e.target.value } }))}
-                              className="w-20 border border-gray-200 rounded px-2 py-1 text-center focus:outline-none focus:ring-1 focus:ring-amber-400"
-                            />
-                          </td>
-                          <td className="text-center px-3 py-3">
-                            <div className="flex items-center justify-center gap-2">
-                              <button
-                                onClick={() => guardarDetalle(p.id)}
-                                disabled={actualizarDetalleMutation.isPending}
-                                className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1 rounded transition-colors"
-                              >
-                                Guardar
-                              </button>
-                              <button
-                                onClick={() => setEtiquetaProducto(p)}
-                                className="text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 px-2 py-1 rounded transition-colors"
-                              >
-                                🏷️ Etiqueta
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Panel de completar */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-4">
-              <h2 className="text-lg font-semibold text-gray-800">Completar Empaque</h2>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Observaciones finales</label>
-                <textarea value={observaciones} onChange={e => setObservaciones(e.target.value)}
-                  rows={2} className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none" />
-              </div>
+                  ))}
+                </tbody>
+              </table>
               <button
-                onClick={() => completarMutation.mutate()}
-                disabled={completarMutation.isPending}
-                className="w-full bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white font-semibold py-3 rounded-lg transition-colors"
+                onClick={() => api('/config/sync-empaque', { method: 'POST' })
+                  .then(() => { qc.invalidateQueries({ queryKey: ['empaque-ov', docNumBuscar] }); mostrarMsg('ok', 'Precios sincronizados desde SAP'); })
+                  .catch((e: any) => mostrarMsg('err', e.message))}
+                className="mt-3 text-xs px-3 py-1.5 border border-blue-300 text-blue-600 rounded hover:bg-blue-50"
               >
-                {completarMutation.isPending ? 'Completando...' : '✅ Completar Empaque y Finalizar Producción'}
+                Sincronizar precios desde SAP
               </button>
-            </div>
-          </>
-        )}
-      </div>
+            </Card>
+          )}
 
-      {/* Modal etiqueta */}
-      {etiquetaProducto && (
-        <ModalEtiqueta
-          producto={etiquetaProducto}
-          lote={lote}
-          fechaVencimiento={registro_empaque?.fecha_vencimiento || fechaVencimiento}
-          onClose={() => setEtiquetaProducto(null)}
+          {/* Resumen de costos */}
+          <Card className="p-4 border-l-4 border-green-500">
+            <h3 className="font-bold text-gray-800 mb-3">Resumen de costos consolidado</h3>
+            <div className="space-y-1 text-sm">
+              {([
+                ['Materias primas (MP)', ov.resumen_costos.costo_mp],
+                ['Mano de obra (MO)', ov.resumen_costos.costo_mo],
+                ['Materiales de empaque', ov.resumen_costos.costo_empaque],
+                ['Costos indirectos', ov.resumen_costos.costo_indirecto],
+              ] as [string, number][]).map(([label, val]) => (
+                <div key={label} className="flex justify-between py-1 border-b border-gray-100">
+                  <span className="text-gray-600">{label}</span>
+                  <span className="font-mono">${COP(val)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between py-2 font-bold text-gray-800">
+                <span>COSTO TOTAL</span>
+                <span className="font-mono text-green-700">${COP(ov.resumen_costos.costo_total)}</span>
+              </div>
+              {ov.productos.length > 0 && ov.resumen_costos.costo_total > 0 && (
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>Costo estimado por unidad</span>
+                  <span className="font-mono">
+                    ${COP(ov.resumen_costos.costo_total /
+                      ov.productos.reduce((s, p) => s + (p.unidades_ajustadas || 0), 0))}
+                  </span>
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-gray-400 mt-2">
+              * Los costos finales se calculan al completar el empaque de cada tanda.
+            </p>
+          </Card>
+        </div>
+      )}
+
+      {modalMO && (
+        <ModalMO
+          masaId={modalMO.masaId}
+          fase={modalMO.fase}
+          tiposMO={tiposMO}
+          onClose={() => setModalMO(null)}
+          onSave={() => qc.invalidateQueries({ queryKey: ['empaque-ov', docNumBuscar] })}
         />
+      )}
+
+      {etiquetaData && (
+        <Etiqueta data={etiquetaData} onClose={() => setEtiquetaData(null)} />
       )}
     </div>
   );
