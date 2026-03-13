@@ -245,10 +245,9 @@ const updateIngrediente = async (req, res, next) => {
  */
 // Descuenta inventario local tras confirmación exitosa de SAP
 const descontarInventarioLocal = async (rows, masaId) => {
+  // 1. Descontar stock general por ítem en sap_inventario_mp
   for (const ing of rows) {
     const cantidadKg = parseFloat(ing.peso_real) / 1000;
-    // sap_lotes_mp ya fue descontado al guardar cada ingrediente (pesaje_lotes_consumo)
-    // Aquí solo actualizamos el stock general por ítem
     await db.query(
       `UPDATE sap_inventario_mp
        SET stock_almp  = GREATEST(0, stock_almp - $1),
@@ -257,7 +256,23 @@ const descontarInventarioLocal = async (rows, masaId) => {
       [cantidadKg, ing.ingrediente_sap_code]
     );
   }
-  logger.info(`Inventario local descontado para masa ${masaId}`);
+
+  // 2. Descontar cantidad por lote en sap_lotes_mp usando pesaje_lotes_consumo
+  const lotesResult = await db.query(
+    `SELECT item_code, batch, cantidad_kg FROM pesaje_lotes_consumo WHERE masa_id = $1`,
+    [masaId]
+  );
+  for (const lote of lotesResult.rows) {
+    await db.query(
+      `UPDATE sap_lotes_mp
+       SET cantidad_disponible = GREATEST(0, cantidad_disponible - $1),
+           ultimo_sync         = NOW()
+       WHERE item_code = $2 AND batch = $3`,
+      [parseFloat(lote.cantidad_kg), lote.item_code, lote.batch]
+    );
+  }
+
+  logger.info(`Inventario local descontado para masa ${masaId}: ${rows.length} ítems, ${lotesResult.rows.length} lotes`);
 };
 
 // Envía InventoryGenExit a SAP. Retorna { success, docEntry, rows } o { success: false, error }
