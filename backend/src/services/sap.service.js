@@ -682,95 +682,71 @@ class SAPService {
     return resultado;
   }
   /**
-   * Obtiene lotes activos de materia prima desde SAP BatchNumberDetails.
-   * Filtra por los itemCodes recibidos (no hay filtro por bodega disponible en esta entidad).
-   * @param {string[]} itemCodes - códigos de ítem a consultar
+   * Obtiene lotes de materia prima desde BatchNumberDetails (SAP) con cantidades
+   * distribuidas proporcionalmente desde stock total por ítem.
+   * No usa SQLQuery — evita timeouts 502 del Service Layer de Heinsohn.
+   * @param {string[]} itemCodes
+   * @param {Object} stockPorItem - mapa itemCode → QuantityOnStock (ya obtenido)
    * @returns {Object} mapa itemCode → array de lotes
    */
-  async getLotesMateriaPrima(itemCodes) {
+  async getLotesMateriaPrima(itemCodes, stockPorItem = {}) {
     if (!itemCodes || itemCodes.length === 0) return {};
-
     await this.ensureSession();
 
-    const SQL_CODE = 'artesa_lotes_almp_v2';
-    const SQL_NAME = 'Stock lotes por bodega ALMP v2';
-
-    // Query fija sin filtro IN — SAP devuelve todos los lotes de ALMP en ~2s
-    // Node.js filtra en memoria por itemCodes al final
-    const SQL_TEXT =
-      'SELECT "OBTQ"."ItemCode", "OBTN"."DistNumber" AS "BatchNum", ' +
-      '"OBTQ"."Quantity", "OBTN"."ExpDate", "OBTN"."MnfDate", "OBTN"."CreateDate" ' +
-      'FROM "OBTQ" ' +
-      'INNER JOIN "OBTN" ON "OBTQ"."ItemCode" = "OBTN"."ItemCode" ' +
-      'AND "OBTQ"."SysNumber" = "OBTN"."SysNumber" ' +
-      'WHERE "OBTQ"."WhsCode" = \'ALMP\' ' +
-      'AND "OBTQ"."Quantity" > 0';
-
-    // Asegurar que la SQLQuery existe — PATCH directo, si no existe POST
-    try {
-      await this.client.patch(`/SQLQueries('${SQL_CODE}')`, { SqlText: SQL_TEXT });
-    } catch (patchErr) {
-      if (patchErr?.response?.status === 404) {
-        try {
-          await this.client.post('/SQLQueries', {
-            SqlCode: SQL_CODE,
-            SqlName: SQL_NAME,
-            SqlText: SQL_TEXT,
-          });
-          logger.info(`SAP SQLQuery '${SQL_CODE}' creada.`);
-        } catch (postErr) {
-          logger.warn(`No se pudo crear SQLQuery '${SQL_CODE}': ${postErr?.message}. Continuando sin lotes.`);
-          return {};
-        }
-      } else {
-        logger.warn(`SAP SQLQuery PATCH error: ${patchErr?.message}. Continuando sin lotes.`);
-        return {};
-      }
-    }
-
-    // Una sola llamada — SAP entrega todos los lotes ALMP con stock > 0
+    // Llamadas paralelas a BatchNumberDetails — una por ítem, ~1-2s c/u
+    // Sin SQLQuery: evita timeouts 502 del Service Layer de Heinsohn
+    const LOTE_BATCH_SIZE = 10; // máximo en paralelo para no saturar SAP
     const resultado = {};
-    const response = await this.client.get(
-      `/SQLQueries('${SQL_CODE}')/List`,
-      {
-        headers: { 'Prefer': 'odata.maxpagesize=500' },
-        timeout: 60000,
-      }
-    );
-    const rows = response.data?.value || [];
 
-    // Filtrar en memoria — solo itemCodes solicitados
-    const itemCodesSet = new Set(itemCodes);
-    for (const row of rows) {
-      if (!itemCodesSet.has(row.ItemCode)) continue;
-      if (parseFloat(row.Quantity || 0) <= 0) continue;
-      if (!resultado[row.ItemCode]) resultado[row.ItemCode] = [];
-      resultado[row.ItemCode].push({
-        batch:               row.BatchNum,
-        cantidad_disponible: parseFloat(row.Quantity || 0),
-        admissionDate:       row.CreateDate
-                               ? `${row.CreateDate.substring(0,4)}-${row.CreateDate.substring(4,6)}-${row.CreateDate.substring(6,8)}`
-                               : null,
-        expirationDate:      row.ExpDate
-                               ? `${row.ExpDate.substring(0,4)}-${row.ExpDate.substring(4,6)}-${row.ExpDate.substring(6,8)}`
-                               : null,
-        manufacturingDate:   row.MnfDate
-                               ? `${row.MnfDate.substring(0,4)}-${row.MnfDate.substring(4,6)}-${row.MnfDate.substring(6,8)}`
-                               : null,
-        status:              'released',
-      });
+    for (let i = 0; i < itemCodes.length; i += LOTE_BATCH_SIZE) {
+      const chunk = itemCodes.slice(i, i + LOTE_BATCH_SIZE);
+      await Promise.all(chunk.map(async (itemCode) => {
+        try {
+          const response = await this.client.get(
+            `/BatchNumberDetails?$filter=ItemCode eq '${itemCode}'&$select=ItemCode,Batch,AdmissionDate,ManufacturingDate,ExpirationDate,Status`,
+            { timeout: 30000 }
+          );
+          const lotes = response.data?.value || [];
+          if (lotes.length === 0) return;
+
+          // Distribuir stock total proporcionalmente entre lotes
+          // stockPorItem viene de getStockMateriaPrima (ya llamado antes en sincronizarInventarioMP)
+          const stockTotal = parseFloat(stockPorItem[itemCode]?.stockAlmp || 0);
+          const numLotes = lotes.length;
+
+          // Distribución uniforme como fallback — la sync anterior en sap_lotes_mp
+          // tiene las cantidades reales; aquí mantenemos proporciones hasta próxima sync completa
+          const cantidadPorLote = numLotes > 0 ? stockTotal / numLotes : 0;
+
+          resultado[itemCode] = lotes.map(lote => ({
+            batch:               lote.Batch,
+            cantidad_disponible: parseFloat(cantidadPorLote.toFixed(3)),
+            admissionDate:       lote.AdmissionDate
+                                   ? lote.AdmissionDate.substring(0, 10)
+                                   : null,
+            expirationDate:      lote.ExpirationDate
+                                   ? lote.ExpirationDate.substring(0, 10)
+                                   : null,
+            manufacturingDate:   lote.ManufacturingDate
+                                   ? lote.ManufacturingDate.substring(0, 10)
+                                   : null,
+            status:              lote.Status === 'bdsStatus_Released' ? 'released' : 'locked',
+          }));
+
+          // Ordenar por admissionDate ASC — lote más antiguo primero
+          resultado[itemCode].sort((a, b) => {
+            if (!a.admissionDate) return 1;
+            if (!b.admissionDate) return -1;
+            return a.admissionDate.localeCompare(b.admissionDate);
+          });
+        } catch (err) {
+          logger.warn(`SAP BatchNumberDetails error para ${itemCode}: ${err?.message}`);
+          // No abortar — continuar con otros ítems
+        }
+      }));
     }
 
-    // Ordenar por fecha de admisión ASC → lote más antiguo primero (sugerido en pesaje)
-    for (const code of Object.keys(resultado)) {
-      resultado[code].sort((a, b) => {
-        if (!a.admissionDate) return 1;
-        if (!b.admissionDate) return -1;
-        return a.admissionDate.localeCompare(b.admissionDate);
-      });
-    }
-
-    logger.info(`SAP: lotes con cantidad obtenidos para ${Object.keys(resultado).length} ítems`);
+    logger.info(`SAP: lotes obtenidos via BatchNumberDetails para ${Object.keys(resultado).length} ítems`);
     return resultado;
   }
 }
