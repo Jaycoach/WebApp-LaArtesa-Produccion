@@ -1,68 +1,48 @@
 /**
- * Rutas para configuración del sistema
+ * config.routes.js — ARTESA
+ * Rutas de configuración del sistema
  */
-
 const express = require('express');
 const router = express.Router();
-const configController = require('../controllers/config.controller');
+const c = require('../controllers/config.controller');
 const { verifyToken } = require('../middleware/auth');
 const { checkRole } = require('../middleware/roleCheck');
 
-/**
- * Todas las rutas requieren autenticación
- */
 router.use(verifyToken);
 
-/**
- * @route   GET /api/config/factor-absorcion
- * @desc    Obtener factor de absorción
- * @access  Private
- */
-router.get('/factor-absorcion', configController.getFactorAbsorcion);
+// Factor absorción
+router.get('/factor-absorcion',              c.getFactorAbsorcion);
+router.put('/factor-absorcion',  checkRole(['admin']), c.updateFactorAbsorcion);
 
-/**
- * @route   PUT /api/config/factor-absorcion
- * @desc    Actualizar factor de absorción
- * @access  Private (Admin only)
- */
-router.put('/factor-absorcion', checkRole(['admin']), configController.updateFactorAbsorcion);
+// Correos
+router.get('/correos',                       c.getCorreos);
+router.put('/correos',           checkRole(['admin']), c.updateCorreos);
 
-/**
- * @route   GET /api/config/correos
- * @desc    Obtener correos de empaque
- * @access  Private
- */
-router.get('/correos', configController.getCorreos);
+// Costos agua
+router.get('/costo-agua',                    c.getCostoAgua);
+router.put('/costo-agua',        checkRole(['admin']), c.updateCostoAgua);
+router.get('/costo-agua2',                   c.getCostoAgua2);
+router.put('/costo-agua2',       checkRole(['admin']), c.updateCostoAgua2);
 
-/**
- * @route   PUT /api/config/correos
- * @desc    Actualizar correos de empaque
- * @access  Private (Admin only)
- */
-router.put('/correos', checkRole(['admin']), configController.updateCorreos);
+// Costos indirectos
+router.get('/costos-indirectos',             c.getCostosIndirectos);
+router.put('/costos-indirectos', checkRole(['admin']), c.updateCostosIndirectos);
 
-/**
- * @route   GET /api/config/costo-agua
- * @desc    Obtener costo del agua por litro
- */
-router.get('/costo-agua', configController.getCostoAgua);
+// Tipos mano de obra (GET /mano-obra/masa/:masaId ANTES de /mano-obra/:id para evitar colisión)
+router.get('/mano-obra/masa/:masaId',        c.getRegistrosMO);
+router.post('/mano-obra/masa/:masaId',       c.createRegistroMO);
+router.delete('/mano-obra/masa/:masaId/:registroId', checkRole(['admin', 'supervisor']), c.deleteRegistroMO);
 
-/**
- * @route   PUT /api/config/costo-agua
- * @desc    Actualizar costo del agua por litro
- */
-router.put('/costo-agua', checkRole(['admin']), configController.updateCostoAgua);
+router.get('/mano-obra',                     c.getTiposMO);
+router.post('/mano-obra',        checkRole(['admin']), c.createTipoMO);
+router.put('/mano-obra/:id',     checkRole(['admin']), c.updateTipoMO);
+router.delete('/mano-obra/:id',  checkRole(['admin']), c.deleteTipoMO);
 
-/**
- * @route   GET /api/config/costo-agua2
- * @desc    Obtener costo del Agua 2 (MP0008) por litro
- */
-router.get('/costo-agua2', configController.getCostoAgua2);
+// Etiquetas
+router.get('/etiquetas',                     c.getEtiquetas);
+router.post('/etiquetas',        checkRole(['admin']), c.upsertEtiqueta);
 
-/**
- * @route   PUT /api/config/costo-agua2
- * @desc    Actualizar costo del Agua 2 (MP0008) por litro
- */
-router.put('/costo-agua2', checkRole(['admin']), configController.updateCostoAgua2);
+// Sync precios empaque SAP
+router.post('/sync-empaque',     checkRole(['admin']), c.syncPreciosEmpaque);
 
 module.exports = router;
