@@ -511,8 +511,9 @@ exports.completarEmpaque = async (req, res) => {
         ]);
       }
     } catch (sapErr) {
-      logger.error(`Error InventoryGenEntries masa ${masaId}: ${sapErr.message}`);
-      sapEntradaResult = { error: sapErr.message };
+      const sapErrDetail = sapErr.response?.data?.error?.message || sapErr.message;
+      logger.error(`Error InventoryGenEntries masa ${masaId}: ${sapErrDetail}`);
+      sapEntradaResult = { error: sapErrDetail };
     }
 
     // 11. GoodsIssues SAP para materiales de empaque
@@ -556,8 +557,9 @@ exports.completarEmpaque = async (req, res) => {
       }
     } catch (sapErr) {
       // SAP falla → loguear pero no revertir (el empaque ya está guardado)
-      logger.error(`Error GoodsIssues empaque masa ${masaId}: ${sapErr.message}`);
-      sapResult = { error: sapErr.message };
+      const sapErrDetail = sapErr.response?.data?.error?.message || sapErr.message;
+      logger.error(`Error GoodsIssues empaque masa ${masaId}: ${sapErrDetail}`);
+      sapResult = { error: sapErrDetail };
     }
 
     await client.query('COMMIT');
