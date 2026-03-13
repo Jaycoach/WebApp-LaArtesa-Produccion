@@ -772,9 +772,11 @@ const sincronizarDesdeOV = async (req, res, next) => {
       const grupo = masasAgrupadas[tipoMasa];
 
       // ── CONTROL ANTI-DUPLICACIÓN ─────────────────────────────────────
-      // Verificar qué docEntries de este grupo ya están importados para esta fecha
+      // Verificar qué pares docEntry+itemCode ya están importados para esta fecha
+      // (el control es por línea de OV, no por OV completa, porque una OV puede
+      //  tener productos de múltiples tipos de masa)
       const docEntriesGrupo = [...new Set(grupo.productos.map(p => p.docEntry))];
-      const docEntriesImportadosResult = await client.query(
+      const yaImportadosResult = await client.query(
         `SELECT p.sap_doc_entry, p.sap_item_code
          FROM productos_por_masa p
          JOIN masas_produccion m ON p.masa_id = m.id
@@ -782,21 +784,18 @@ const sincronizarDesdeOV = async (req, res, next) => {
            AND p.sap_doc_entry = ANY($2::int[])`,
         [fechaProduccion, docEntriesGrupo]
       );
-      const itemsYaImportados = new Set(
-        docEntriesImportadosResult.rows.map(r => `${r.sap_doc_entry}::${r.sap_item_code}`)
+      const yaImportadosSet = new Set(
+        yaImportadosResult.rows.map(r => `${r.sap_doc_entry}__${r.sap_item_code}`)
       );
-
-      // Filtrar solo los productos con par docEntry+itemCode NO importado aún
+      // Filtrar solo productos cuyo par docEntry+itemCode NO esté importado aún
       const productosNuevos = grupo.productos.filter(
-        p => !itemsYaImportados.has(`${p.docEntry}::${p.itemCode}`)
+        p => !yaImportadosSet.has(`${p.docEntry}__${p.itemCode}`)
       );
-
       if (productosNuevos.length === 0) {
-        logger.info(`Tipo ${tipoMasa} — todos los items (docEntry+itemCode) ya importados, omitiendo`);
+        logger.info(`Tipo ${tipoMasa} — todos los productos ya importados, omitiendo`);
         ordenCounter++;
         continue;
       }
-
       // Trabajar solo con los productos nuevos
       grupo.productos = productosNuevos;
       // ─────────────────────────────────────────────────────────────────
