@@ -1619,6 +1619,17 @@ const sincronizarInventarioMP = async (req, res, next) => {
 
     for (const [itemCode, lotes] of Object.entries(lotesMap)) {
       for (const lote of lotes) {
+        // Restar lo ya reservado localmente en pesaje_lotes_consumo para no sobreescribir
+        // consumos que aún no fueron enviados a SAP como InventoryGenExit
+        const reservadoResult = await db.query(
+          `SELECT COALESCE(SUM(cantidad_kg), 0) AS reservado
+           FROM pesaje_lotes_consumo
+           WHERE item_code = $1 AND batch = $2`,
+          [itemCode, lote.batch],
+        );
+        const reservado = parseFloat(reservadoResult.rows[0].reservado);
+        const cantidadNeta = Math.max(0, (lote.cantidad_disponible || 0) - reservado);
+
         await db.query(
           `INSERT INTO sap_lotes_mp
              (item_code, item_name, batch, status, admission_date, manufacturing_date, expiration_date, cantidad_disponible, ultimo_sync)
@@ -1638,7 +1649,7 @@ const sincronizarInventarioMP = async (req, res, next) => {
             lote.admissionDate || null,
             lote.manufacturingDate || null,
             lote.expirationDate || null,
-            lote.cantidad_disponible || 0,
+            cantidadNeta,
           ]
         );
         lotesSincronizados++;

@@ -351,7 +351,7 @@ const enviarInventoryGenExits = async (masaId, usuarioId) => {
         ItemCode:      itemCode,
         Quantity:      data.total_kg,
         WarehouseCode: 'ALMP',
-        AccountCode:   '14050501',
+        AccountCode:   '71050501',
       };
       if (data.manage_batch_numbers && data.batches.length > 0) {
         line.BatchNumbers = data.batches.map(b => ({
