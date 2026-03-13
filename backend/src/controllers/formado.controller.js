@@ -70,9 +70,15 @@ exports.getFormadoInfo = async (req, res) => {
         ef.diametro_cm,
         ef.tolerancia_cm
       FROM productos_por_masa ppm
-      LEFT JOIN especificaciones_formado ef
-        ON ppm.producto_codigo = ef.producto_codigo
-        OR ef.tipo_masa = $2
+      LEFT JOIN LATERAL (
+        SELECT largo_cm, ancho_cm, alto_cm, diametro_cm, tolerancia_cm
+        FROM especificaciones_formado
+        WHERE producto_codigo = ppm.producto_codigo
+           OR tipo_masa = $2
+        ORDER BY
+          CASE WHEN producto_codigo = ppm.producto_codigo THEN 0 ELSE 1 END
+        LIMIT 1
+      ) ef ON true
       WHERE ppm.masa_id = $1
       ORDER BY ppm.producto_nombre
     `;
