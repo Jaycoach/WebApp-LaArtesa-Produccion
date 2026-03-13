@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Card } from '@/components/common';
 import { useMasaDetail } from '../../hooks/useMasas';
 import { useCompletarFase } from '../../hooks/useFases';
+import { ModalMO } from '../../components/common/ModalMO';
 
 export const AmasadoMasa: React.FC = () => {
   const { masaId } = useParams<{ masaId: string }>();
@@ -12,6 +13,7 @@ export const AmasadoMasa: React.FC = () => {
   const { data: masa, isLoading: loadingMasa } = useMasaDetail(masaIdNum);
   const completarMutation = useCompletarFase();
 
+  const [showMO, setShowMO] = useState(false);
   const [formData, setFormData] = useState({
     temperatura_masa_final: '',
     velocidad_1_minutos: '',
@@ -212,14 +214,23 @@ export const AmasadoMasa: React.FC = () => {
             ← Volver
           </button>
 
-          <button
-            onClick={handleCompletar}
-            disabled={completarMutation.isPending}
-            className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-semibold"
-          >
-            {completarMutation.isPending ? 'Completando...' : 'Completar Amasado'}
-          </button>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setShowMO(true)}
+              className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 text-sm font-medium"
+            >
+              + Mano de obra
+            </button>
+            <button
+              onClick={handleCompletar}
+              disabled={completarMutation.isPending}
+              className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-semibold"
+            >
+              {completarMutation.isPending ? 'Completando...' : 'Completar Amasado'}
+            </button>
+          </div>
         </div>
+        {showMO && <ModalMO masaId={masaIdNum} fase="AMASADO" onClose={() => setShowMO(false)} />}
       </div>
     </div>
   );

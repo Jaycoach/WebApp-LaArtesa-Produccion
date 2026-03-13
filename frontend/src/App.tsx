@@ -23,6 +23,7 @@ import FormadoMasa from '@/pages/Formado/FormadoMasa';
 import FermentacionMasa from '@/pages/Fermentacion/FermentacionMasa';
 import HorneadoMasa from '@/pages/Horneado/HorneadoMasa';
 import EmpaqueMasa from '@/pages/Empaque/EmpaqueMasa';
+import ReporteCostos from '@/pages/Reportes/ReporteCostos';
 import ConfiguracionSistema from '@/pages/Configuracion/ConfiguracionSistema';
 import CostosConfig from '@/pages/Configuracion/CostosConfig';
 import FaseListado from '@/pages/Fases/FaseListado';
@@ -93,6 +94,11 @@ function App() {
           <Route path="empaque">
             <Route index element={<EmpaqueMasa />} />
             <Route path=":masaId" element={<EmpaqueMasa />} />
+          </Route>
+
+          {/* Reportes */}
+          <Route path="reportes">
+            <Route path="costos" element={<ReporteCostos />} />
           </Route>
 
           {/* Fases de producción - listado por fase */}

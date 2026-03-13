@@ -8,6 +8,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { ModalMO } from '../../components/common/ModalMO';
 
 const getToken = () => {
   try {
@@ -33,6 +34,7 @@ export const HorneadoMasa: React.FC = () => {
   const queryClient = useQueryClient();
 
   const [etapa, setEtapa] = useState<EtapaHorno>('inicio');
+  const [showMO, setShowMO] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [observaciones, setObservaciones] = useState('');
 
@@ -258,13 +260,22 @@ export const HorneadoMasa: React.FC = () => {
                 rows={2} className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-400 resize-none" />
             </div>
 
-            <button
-              onClick={() => completarMutation.mutate()}
-              disabled={completarMutation.isPending}
-              className="w-full bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white font-semibold py-3 rounded-lg transition-colors"
-            >
-              {completarMutation.isPending ? 'Completando...' : '✅ Completar Horneado → Ir a Empaque'}
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowMO(true)}
+                className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 text-sm font-medium"
+              >
+                + Mano de obra
+              </button>
+              <button
+                onClick={() => completarMutation.mutate()}
+                disabled={completarMutation.isPending}
+                className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white font-semibold py-3 rounded-lg transition-colors"
+              >
+                {completarMutation.isPending ? 'Completando...' : '✅ Completar Horneado → Ir a Empaque'}
+              </button>
+            </div>
+            {showMO && <ModalMO masaId={Number(masaId)} fase="HORNEADO" onClose={() => setShowMO(false)} />}
           </div>
         )}
 

@@ -19,6 +19,7 @@ const horneadoRoutes = require('./horneado.routes');
 const empaqueRoutes = require('./empaque.routes');
 const configRoutes = require('./config.routes');
 const sapRoutes = require('./sap.routes');
+const reportesRoutes = require('./reportes.routes');
 
 /**
  * @route   GET /api
@@ -62,5 +63,6 @@ router.use('/horneado', horneadoRoutes);
 router.use('/empaque', empaqueRoutes);
 router.use('/config', configRoutes);
 router.use('/sap', sapRoutes);
+router.use('/reportes', reportesRoutes);
 
 module.exports = router;
