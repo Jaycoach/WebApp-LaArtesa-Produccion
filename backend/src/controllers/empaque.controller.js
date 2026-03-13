@@ -521,8 +521,15 @@ exports.getMasasPendientesEmpaque = async (req, res) => {
     for (const masa of masasR.rows) {
       const prodsR = await db.query(`
         SELECT ppm.id, ppm.sap_item_code, ppm.producto_nombre, ppm.presentacion,
-               ppm.gramaje_unitario, ppm.unidades_pedidas,
-               GREATEST(COALESCE(ppm.unidades_ajustadas, 0), COALESCE(ppm.unidades_programadas, 0)) AS unidades_ajustadas,
+               ppm.gramaje_unitario,
+               ppm.unidades_pedidas,
+               ppm.unidades_programadas,
+               CASE
+                 WHEN ppm.division_completada = true AND COALESCE(ppm.cantidad_divisiones, 0) > 0
+                 THEN ppm.cantidad_divisiones
+                 ELSE GREATEST(COALESCE(ppm.unidades_ajustadas, 0), COALESCE(ppm.unidades_programadas, 0))
+               END AS unidades_referencia,
+               COALESCE(ppm.division_completada, false) AS division_completada,
                COALESCE(ppm.unidades_producidas, 0) AS unidades_producidas,
                ppm.sap_doc_num, ppm.sap_doc_entry
         FROM productos_por_masa ppm
