@@ -1518,10 +1518,8 @@ const sincronizarBOM = async (req, res, next) => {
   }
 };
 
-const sincronizarInventarioMP = async (req, res, next) => {
+const sincronizarInventarioMP = async (_req, res, next) => {
   try {
-    const modo = req.body?.modo || req.query?.modo || 'completo';
-
     // Obtener todos los ítems MP del BOM
     const itemsResult = await db.query(
       `SELECT DISTINCT item_code_comp AS item_code
@@ -1539,30 +1537,20 @@ const sincronizarInventarioMP = async (req, res, next) => {
       });
     }
 
-    // Modo 'activas': solo ítems de masas en APROBADA/PESAJE sin stock en DB
-    let itemCodesLotes = todosItemCodes;
-    if (modo === 'activas') {
-      const activasResult = await db.query(
-        `SELECT DISTINCT im.ingrediente_sap_code AS item_code
-         FROM ingredientes_masa im
-         JOIN masas_produccion mp ON im.masa_id = mp.id
-         WHERE mp.fase_actual IN ('APROBADA','PESAJE')
-         AND im.es_empaque = false
-         AND im.ingrediente_sap_code IS NOT NULL
-         AND NOT EXISTS (
-           SELECT 1 FROM sap_lotes_mp sl
-           WHERE sl.item_code = im.ingrediente_sap_code
-           AND sl.cantidad_disponible > 0
-         )`
-      );
-      if (activasResult.rows.length > 0) {
-        itemCodesLotes = activasResult.rows.map(r => r.item_code);
-        logger.info(`Sync lotes modo 'activas': ${itemCodesLotes.length} ítems sin stock en masas activas`);
-      } else {
-        logger.info(`Sync lotes modo 'activas': todos los ítems ya tienen stock en DB`);
-        itemCodesLotes = [];
-      }
-    }
+    // Siempre sincronizar lotes de todos los ítems MP presentes en cualquier masa activa
+    // (PLANIFICACION → HORNEADO) para mantener stock consistente con SAP
+    const activasResult = await db.query(
+      `SELECT DISTINCT im.ingrediente_sap_code AS item_code
+       FROM ingredientes_masa im
+       JOIN masas_produccion mp ON im.masa_id = mp.id
+       WHERE mp.fase_actual NOT IN ('EMPAQUE','COMPLETADA','CANCELADA')
+       AND im.es_empaque = false
+       AND im.ingrediente_sap_code IS NOT NULL`
+    );
+    let itemCodesLotes = activasResult.rows.length > 0
+      ? activasResult.rows.map(r => r.item_code)
+      : todosItemCodes;
+    logger.info(`Sync lotes: ${itemCodesLotes.length} ítems de masas activas`);
 
     // Stock siempre sincroniza todos los ítems del BOM
     const itemCodes = todosItemCodes;
@@ -1665,7 +1653,7 @@ const sincronizarInventarioMP = async (req, res, next) => {
     });
   } catch (error) {
     logger.error('Error sincronizando inventario MP:', error);
-    next(error);
+    return next(error);
   }
 };
 

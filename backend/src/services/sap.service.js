@@ -695,26 +695,25 @@ class SAPService {
     const SQL_CODE = 'artesa_lotes_almp_v2';
     const SQL_NAME = 'Stock lotes por bodega ALMP v2';
 
-    // Filtro IN dinámico — solo los itemCodes solicitados
-    const inList = itemCodes.map(c => `'${c}'`).join(',');
+    // Query fija sin filtro IN — SAP devuelve todos los lotes de ALMP en ~2s
+    // Node.js filtra en memoria por itemCodes al final
     const SQL_TEXT =
       'SELECT "OBTQ"."ItemCode", "OBTN"."DistNumber" AS "BatchNum", ' +
       '"OBTQ"."Quantity", "OBTN"."ExpDate", "OBTN"."MnfDate", "OBTN"."CreateDate" ' +
       'FROM "OBTQ" ' +
       'INNER JOIN "OBTN" ON "OBTQ"."ItemCode" = "OBTN"."ItemCode" ' +
       'AND "OBTQ"."SysNumber" = "OBTN"."SysNumber" ' +
-      `WHERE "OBTQ"."WhsCode" = 'ALMP' ` +
-      `AND "OBTQ"."Quantity" > 0 ` +
-      `AND "OBTQ"."ItemCode" IN (${inList})`;
+      'WHERE "OBTQ"."WhsCode" = \'ALMP\' ' +
+      'AND "OBTQ"."Quantity" > 0';
 
-    // El SQL cambia dinámicamente (filtro IN), siempre hacer PATCH o POST
+    // Asegurar que la SQLQuery existe con el SQL fijo — solo PATCH/POST si cambia
     try {
-      await this.client.get(`/SQLQueries('${SQL_CODE}')`);
-      // Existe — actualizar con el nuevo SQL (filtro IN dinámico)
-      await this.client.patch(`/SQLQueries('${SQL_CODE}')`, {
-        SqlText: SQL_TEXT,
-      });
-      logger.info(`SAP SQLQuery '${SQL_CODE}' actualizada con filtro IN.`);
+      const existeResp = await this.client.get(`/SQLQueries('${SQL_CODE}')`);
+      const sqlActual = existeResp.data?.SqlText || '';
+      if (sqlActual.trim() !== SQL_TEXT.trim()) {
+        await this.client.patch(`/SQLQueries('${SQL_CODE}')`, { SqlText: SQL_TEXT });
+        logger.info(`SAP SQLQuery '${SQL_CODE}' actualizada a query fija.`);
+      }
     } catch (getErr) {
       if (getErr?.response?.status === 404) {
         try {
@@ -734,18 +733,21 @@ class SAPService {
       }
     }
 
-    // Una sola llamada con Prefer: odata.maxpagesize=0 — SAP entrega todos los registros sin paginar
+    // Una sola llamada — SAP entrega todos los lotes ALMP con stock > 0
     const resultado = {};
     const response = await this.client.get(
       `/SQLQueries('${SQL_CODE}')/List`,
       {
-        headers: { 'Prefer': 'odata.maxpagesize=0' },
-        timeout: 60000,
+        headers: { 'Prefer': 'odata.maxpagesize=500' },
+        timeout: 30000,
       }
     );
     const rows = response.data?.value || [];
 
+    // Filtrar en memoria — solo itemCodes solicitados
+    const itemCodesSet = new Set(itemCodes);
     for (const row of rows) {
+      if (!itemCodesSet.has(row.ItemCode)) continue;
       if (parseFloat(row.Quantity || 0) <= 0) continue;
       if (!resultado[row.ItemCode]) resultado[row.ItemCode] = [];
       resultado[row.ItemCode].push({
