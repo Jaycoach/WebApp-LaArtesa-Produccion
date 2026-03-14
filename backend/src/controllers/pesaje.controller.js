@@ -367,6 +367,8 @@ const enviarInventoryGenExits = async (masaId, usuarioId) => {
         Quantity:      data.total_kg,
         WarehouseCode: 'ALMP',
         AccountCode:   '71050501',
+        OcrCode:       'Operac',
+        OcrCode2:      'Prod',
       };
       if (data.manage_batch_numbers && data.batches.length > 0) {
         line.BatchNumbers = data.batches.map(b => ({
