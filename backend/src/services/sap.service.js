@@ -697,7 +697,6 @@ class SAPService {
     // Devuelve cantidades reales por lote en bodega ALMP — no distribución uniforme.
     // Filtrar por ítem individual evita el timeout 502 que ocurre al escanear la tabla completa.
     // Fallback a BatchNumberDetails (distribución uniforme) si SQLQuery falla para un ítem.
-    const LOTE_BATCH_SIZE = 5; // paralelo conservador — cada ítem hace 2 calls SAP
     const resultado = {};
 
     const obtenerLotesReales = async (itemCode) => {
@@ -753,10 +752,8 @@ class SAPService {
       return null;
     };
 
-    for (let i = 0; i < itemCodes.length; i += LOTE_BATCH_SIZE) {
-      const chunk = itemCodes.slice(i, i + LOTE_BATCH_SIZE);
-      await Promise.all(chunk.map(async (itemCode) => {
-        try {
+    for (const itemCode of itemCodes) {
+      try {
           const rows = await obtenerLotesReales(itemCode);
           if (rows.length === 0) return;
 
@@ -792,7 +789,7 @@ class SAPService {
             logger.warn(`SAP fallback también falló para ${itemCode}: ${fallbackErr?.message}`);
           }
         }
-      }));
+      }
     }
 
     logger.info(`SAP: lotes obtenidos para ${Object.keys(resultado).length} ítems (OBTQ + fallback BatchNumberDetails)`);
