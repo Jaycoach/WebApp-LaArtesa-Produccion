@@ -608,7 +608,7 @@ export const PesajeMasa: React.FC = () => {
                           setFormData({
                             ...formData,
                             fecha_vencimiento_display: raw,
-                            fecha_vencimiento: parsed ?? formData.fecha_vencimiento
+                            fecha_vencimiento: parsed ?? ''
                           });
                         }}
                         onBlur={(e) => {
@@ -617,6 +617,12 @@ export const PesajeMasa: React.FC = () => {
                             setFormData({
                               ...formData,
                               fecha_vencimiento: parsed,
+                              fecha_vencimiento_display: undefined
+                            });
+                          } else if (e.target.value.trim() !== '') {
+                            setFormData({
+                              ...formData,
+                              fecha_vencimiento: '',
                               fecha_vencimiento_display: undefined
                             });
                           }
