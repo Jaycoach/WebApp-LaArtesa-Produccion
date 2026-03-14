@@ -363,12 +363,11 @@ const enviarInventoryGenExits = async (masaId, usuarioId) => {
 
     const documentLines = Object.entries(itemMap).map(([itemCode, data]) => {
       const line = {
-        ItemCode:      itemCode,
-        Quantity:      data.total_kg,
-        WarehouseCode: 'ALMP',
-        AccountCode:   '71050501',
-        OcrCode:       'Operac',
-        OcrCode2:      'Prod',
+        ItemCode:         itemCode,
+        Quantity:         data.total_kg,
+        WarehouseCode:    'ALMP',
+        AccountCode:      '71050501',
+        DistributionRule: 'Operac',
       };
       if (data.manage_batch_numbers && data.batches.length > 0) {
         line.BatchNumbers = data.batches.map(b => ({
