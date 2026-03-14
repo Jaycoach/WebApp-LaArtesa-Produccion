@@ -113,6 +113,15 @@ class ApiService {
           error: data?.error,
         });
 
+      case HTTP_STATUS.UNPROCESSABLE_ENTITY:
+        console.error('Unprocessable (422):', data?.message);
+        return Promise.reject({
+          success: false,
+          status: 422,
+          message: data?.message || 'Datos inválidos',
+          error: data?.error,
+        });
+
       case HTTP_STATUS.INTERNAL_SERVER_ERROR:
         console.error('Server Error:', data?.error);
         return Promise.reject({
