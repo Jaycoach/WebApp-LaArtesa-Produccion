@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Card } from '@/components/common';
 import { useChecklist, useUpdateIngrediente, useConfirmarPesaje } from '../../hooks/useChecklist';
 import { ModalMO } from '../../components/common/ModalMO';
+import { useAuthStore } from '../../store/useAuthStore';
 
 export const PesajeMasa: React.FC = () => {
   const { masaId } = useParams<{ masaId: string }>();
@@ -13,6 +14,8 @@ export const PesajeMasa: React.FC = () => {
   const updateMutation = useUpdateIngrediente();
   const confirmarMutation = useConfirmarPesaje();
 
+  const { user } = useAuthStore();
+  const puedeEditar = user?.rol === 'admin' || user?.rol === 'supervisor';
   const [showMO, setShowMO] = useState(false);
   const [editando, setEditando] = useState<number | null>(null);
 
@@ -429,7 +432,7 @@ export const PesajeMasa: React.FC = () => {
                 </div>
 
                 {/* Formulario de pesaje */}
-                {ing.verificado && !ing.pesado && editando === ing.id && (
+                {ing.verificado && ((!ing.pesado && editando === ing.id) || (ing.pesado && editando === ing.id && puedeEditar)) && (
                   <div className="mt-4 grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Peso Real (g)</label>
@@ -652,8 +655,21 @@ export const PesajeMasa: React.FC = () => {
                     Registrar Pesaje
                   </button>
                 )}
+                {ing.pesado && puedeEditar && editando !== ing.id && (
+                  <button
+                    onClick={() => handleEditar(ing)}
+                    className="mt-2 px-3 py-1.5 bg-amber-500 text-white rounded hover:bg-amber-600 text-xs font-medium"
+                  >
+                    ✏️ Editar pesaje
+                  </button>
+                )}
 
                 {/* Datos de pesaje completado */}
+                {ing.pesado && editando === ing.id && puedeEditar && (
+                  <div className="mt-4 p-3 bg-amber-50 border border-amber-300 rounded text-xs text-amber-700 mb-2">
+                    ✏️ Modo edición — solo admin/supervisor
+                  </div>
+                )}
                 {ing.pesado && (
                   <div className="mt-4 grid grid-cols-3 gap-4 text-sm p-4 bg-green-50 rounded">
                     <div>
