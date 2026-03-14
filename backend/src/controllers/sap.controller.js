@@ -1593,14 +1593,14 @@ const sincronizarInventarioMP = async (_req, res, next) => {
       : {};
     let lotesSincronizados = 0;
 
-    // Limpiar lotes sin stock de los ítems que se van a sincronizar
-    // para evitar acumulación de registros basura con cantidad=0
+    // Limpiar TODOS los lotes de los ítems que se van a sincronizar antes de insertar.
+    // Esto garantiza que la tabla refleje exactamente lo que SAP reporta —
+    // sin lotes de otras bodegas (PRODPROC, ALFABRIC) ni lotes agotados.
     if (Object.keys(lotesMap).length > 0) {
       const itemsConLotesNuevos = Object.keys(lotesMap);
       await db.query(
         `DELETE FROM sap_lotes_mp
-         WHERE item_code = ANY($1)
-           AND cantidad_disponible = 0`,
+         WHERE item_code = ANY($1)`,
         [itemsConLotesNuevos]
       );
     }
