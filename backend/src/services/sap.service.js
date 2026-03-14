@@ -755,7 +755,7 @@ class SAPService {
     for (const itemCode of itemCodes) {
       try {
           const rows = await obtenerLotesReales(itemCode);
-          if (rows.length === 0) return;
+          if (rows.length === 0) continue;
 
           resultado[itemCode] = rows.map(row => ({
             batch:               row.DistNumber,
