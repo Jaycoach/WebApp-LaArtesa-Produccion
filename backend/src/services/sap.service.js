@@ -789,7 +789,6 @@ class SAPService {
             logger.warn(`SAP fallback también falló para ${itemCode}: ${fallbackErr?.message}`);
           }
         }
-      }
     }
 
     logger.info(`SAP: lotes obtenidos para ${Object.keys(resultado).length} ítems (OBTQ + fallback BatchNumberDetails)`);
