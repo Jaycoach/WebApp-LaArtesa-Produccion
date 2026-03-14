@@ -219,6 +219,40 @@ const updateIngredienteChecklist = async (ingredienteId, data) => {
       if (lotes_consumo[0]) data.lote = lotes_consumo[0].batch;
     }
 
+    // ── Validar lote manual contra sap_lotes_mp (cuando no viene lotes_consumo) ─
+    if (lote && (!Array.isArray(lotes_consumo) || lotes_consumo.length === 0)) {
+      const ingRow2 = await client.query(
+        `SELECT ingrediente_sap_code FROM ingredientes_masa WHERE id = $1`,
+        [ingredienteId]
+      );
+      if (ingRow2.rows[0]) {
+        const { ingrediente_sap_code } = ingRow2.rows[0];
+        const invRow = await client.query(
+          `SELECT manage_batch_numbers FROM sap_inventario_mp WHERE item_code = $1`,
+          [ingrediente_sap_code]
+        );
+        if (invRow.rows[0]?.manage_batch_numbers) {
+          const loteRow = await client.query(
+            `SELECT batch, cantidad_disponible FROM sap_lotes_mp
+             WHERE item_code = $1 AND batch = $2 LIMIT 1`,
+            [ingrediente_sap_code, lote.trim()]
+          );
+          if (loteRow.rowCount === 0) {
+            const lotesDisp = await client.query(
+              `SELECT batch, cantidad_disponible FROM sap_lotes_mp
+               WHERE item_code = $1 AND cantidad_disponible > 0
+               ORDER BY cantidad_disponible DESC`,
+              [ingrediente_sap_code]
+            );
+            throw Object.assign(
+              new Error(`Lote '${lote}' no existe en SAP para ítem ${ingrediente_sap_code}`),
+              { status: 409, lote: lote, disponible: 0, lotes_actuales: lotesDisp.rows }
+            );
+          }
+        }
+      }
+    }
+
     // ── UPDATE principal ─────────────────────────────────────────────
     const result = await client.query(`
       UPDATE ingredientes_masa
