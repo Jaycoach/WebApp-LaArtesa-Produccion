@@ -169,6 +169,14 @@ export const PesajeMasa: React.FC = () => {
           disponible: err?.data?.disponible ?? null,
           lotes_actuales: err?.data?.lotes_actuales || [],
         });
+      } else if (err?.status === 422) {
+        setStockError({
+          ingredienteId,
+          mensaje: err?.message || 'Dato inválido',
+          lote_fallido: null,
+          disponible: null,
+          lotes_actuales: [],
+        });
       } else {
         throw err;
       }
