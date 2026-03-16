@@ -774,20 +774,9 @@ class SAPService {
 
           logger.info(`SAP: lotes reales ALMP para ${itemCode}: ${rows.length} lotes via OBTQ`);
         } catch (err) {
-          logger.warn(`SAP OBTQ falló para ${itemCode}, usando fallback BatchNumberDetails: ${err?.message}`);
-          try {
-            const lotesFallback = await obtenerLotesFallback(itemCode);
-            if (lotesFallback.length > 0) {
-              resultado[itemCode] = lotesFallback;
-              lotesFallback.sort((a, b) => {
-                if (!a.admissionDate) return 1;
-                if (!b.admissionDate) return -1;
-                return a.admissionDate.localeCompare(b.admissionDate);
-              });
-            }
-          } catch (fallbackErr) {
-            logger.warn(`SAP fallback también falló para ${itemCode}: ${fallbackErr?.message}`);
-          }
+          // NO usar fallback con distribución uniforme — genera cantidades inventadas.
+          // Si OBTQ falla, el ítem queda sin lotes hasta el próximo sync exitoso.
+          logger.warn(`SAP OBTQ falló para ${itemCode}, omitiendo lotes: ${err?.message}`);
         }
     }
 

@@ -130,11 +130,23 @@ class ApiService {
           error: data?.error,
         });
 
+      case 502:
+        console.error('SAP Error (502):', data?.message);
+        return Promise.reject({
+          success: false,
+          status: 502,
+          message: (data as any)?.message || 'Error al comunicarse con SAP',
+          data: (data as any)?.data,  // { reintentable, lote_fallido, alternativas }
+          error: data?.error,
+        });
+
       default:
         console.error('Unknown Error:', status, data?.error);
         return Promise.reject({
           success: false,
-          message: MESSAGES.ERROR.UNKNOWN,
+          status,
+          message: data?.message || MESSAGES.ERROR.UNKNOWN,
+          data: (data as any)?.data,
           error: data?.error,
         });
     }
