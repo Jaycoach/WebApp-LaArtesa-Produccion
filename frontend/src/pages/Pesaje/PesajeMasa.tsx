@@ -185,8 +185,32 @@ export const PesajeMasa: React.FC = () => {
 
   const handleConfirmar = async () => {
     if (confirm('¿Confirmar pesaje completo? Esto desbloqueará la siguiente fase.')) {
-      await confirmarMutation.mutateAsync(masaIdNum);
-      navigate(`/planificacion/masas/${masaId}`);
+      try {
+        await confirmarMutation.mutateAsync(masaIdNum);
+        navigate(`/planificacion/masas/${masaId}`);
+      } catch (err: any) {
+        const data = err?.data || {};
+        const mensaje = err?.message || 'Error al transmitir consumos a SAP';
+        const loteFallido = data?.lote_fallido || null;
+        const alternativas: any[] = data?.alternativas || [];
+
+        let textoError = `⚠ Error SAP\n\n${mensaje}`;
+        if (loteFallido) {
+          textoError += `\n\nIngrediente: ${loteFallido.item_name || loteFallido.item_code}`;
+          textoError += `\nLote sin stock suficiente en SAP: ${loteFallido.batch}`;
+        }
+        if (alternativas.length > 0) {
+          textoError += `\n\nLotes alternativos disponibles:`;
+          alternativas.forEach((a: any) => {
+            textoError += `\n  • Lote ${a.batch}: ${Number(a.cantidad_disponible).toFixed(3)} kg`;
+            if (a.expiration_date) textoError += ` (vence ${a.expiration_date})`;
+          });
+          textoError += `\n\nCambia el lote en el pesaje y vuelve a confirmar.`;
+        } else if (loteFallido) {
+          textoError += `\n\nNo hay lotes alternativos con stock. Sincroniza el inventario SAP o contacta al supervisor.`;
+        }
+        alert(textoError);
+      }
     }
   };
 
