@@ -878,14 +878,17 @@ const PanelResumenVariedad: React.FC<{ fecha: string }> = ({ fecha }) => {
 
   const handleImprimir = () => window.print();
 
-  // Estilos de impresión: ocultar tabs/nav, mostrar solo la tabla con expandidos al tope
   const estiloImpresion = `
+    @media screen {
+      .solo-impresion { display: none !important; }
+    }
     @media print {
-      body > * { display: none !important; }
-      #empaque-resumen-print { display: block !important; }
-      .no-print { display: none !important; }
-      .print-expandido { display: table-row !important; }
       @page { margin: 15mm; size: A4; }
+      nav, header, aside, footer, .no-print { display: none !important; }
+      .solo-impresion { display: block !important; }
+      .solo-pantalla { display: none !important; }
+      body { font-family: Arial, sans-serif; font-size: 11pt; color: #000; }
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
   `;
 
@@ -971,14 +974,120 @@ const PanelResumenVariedad: React.FC<{ fecha: string }> = ({ fecha }) => {
           </button>
         </div>
 
-        {/* Nota de impresión — solo visible al imprimir */}
-        <div className="hidden print:block text-xs text-gray-500 mb-2">
-          Solicitud de materiales de empaque · La Artesa SAS · {fecha}
-          {expandidos.size > 0 && ` · ${expandidos.size} variedad${expandidos.size > 1 ? 'es' : ''} con detalle de materiales`}
+        {/* ── LISTA SOLO PARA IMPRESIÓN ── */}
+        <div id="lista-impresion" className="solo-impresion">
+          {/* Encabezado del documento */}
+          <div style={{ borderBottom: '2px solid #000', paddingBottom: '8px', marginBottom: '16px' }}>
+            <div style={{ fontSize: '16pt', fontWeight: 'bold' }}>La Artesa SAS — Solicitud de Materiales de Empaque</div>
+            <div style={{ fontSize: '10pt', color: '#555', marginTop: '4px' }}>
+              Fecha de producción: <strong>{fecha}</strong>
+              &nbsp;·&nbsp;
+              {expandidos.size > 0
+                ? `${expandidos.size} variedad${expandidos.size > 1 ? 'es' : ''} seleccionadas con materiales`
+                : 'Lista completa de variedades'}
+              &nbsp;·&nbsp;
+              Total: {resumen.total_unidades.toLocaleString()} unidades · {Math.ceil(resumen.total_paquetes).toLocaleString()} paquetes
+            </div>
+          </div>
+
+          {/* Primero los expandidos, luego el resto */}
+          {productosOrdenados.map((p, idx) => {
+            const key = p.sap_item_code || p.producto_nombre;
+            const abierto = expandidos.has(key);
+            return (
+              <div key={key} style={{
+                marginBottom: '12px',
+                pageBreakInside: 'avoid',
+                borderLeft: abierto ? '3px solid #3b82f6' : '3px solid #e5e7eb',
+                paddingLeft: '10px',
+              }}>
+                {/* Fila del producto */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: abierto ? '6px' : '0' }}>
+                  {/* Checkbox de entrega */}
+                  <div style={{
+                    width: '16px', height: '16px', border: '1.5px solid #555',
+                    borderRadius: '3px', flexShrink: 0, marginTop: '2px',
+                  }} />
+                  {/* Datos del producto */}
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 'bold', fontSize: '11pt' }}>
+                      {String(idx + 1).padStart(2, '0')}. {p.producto_nombre}
+                    </div>
+                    <div style={{ fontSize: '9pt', color: '#555' }}>
+                      {p.sap_item_code}
+                      {p.gramaje_unitario > 0 && ` · ${p.gramaje_unitario}g/und`}
+                    </div>
+                  </div>
+                  {/* Cantidades */}
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <div style={{ fontWeight: 'bold', fontSize: '12pt' }}>
+                      {p.total_unidades.toLocaleString()} und
+                    </div>
+                    <div style={{ fontSize: '9pt', color: '#555' }}>
+                      {Math.ceil(p.total_paquetes)} paquetes
+                    </div>
+                  </div>
+                </div>
+
+                {/* Materiales — solo si estaba expandido */}
+                {abierto && p.materiales.length > 0 && (
+                  <div style={{ marginLeft: '24px', marginTop: '4px' }}>
+                    <div style={{ fontSize: '9pt', fontWeight: 'bold', color: '#1d4ed8', marginBottom: '4px' }}>
+                      Materiales a entregar:
+                    </div>
+                    {p.materiales.map(m => (
+                      <div key={m.item_code} style={{
+                        display: 'flex', alignItems: 'center', gap: '8px',
+                        marginBottom: '3px', fontSize: '10pt',
+                      }}>
+                        {/* Checkbox de material */}
+                        <div style={{
+                          width: '13px', height: '13px', border: '1.5px solid #555',
+                          borderRadius: '2px', flexShrink: 0,
+                        }} />
+                        <div style={{ flex: 1 }}>
+                          {m.nombre}
+                          <span style={{ color: '#888', fontSize: '9pt', marginLeft: '6px' }}>
+                            {m.item_code}
+                          </span>
+                        </div>
+                        <div style={{ fontWeight: 'bold', color: '#1d4ed8', flexShrink: 0 }}>
+                          {m.cantidad_total.toLocaleString()} {m.uom}
+                        </div>
+                        {/* Línea para firma/cantidad real entregada */}
+                        <div style={{ flexShrink: 0, fontSize: '9pt', color: '#555' }}>
+                          Entregado: <span style={{
+                            display: 'inline-block', width: '50px',
+                            borderBottom: '1px solid #555', marginLeft: '4px',
+                          }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Pie de firma */}
+          <div style={{ marginTop: '32px', borderTop: '1px solid #ccc', paddingTop: '16px', display: 'flex', gap: '60px' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ borderBottom: '1px solid #000', marginBottom: '4px', height: '32px' }} />
+              <div style={{ fontSize: '9pt', color: '#555' }}>Firma Almacén / Entregó</div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ borderBottom: '1px solid #000', marginBottom: '4px', height: '32px' }} />
+              <div style={{ fontSize: '9pt', color: '#555' }}>Firma Empaque / Recibió</div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '9pt', color: '#555', marginBottom: '4px' }}>Fecha y hora de entrega:</div>
+              <div style={{ borderBottom: '1px solid #000', height: '32px' }} />
+            </div>
+          </div>
         </div>
 
-        {/* Tabla */}
-        <div className="border border-gray-200 rounded-lg overflow-hidden">
+        {/* ── TABLA SOLO PARA PANTALLA ── */}
+        <div id="tabla-pantalla" className="solo-pantalla border border-gray-200 rounded-lg overflow-hidden">
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr className="bg-gray-50 text-gray-600 text-xs border-b border-gray-200">
@@ -1063,6 +1172,8 @@ const PanelResumenVariedad: React.FC<{ fecha: string }> = ({ fecha }) => {
             </tbody>
           </table>
         </div>
+
+        </div>{/* cierre tabla-pantalla */}
 
         <p className="text-xs text-gray-400 text-center no-print">
           Incluye masas con EMPAQUE en alistamiento anticipado y en progreso · {fecha}
