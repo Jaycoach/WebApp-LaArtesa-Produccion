@@ -734,6 +734,127 @@ exports.getMasasPendientesEmpaque = async (req, res) => {
 };
 
 // ── GET /api/empaque/:masaId/etiqueta/:productoId ────────────────────────────
+// ── GET /api/empaque/resumen-variedad?fecha=YYYY-MM-DD ───────────────────────
+// Resumen consolidado de unidades por SKU para bodega / alistamiento de empaque
+exports.getResumenVariedad = async (req, res) => {
+  try {
+    const fecha = req.query.fecha || new Date().toISOString().slice(0, 10);
+
+    // 1. Unidades programadas agrupadas por SKU, de todas las masas con EMPAQUE activo
+    const productosR = await db.query(
+      `SELECT
+         ppm.sap_item_code,
+         ppm.producto_nombre,
+         ppm.gramaje_unitario,
+         ppm.unidades_por_paquete,
+         ppm.unidades_pan_por_paquete,
+         SUM(ppm.unidades_programadas)  AS total_unidades,
+         SUM(ppm.cantidad_paquetes)     AS total_paquetes,
+         COUNT(DISTINCT mp.id)          AS cant_masas,
+         STRING_AGG(DISTINCT mp.tipo_masa, ', ' ORDER BY mp.tipo_masa) AS tipos_masa,
+         pf.estado                      AS empaque_estado
+       FROM productos_por_masa ppm
+       JOIN masas_produccion mp ON mp.id = ppm.masa_id
+       JOIN progreso_fases pf  ON pf.masa_id = mp.id AND pf.fase = 'EMPAQUE'
+       WHERE mp.fecha_produccion = $1
+         AND pf.estado IN ('PENDIENTE', 'EN_PROGRESO')
+         AND ppm.unidades_programadas > 0
+       GROUP BY
+         ppm.sap_item_code,
+         ppm.producto_nombre,
+         ppm.gramaje_unitario,
+         ppm.unidades_por_paquete,
+         ppm.unidades_pan_por_paquete,
+         pf.estado
+       ORDER BY ppm.producto_nombre`,
+      [fecha]
+    );
+
+    // 2. Materiales de empaque (BOM grupo 182) para cada SKU encontrado
+    const itemCodes = [...new Set(productosR.rows.map(r => r.sap_item_code).filter(Boolean))];
+    let materialesMap = {};
+
+    if (itemCodes.length > 0) {
+      const matsR = await db.query(
+        `SELECT
+           sbc.item_code_padre,
+           sbc.item_code_comp,
+           sbc.item_name_comp,
+           sbc.cantidad      AS cantidad_por_unidad,
+           sbc.uom
+         FROM sap_bom_componentes sbc
+         WHERE sbc.item_code_padre = ANY($1)
+           AND sbc.es_empaque = true
+         ORDER BY sbc.item_code_padre, sbc.visual_order`,
+        [itemCodes]
+      );
+      for (const mat of matsR.rows) {
+        if (!materialesMap[mat.item_code_padre]) materialesMap[mat.item_code_padre] = [];
+        materialesMap[mat.item_code_padre].push({
+          item_code:           mat.item_code_comp,
+          nombre:              mat.item_name_comp,
+          cantidad_por_unidad: parseFloat(mat.cantidad_por_unidad),
+          uom:                 mat.uom,
+        });
+      }
+    }
+
+    // 3. Consolidar: agrupar filas del mismo SKU que tengan distinto estado
+    //    (puede haber masas PENDIENTE y EN_PROGRESO del mismo SKU)
+    const consolidado = {};
+    for (const row of productosR.rows) {
+      const key = row.sap_item_code || row.producto_nombre;
+      if (!consolidado[key]) {
+        consolidado[key] = {
+          sap_item_code:            row.sap_item_code,
+          producto_nombre:          row.producto_nombre,
+          gramaje_unitario:         parseFloat(row.gramaje_unitario || 0),
+          unidades_por_paquete:     parseFloat(row.unidades_por_paquete || 1),
+          unidades_pan_por_paquete: parseFloat(row.unidades_pan_por_paquete || 1),
+          total_unidades:           0,
+          total_paquetes:           0,
+          cant_masas:               0,
+          tipos_masa:               new Set(),
+          tiene_pendiente:          false,
+          tiene_en_progreso:        false,
+          materiales:               materialesMap[row.sap_item_code] || [],
+        };
+      }
+      const item = consolidado[key];
+      item.total_unidades  += parseInt(row.total_unidades || 0);
+      item.total_paquetes  += parseFloat(row.total_paquetes || 0);
+      item.cant_masas      += parseInt(row.cant_masas || 0);
+      row.tipos_masa?.split(', ').forEach(t => item.tipos_masa.add(t));
+      if (row.empaque_estado === 'PENDIENTE')   item.tiene_pendiente   = true;
+      if (row.empaque_estado === 'EN_PROGRESO') item.tiene_en_progreso = true;
+    }
+
+    const resultado = Object.values(consolidado).map(item => ({
+      ...item,
+      tipos_masa: [...item.tipos_masa].join(', '),
+      materiales: item.materiales.map(m => ({
+        ...m,
+        cantidad_total: Math.ceil(m.cantidad_por_unidad * item.total_unidades),
+      })),
+    })).sort((a, b) => a.producto_nombre.localeCompare(b.producto_nombre));
+
+    return res.json({
+      success: true,
+      data: {
+        fecha,
+        total_skus:     resultado.length,
+        total_unidades: resultado.reduce((s, r) => s + r.total_unidades, 0),
+        total_paquetes: resultado.reduce((s, r) => s + r.total_paquetes, 0),
+        productos:      resultado,
+      },
+    });
+
+  } catch (err) {
+    logger.error('getResumenVariedad error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 exports.getEtiqueta = async (req, res) => {
   try {
     const { masaId, productoId } = req.params;
