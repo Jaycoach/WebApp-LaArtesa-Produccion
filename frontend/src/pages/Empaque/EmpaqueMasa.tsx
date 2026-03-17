@@ -1171,8 +1171,6 @@ const PanelResumenVariedad: React.FC<{ fecha: string }> = ({ fecha }) => {
               })}
             </tbody>
           </table>
-        </div>
-
         </div>{/* cierre tabla-pantalla */}
 
         <p className="text-xs text-gray-400 text-center no-print">
