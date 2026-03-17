@@ -44,6 +44,14 @@ interface OVPendiente {
   doc_num: string;
   productos: ProductoPendiente[];
 }
+interface MaterialAlistamiento {
+  item_code: string;
+  nombre: string;
+  uom: string;
+  cantidad_total: number;
+  precio_unitario: number;
+  stock_disponible: number;
+}
 interface MasaPendiente {
   id: number;
   codigo_masa: string;
@@ -53,9 +61,12 @@ interface MasaPendiente {
   fecha_produccion: string;
   es_subdivision: boolean;
   estado_empaque: string;
+  estado_horneado: string;
+  horneado_completo: boolean;
   empaque_iniciado: boolean;
   empaque_id: number | null;
   fecha_vencimiento: string | null;
+  materiales_alistamiento: MaterialAlistamiento[];
   ovs: OVPendiente[];
 }
 
@@ -320,6 +331,38 @@ const ModalMO: React.FC<{
   );
 };
 
+// ── Botón de etiqueta rápida desde la lista ──────────────────────────────────
+const EtiquetaRapida: React.FC<{ masaId: number; productoId: number }> = ({ masaId, productoId }) => {
+  const [etiquetaData, setEtiquetaData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+
+  const ver = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setLoading(true);
+    try {
+      const d = await api(`/empaque/${masaId}/etiqueta/${productoId}`);
+      setEtiquetaData(d.data);
+    } catch { /* silencioso */ }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <>
+      <button
+        onClick={ver}
+        disabled={loading}
+        className="text-xs px-2 py-0.5 border border-gray-300 rounded hover:bg-white hover:border-blue-400 text-gray-500 hover:text-blue-600 disabled:opacity-50 transition-colors"
+        title="Imprimir etiqueta INVIMA"
+      >
+        {loading ? '...' : '🏷 Etiqueta'}
+      </button>
+      {etiquetaData && (
+        <Etiqueta data={etiquetaData} onClose={() => setEtiquetaData(null)} />
+      )}
+    </>
+  );
+};
+
 // ── Panel: lista de masas pendientes ─────────────────────────────────────────
 const PanelPendientes: React.FC<{
   masas: MasaPendiente[];
@@ -339,22 +382,29 @@ const PanelPendientes: React.FC<{
         return (
           <div
             key={masa.id}
-            onClick={() => onSeleccionar(masa)}
-            className="border border-gray-200 rounded-lg p-4 hover:border-blue-400 hover:bg-blue-50 cursor-pointer transition-all group"
+            className={`border rounded-lg p-4 transition-all ${
+              masa.horneado_completo
+                ? 'border-green-300 bg-green-50'
+                : 'border-amber-200 bg-amber-50'
+            }`}
           >
-            <div className="flex items-start justify-between">
+            {/* Cabecera clickeable → abre formulario de empaque */}
+            <div
+              onClick={() => onSeleccionar(masa)}
+              className="flex items-start justify-between cursor-pointer hover:opacity-80"
+            >
               <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="font-bold text-gray-800 group-hover:text-blue-700">
-                    {masa.nombre_masa}
-                  </span>
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <span className="font-bold text-gray-800">{masa.nombre_masa}</span>
                   <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-mono">
                     {masa.codigo_masa}
                   </span>
+                  {masa.horneado_completo
+                    ? <span className="text-xs px-2 py-0.5 rounded-full bg-green-200 text-green-800 font-medium">✅ Listo para empacar</span>
+                    : <span className="text-xs px-2 py-0.5 rounded-full bg-amber-200 text-amber-800 font-medium">🕐 En producción — alistamiento</span>
+                  }
                   {masa.empaque_iniciado && (
-                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium">
-                      En progreso
-                    </span>
+                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium">En progreso</span>
                   )}
                 </div>
                 <div className="flex flex-wrap gap-3 text-xs text-gray-500">
@@ -365,18 +415,68 @@ const PanelPendientes: React.FC<{
                   <span>{totalProductos} producto{totalProductos !== 1 ? 's' : ''}</span>
                 </div>
                 <div className="flex flex-wrap gap-1 mt-2">
-                  {masa.ovs
-                    .filter(o => o.doc_num !== 'SIN_OV')
-                    .map(o => (
-                      <span key={o.doc_num}
-                        className="text-xs bg-blue-50 border border-blue-200 text-blue-700 px-2 py-0.5 rounded font-mono">
-                        OV {o.doc_num}
-                      </span>
-                    ))}
+                  {masa.ovs.filter(o => o.doc_num !== 'SIN_OV').map(o => (
+                    <span key={o.doc_num}
+                      className="text-xs bg-blue-50 border border-blue-200 text-blue-700 px-2 py-0.5 rounded font-mono">
+                      OV {o.doc_num}
+                    </span>
+                  ))}
                 </div>
               </div>
-              <div className="text-blue-400 group-hover:text-blue-600 text-lg ml-3">→</div>
+              <div className="text-gray-400 text-lg ml-3">→</div>
             </div>
+
+            {/* Sección de alistamiento anticipado — visible siempre */}
+            {masa.ovs.map(ov => (
+              <div key={ov.doc_num} className="mt-3 border-t border-gray-200 pt-3">
+                {ov.doc_num !== 'SIN_OV' && (
+                  <div className="text-xs font-semibold text-gray-500 mb-2">OV {ov.doc_num}</div>
+                )}
+                <div className="space-y-1">
+                  {ov.productos.map(p => (
+                    <div key={p.id} className="flex items-center justify-between text-xs">
+                      <div className="flex-1 min-w-0">
+                        <span className="font-medium text-gray-700 truncate block">{p.producto_nombre}</span>
+                        <span className="text-gray-400 font-mono">{p.sap_item_code} · {p.presentacion}</span>
+                      </div>
+                      <div className="flex items-center gap-3 ml-3 shrink-0">
+                        <span className="text-gray-500">
+                          <span className="font-semibold text-gray-700">{p.unidades_programadas}</span> uds prog.
+                        </span>
+                        {p.division_completada && (
+                          <span className="text-blue-600 font-semibold">{p.unidades_referencia} div.</span>
+                        )}
+                        <EtiquetaRapida masaId={masa.id} productoId={p.id} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            {/* Materiales de empaque para alistar */}
+            {masa.materiales_alistamiento && masa.materiales_alistamiento.length > 0 && (
+              <div className="mt-3 border-t border-gray-200 pt-3">
+                <div className="text-xs font-semibold text-gray-500 mb-2">📦 Materiales de empaque a alistar</div>
+                <div className="grid grid-cols-1 gap-1">
+                  {masa.materiales_alistamiento.map(mat => (
+                    <div key={mat.item_code} className="flex items-center justify-between text-xs bg-white rounded px-2 py-1 border border-gray-100">
+                      <span className="text-gray-700 font-medium">{mat.nombre}</span>
+                      <div className="flex items-center gap-3 text-gray-500">
+                        <span>
+                          Necesita: <span className="font-bold text-gray-800">
+                            {mat.cantidad_total % 1 === 0 ? mat.cantidad_total : mat.cantidad_total.toFixed(2)}
+                          </span> {mat.uom}
+                        </span>
+                        <span className={mat.stock_disponible >= mat.cantidad_total ? 'text-green-600 font-semibold' : 'text-red-600 font-semibold'}>
+                          Stock: {mat.stock_disponible % 1 === 0 ? mat.stock_disponible : mat.stock_disponible.toFixed(2)} {mat.uom}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         );
       })}
