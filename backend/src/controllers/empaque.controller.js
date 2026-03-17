@@ -597,14 +597,13 @@ exports.getMasasPendientesEmpaque = async (req, res) => {
       SELECT mp.id, mp.codigo_masa, mp.nombre_masa, mp.tipo_masa,
              mp.total_kilos_con_merma, mp.fecha_produccion,
              mp.es_subdivision, mp.masa_padre_id,
-             pf_e.estado AS estado_empaque
+             pf_e.estado AS estado_empaque,
+             COALESCE(pf_h.estado, 'BLOQUEADA') AS estado_horneado
       FROM masas_produccion mp
-      JOIN progreso_fases pf_h ON pf_h.masa_id = mp.id AND pf_h.fase = 'HORNEADO'
       JOIN progreso_fases pf_e ON pf_e.masa_id = mp.id AND pf_e.fase = 'EMPAQUE'
-      WHERE pf_h.estado = 'COMPLETADA'
-        AND pf_e.estado != 'COMPLETADA'
-        AND mp.estado != 'SUBDIVIDIDA'
-        AND mp.estado != 'CANCELADA'
+      LEFT JOIN progreso_fases pf_h ON pf_h.masa_id = mp.id AND pf_h.fase = 'HORNEADO'
+      WHERE pf_e.estado IN ('PENDIENTE', 'EN_PROGRESO')
+        AND mp.estado NOT IN ('SUBDIVIDIDA', 'CANCELADA', 'PLANIFICACION')
       ORDER BY mp.fecha_produccion DESC, mp.id DESC
     `);
 
@@ -670,18 +669,56 @@ exports.getMasasPendientesEmpaque = async (req, res) => {
         FROM registros_empaque WHERE masa_id = $1 LIMIT 1
       `, [masa.id]);
 
+      // Materiales de empaque del BOM para alistamiento anticipado
+      const itemCodes = [...new Set(productos.map(p => p.sap_item_code).filter(Boolean))];
+      let materialesAlistamiento = [];
+      if (itemCodes.length) {
+        const matR = await db.query(
+          `SELECT sbc.item_code_padre, sbc.item_code_comp, sbc.item_name_comp,
+                  sbc.cantidad AS cantidad_por_unidad, sbc.uom,
+                  COALESCE(sim.costo_unitario, 0) AS precio_unitario,
+                  COALESCE(sim.stock_almp, 0) AS stock_disponible
+           FROM sap_bom_componentes sbc
+           LEFT JOIN sap_inventario_mp sim ON sim.item_code = sbc.item_code_comp
+           WHERE sbc.item_code_padre = ANY($1) AND sbc.es_empaque = true
+           ORDER BY sbc.item_name_comp`,
+          [itemCodes]
+        );
+        const mapaMateriales = {};
+        for (const mat of matR.rows) {
+          const prod = productos.find(p => p.sap_item_code === mat.item_code_padre);
+          const unidades = parseInt(prod?.unidades_referencia || prod?.unidades_programadas || 0);
+          const key = mat.item_code_comp;
+          if (!mapaMateriales[key]) {
+            mapaMateriales[key] = {
+              item_code:        mat.item_code_comp,
+              nombre:           mat.item_name_comp,
+              uom:              mat.uom,
+              cantidad_total:   0,
+              precio_unitario:  parseFloat(mat.precio_unitario),
+              stock_disponible: parseFloat(mat.stock_disponible),
+            };
+          }
+          mapaMateriales[key].cantidad_total += parseFloat(mat.cantidad_por_unidad) * unidades;
+        }
+        materialesAlistamiento = Object.values(mapaMateriales);
+      }
+
       resultado.push({
-        id:                    masa.id,
-        codigo_masa:           masa.codigo_masa,
-        nombre_masa:           masa.nombre_masa,
-        tipo_masa:             masa.tipo_masa,
-        total_kilos_con_merma: parseFloat(masa.total_kilos_con_merma || 0),
-        fecha_produccion:      masa.fecha_produccion,
-        es_subdivision:        masa.es_subdivision,
-        estado_empaque:        masa.estado_empaque,
-        empaque_iniciado:      empR.rows.length > 0,
-        empaque_id:            empR.rows[0]?.id || null,
-        fecha_vencimiento:     empR.rows[0]?.fecha_vencimiento || null,
+        id:                      masa.id,
+        codigo_masa:             masa.codigo_masa,
+        nombre_masa:             masa.nombre_masa,
+        tipo_masa:               masa.tipo_masa,
+        total_kilos_con_merma:   parseFloat(masa.total_kilos_con_merma || 0),
+        fecha_produccion:        masa.fecha_produccion,
+        es_subdivision:          masa.es_subdivision,
+        estado_empaque:          masa.estado_empaque,
+        estado_horneado:         masa.estado_horneado,
+        horneado_completo:       masa.estado_horneado === 'COMPLETADA',
+        empaque_iniciado:        empR.rows.length > 0,
+        empaque_id:              empR.rows[0]?.id || null,
+        fecha_vencimiento:       empR.rows[0]?.fecha_vencimiento || null,
+        materiales_alistamiento: materialesAlistamiento,
         ovs: Object.entries(porOV).map(([doc_num, prods]) => ({
           doc_num,
           productos: prods,

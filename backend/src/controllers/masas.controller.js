@@ -306,6 +306,12 @@ const aprobarMasa = async (req, res, next) => {
            WHERE masa_id = $1 AND fase = 'PESAJE'`,
           [subMasa.id]
         );
+        await db.query(
+          `UPDATE progreso_fases
+           SET estado = 'PENDIENTE', updated_at = NOW()
+           WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
+          [subMasa.id]
+        );
       }
 
       logger.info(`Masa ${id} subdividida en ${resultadoSubdivision.n_tandas} tandas y aprobadas por usuario ${req.user.id}`);
@@ -322,6 +328,12 @@ const aprobarMasa = async (req, res, next) => {
       `UPDATE progreso_fases
        SET estado = 'EN_PROGRESO'
        WHERE masa_id = $1 AND fase = 'PESAJE'`,
+      [id]
+    );
+    await db.query(
+      `UPDATE progreso_fases
+       SET estado = 'PENDIENTE', updated_at = NOW()
+       WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
       [id]
     );
 

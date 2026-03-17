@@ -89,7 +89,7 @@ function generarLetrasTanda(n) {
  * PLANIFICACION → COMPLETADA, PESAJE → EN_PROGRESO, resto → BLOQUEADA.
  */
 async function inicializarFasesMasa(masaId, userId) {
-  const fases = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO'];
+  const fases = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO', 'EMPAQUE'];
 
   for (const fase of fases) {
     const estado      = fase === 'PLANIFICACION' ? 'COMPLETADA'
@@ -114,7 +114,7 @@ async function inicializarFasesMasa(masaId, userId) {
  * PLANIFICACION → COMPLETADA, PESAJE → COMPLETADA, AMASADO → EN_PROGRESO, resto → BLOQUEADA.
  */
 async function inicializarFasesMasaConPesaje(masaId, userId) {
-  const fases = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO'];
+  const fases = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO', 'EMPAQUE'];
 
   for (const fase of fases) {
     const estado = fase === 'PLANIFICACION' ? 'COMPLETADA'
@@ -548,7 +548,7 @@ const updateProgreso = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Fase y acción son requeridas' });
     }
 
-    const fasesValidas    = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO'];
+    const fasesValidas    = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO', 'EMPAQUE'];
     const accionesValidas = ['iniciar', 'actualizar', 'completar'];
 
     if (!fasesValidas.includes(fase.toUpperCase()))
