@@ -818,11 +818,204 @@ const PanelEmpaqueMasa: React.FC<{
   );
 };
 
+// ── Tipos para resumen variedad ──────────────────────────────────────────────
+interface MaterialResumen {
+  item_code: string;
+  nombre: string;
+  cantidad_por_unidad: number;
+  uom: string;
+  cantidad_total: number;
+}
+interface ProductoResumen {
+  sap_item_code: string;
+  producto_nombre: string;
+  gramaje_unitario: number;
+  unidades_por_paquete: number;
+  unidades_pan_por_paquete: number;
+  total_unidades: number;
+  total_paquetes: number;
+  cant_masas: number;
+  tipos_masa: string;
+  tiene_pendiente: boolean;
+  tiene_en_progreso: boolean;
+  materiales: MaterialResumen[];
+}
+interface ResumenVariedad {
+  fecha: string;
+  total_skus: number;
+  total_unidades: number;
+  total_paquetes: number;
+  productos: ProductoResumen[];
+}
+
+// ── Panel: resumen por variedad para bodega ──────────────────────────────────
+const PanelResumenVariedad: React.FC<{ fecha: string }> = ({ fecha }) => {
+  const [expandido, setExpandido] = useState<string | null>(null);
+  const [filtroBusqueda, setFiltroBusqueda] = useState('');
+
+  const { data, isLoading, error } = useQuery<{ data: ResumenVariedad }>({
+    queryKey: ['empaque-resumen-variedad', fecha],
+    queryFn: () => api(`/empaque/resumen-variedad?fecha=${fecha}`),
+    refetchInterval: 60000,
+  });
+
+  const resumen = data?.data;
+
+  const productosFiltrados = resumen?.productos.filter(p =>
+    !filtroBusqueda ||
+    p.producto_nombre.toLowerCase().includes(filtroBusqueda.toLowerCase()) ||
+    p.sap_item_code?.toLowerCase().includes(filtroBusqueda.toLowerCase())
+  ) || [];
+
+  const handleImprimir = () => window.print();
+
+  if (isLoading) return (
+    <div className="text-center py-10 text-gray-400 text-sm">Cargando resumen...</div>
+  );
+  if (error) return (
+    <div className="bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm">
+      Error al cargar el resumen de variedades.
+    </div>
+  );
+  if (!resumen || resumen.productos.length === 0) return (
+    <div className="text-center py-10 text-gray-400 text-sm">
+      No hay masas con empaque activo para la fecha seleccionada.
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* Cabecera con totales */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-center">
+          <div className="text-2xl font-bold text-blue-700">{resumen.total_skus}</div>
+          <div className="text-xs text-blue-500">Variedades</div>
+        </div>
+        <div className="bg-green-50 border border-green-100 rounded-lg p-3 text-center">
+          <div className="text-2xl font-bold text-green-700">{resumen.total_unidades.toLocaleString()}</div>
+          <div className="text-xs text-green-500">Unidades totales</div>
+        </div>
+        <div className="bg-purple-50 border border-purple-100 rounded-lg p-3 text-center">
+          <div className="text-2xl font-bold text-purple-700">{Math.ceil(resumen.total_paquetes).toLocaleString()}</div>
+          <div className="text-xs text-purple-500">Paquetes totales</div>
+        </div>
+      </div>
+
+      {/* Buscador + botón imprimir */}
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={filtroBusqueda}
+          onChange={e => setFiltroBusqueda(e.target.value)}
+          placeholder="Buscar variedad o código..."
+          className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400"
+        />
+        <button
+          onClick={handleImprimir}
+          className="px-4 py-2 border border-gray-300 rounded text-sm text-gray-600 hover:bg-gray-50 flex items-center gap-1"
+        >
+          🖨 Imprimir
+        </button>
+      </div>
+
+      {/* Tabla de variedades */}
+      <div className="border border-gray-200 rounded-lg overflow-hidden">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="bg-gray-50 text-gray-600 text-xs border-b border-gray-200">
+              <th className="text-left p-3">Variedad / SKU</th>
+              <th className="text-right p-3">Unidades</th>
+              <th className="text-right p-3">Paquetes</th>
+              <th className="text-right p-3">Gramaje</th>
+              <th className="text-center p-3">Estado</th>
+              <th className="text-center p-3">Materiales</th>
+            </tr>
+          </thead>
+          <tbody>
+            {productosFiltrados.map(p => {
+              const key = p.sap_item_code || p.producto_nombre;
+              const abierto = expandido === key;
+              return (
+                <>
+                  <tr
+                    key={key}
+                    className={`border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${abierto ? 'bg-blue-50' : ''}`}
+                    onClick={() => setExpandido(abierto ? null : key)}
+                  >
+                    <td className="p-3">
+                      <div className="font-medium text-gray-800">{p.producto_nombre}</div>
+                      <div className="text-xs text-gray-400 font-mono">{p.sap_item_code}</div>
+                      <div className="text-xs text-gray-400">{p.tipos_masa}</div>
+                    </td>
+                    <td className="p-3 text-right">
+                      <span className="font-bold text-gray-800 text-base">{p.total_unidades.toLocaleString()}</span>
+                    </td>
+                    <td className="p-3 text-right">
+                      <span className="font-semibold text-purple-700">{Math.ceil(p.total_paquetes)}</span>
+                      {p.unidades_pan_por_paquete > 1 && (
+                        <div className="text-xs text-gray-400">x{p.unidades_pan_por_paquete} und/paq</div>
+                      )}
+                    </td>
+                    <td className="p-3 text-right text-xs text-gray-500">
+                      {p.gramaje_unitario > 0 ? `${p.gramaje_unitario}g` : '—'}
+                    </td>
+                    <td className="p-3 text-center">
+                      <div className="flex flex-col gap-1 items-center">
+                        {p.tiene_en_progreso && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">En empaque</span>
+                        )}
+                        {p.tiene_pendiente && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">Alistamiento</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-3 text-center text-xs text-gray-500">
+                      {p.materiales.length > 0
+                        ? <span className="text-blue-600 font-medium">{p.materiales.length} mat. {abierto ? '▲' : '▼'}</span>
+                        : '—'}
+                    </td>
+                  </tr>
+                  {abierto && p.materiales.length > 0 && (
+                    <tr key={`${key}-mat`} className="bg-blue-50 border-b border-blue-100">
+                      <td colSpan={6} className="px-6 py-3">
+                        <div className="text-xs font-semibold text-blue-700 mb-2">📦 Materiales de empaque necesarios</div>
+                        <div className="grid grid-cols-1 gap-1">
+                          {p.materiales.map(m => (
+                            <div key={m.item_code} className="flex items-center justify-between bg-white rounded px-3 py-1.5 border border-blue-100 text-xs">
+                              <div>
+                                <span className="font-medium text-gray-700">{m.nombre}</span>
+                                <span className="text-gray-400 font-mono ml-2">{m.item_code}</span>
+                              </div>
+                              <div className="flex items-center gap-4 text-gray-600">
+                                <span>{m.cantidad_por_unidad} {m.uom}/unidad</span>
+                                <span className="font-bold text-blue-700">{m.cantidad_total.toLocaleString()} {m.uom} total</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="text-xs text-gray-400 text-center">
+        Incluye masas con EMPAQUE en alistamiento anticipado y en progreso · {fecha}
+      </p>
+    </div>
+  );
+};
+
 // ── Componente principal ─────────────────────────────────────────────────────
 export const EmpaqueMasa: React.FC = () => {
   const qc = useQueryClient();
 
-  const [modo, setModo] = useState<'lista' | 'masa' | 'ov'>('lista');
+  const [modo, setModo] = useState<'lista' | 'masa' | 'ov' | 'resumen'>('lista');
+  const [fechaResumen, setFechaResumen] = useState(new Date().toISOString().slice(0, 10));
   const [masaSeleccionada, setMasaSeleccionada] = useState<MasaPendiente | null>(null);
 
   // Búsqueda por OV (modo legado)
@@ -959,6 +1152,16 @@ export const EmpaqueMasa: React.FC = () => {
         >
           Buscar por OV
         </button>
+        <button
+          onClick={() => setModo('resumen')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            modo === 'resumen'
+              ? 'border-purple-600 text-purple-700'
+              : 'border-transparent text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          📦 Resumen por variedad
+        </button>
       </div>
 
       {/* Tab: lista de masas pendientes */}
@@ -972,6 +1175,22 @@ export const EmpaqueMasa: React.FC = () => {
               onSeleccionar={(masa) => { setMasaSeleccionada(masa); setModo('masa'); }}
             />
           )}
+        </div>
+      )}
+
+      {/* Tab: resumen por variedad para bodega */}
+      {modo === 'resumen' && (
+        <div>
+          <div className="flex items-center gap-3 mb-4">
+            <label className="text-sm font-medium text-gray-700">Fecha de producción:</label>
+            <input
+              type="date"
+              value={fechaResumen}
+              onChange={e => setFechaResumen(e.target.value)}
+              className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:ring-2 focus:ring-purple-400"
+            />
+          </div>
+          <PanelResumenVariedad fecha={fechaResumen} />
         </div>
       )}
 

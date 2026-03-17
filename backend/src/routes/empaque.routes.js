@@ -11,6 +11,9 @@ router.use(verifyToken);
 // Lista masas con horneado completo y empaque pendiente (ANTES de /:masaId)
 router.get('/pendientes',                    c.getMasasPendientesEmpaque);
 
+// Resumen consolidado por SKU/variedad para bodega (ANTES de /:masaId)
+router.get('/resumen-variedad',              c.getResumenVariedad);
+
 // Vista consolidada por OV (ANTES de /:masaId para evitar colisión)
 router.get('/ov/:docNum',                    c.getEmpaqueByOV);
 
