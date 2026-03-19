@@ -229,6 +229,12 @@ export const HorneadoMasa: React.FC = () => {
             >
               {iniciarMutation.isPending ? 'Iniciando...' : '🔥 Iniciar Horneado'}
             </button>
+            <button
+              onClick={() => navigate(`/planificacion/masas/${masaId}`)}
+              className="w-full px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-medium"
+            >
+              ← Volver al detalle
+            </button>
           </div>
         )}
 
@@ -293,6 +299,12 @@ export const HorneadoMasa: React.FC = () => {
                 {completarMutation.isPending ? 'Completando...' : '✅ Completar Horneado → Ir a Empaque'}
               </button>
             </div>
+            <button
+              onClick={() => navigate(`/planificacion/masas/${masaId}`)}
+              className="w-full px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-medium"
+            >
+              ← Volver al detalle
+            </button>
             {showMO && <ModalMO masaId={Number(masaId)} fase="HORNEADO" onClose={() => setShowMO(false)} />}
           </div>
         )}

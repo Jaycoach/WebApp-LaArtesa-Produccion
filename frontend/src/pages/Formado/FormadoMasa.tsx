@@ -244,6 +244,12 @@ export const FormadoMasa: React.FC = () => {
             >
               {iniciarMutation.isPending ? 'Iniciando...' : '▶ Iniciar Formado'}
             </button>
+            <button
+              onClick={() => navigate(`/planificacion/masas/${masaId}`)}
+              className="w-full px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-medium"
+            >
+              ← Volver al detalle
+            </button>
           </div>
         )}
 
@@ -273,6 +279,12 @@ export const FormadoMasa: React.FC = () => {
               className="w-full bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white font-semibold py-3 rounded-lg transition-colors"
             >
               {completarMutation.isPending ? 'Completando...' : '✅ Completar Formado → Ir a Fermentación'}
+            </button>
+            <button
+              onClick={() => navigate(`/planificacion/masas/${masaId}`)}
+              className="w-full px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-medium"
+            >
+              ← Volver al detalle
             </button>
           </div>
         )}
