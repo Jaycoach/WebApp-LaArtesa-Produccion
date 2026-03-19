@@ -342,6 +342,13 @@ const aprobarMasa = async (req, res, next) => {
     }
 
     // Sin subdivisión: flujo normal
+    // Completar PLANIFICACION (consistencia con flujo de subdivisión)
+    await db.query(
+      `UPDATE progreso_fases
+       SET estado = 'COMPLETADA'
+       WHERE masa_id = $1 AND fase = 'PLANIFICACION'`,
+      [id]
+    );
     await db.query(
       `UPDATE progreso_fases
        SET estado = 'EN_PROGRESO'
@@ -394,6 +401,18 @@ const marcarPendiente = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: `No se puede marcar pendiente una masa en estado ${masa.rows[0].estado}`,
+      });
+    }
+
+    // Bloquear reversión si el pesaje ya fue iniciado (fecha_inicio indica que se tocaron ingredientes)
+    const pesajeFase = await db.query(
+      `SELECT fecha_inicio FROM progreso_fases WHERE masa_id = $1 AND fase = 'PESAJE'`,
+      [id]
+    );
+    if (pesajeFase.rows.length > 0 && pesajeFase.rows[0].fecha_inicio !== null) {
+      return res.status(409).json({
+        success: false,
+        message: 'No se puede revertir la masa: el pesaje ya fue iniciado. Contacta al supervisor de producción.',
       });
     }
 
