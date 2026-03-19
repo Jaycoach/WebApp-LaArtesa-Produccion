@@ -404,15 +404,17 @@ const marcarPendiente = async (req, res, next) => {
       });
     }
 
-    // Bloquear reversión si el pesaje ya fue iniciado (fecha_inicio indica que se tocaron ingredientes)
-    const pesajeFase = await db.query(
-      `SELECT fecha_inicio FROM progreso_fases WHERE masa_id = $1 AND fase = 'PESAJE'`,
+    // Bloquear reversión si ya hay ingredientes con peso registrado (timestamp_peso indica pesaje físico real)
+    const pesosRegistrados = await db.query(
+      `SELECT COUNT(*) AS total
+       FROM ingredientes_masa
+       WHERE masa_id = $1 AND timestamp_peso IS NOT NULL`,
       [id]
     );
-    if (pesajeFase.rows.length > 0 && pesajeFase.rows[0].fecha_inicio !== null) {
+    if (parseInt(pesosRegistrados.rows[0].total) > 0) {
       return res.status(409).json({
         success: false,
-        message: 'No se puede revertir la masa: el pesaje ya fue iniciado. Contacta al supervisor de producción.',
+        message: 'No se puede revertir la masa: ya hay ingredientes pesados. Contacta al supervisor de producción.',
       });
     }
 
