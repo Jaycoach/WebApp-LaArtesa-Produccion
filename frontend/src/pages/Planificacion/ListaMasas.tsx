@@ -53,16 +53,30 @@ export const ListaMasas: React.FC = () => {
     navigate(`/planificacion/masas/${masaId}`);
   };
 
-  const handleAprobar = async (e: React.MouseEvent, masaId: number) => {
+  const [aprobarModal, setAprobarModal] = useState<{ masaId: number; fecha: string } | null>(null);
+
+  const handleAprobar = (e: React.MouseEvent, masaId: number) => {
     e.stopPropagation();
+    const sugerida = new Date();
+    sugerida.setDate(sugerida.getDate() + 4);
+    setAprobarModal({ masaId, fecha: sugerida.toISOString().slice(0, 10) });
+  };
+
+  const confirmarAprobar = async () => {
+    if (!aprobarModal) return;
     try {
-      const result = await aprobarMutation.mutateAsync(masaId);
+      const result = await aprobarMutation.mutateAsync({
+        masaId: aprobarModal.masaId,
+        fecha_vencimiento_sugerida: aprobarModal.fecha || undefined,
+      });
+      setAprobarModal(null);
       if (result?.subdivision?.realizada) {
         const n = result.subdivision.n_tandas;
         alert(`✅ Masa subdividida en ${n} tandas. Cada tanda está aprobada y lista para pesaje.`);
       }
     } catch (error) {
       console.error('Error aprobando masa:', error);
+      setAprobarModal(null);
     }
   };
 
@@ -422,6 +436,42 @@ export const ListaMasas: React.FC = () => {
                 className="flex-1 px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg text-sm font-medium disabled:opacity-50"
               >
                 {pendienteMutation.isPending ? 'Guardando...' : 'Confirmar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Modal confirmación de aprobación con fecha de vencimiento */}
+      {aprobarModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">
+            <h3 className="font-bold text-lg mb-1">Aprobar masa</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Opcionalmente, indica la fecha de vencimiento sugerida para el empaque.
+            </p>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Fecha de vencimiento sugerida
+              <span className="text-gray-400 font-normal ml-1">(opcional)</span>
+            </label>
+            <input
+              type="date"
+              value={aprobarModal.fecha}
+              onChange={e => setAprobarModal(prev => prev ? { ...prev, fecha: e.target.value } : null)}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm mb-4 focus:ring-2 focus:ring-green-400"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={confirmarAprobar}
+                disabled={aprobarMutation.isPending}
+                className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+              >
+                {aprobarMutation.isPending ? 'Aprobando...' : '✓ Confirmar aprobación'}
+              </button>
+              <button
+                onClick={() => setAprobarModal(null)}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
+              >
+                Cancelar
               </button>
             </div>
           </div>
