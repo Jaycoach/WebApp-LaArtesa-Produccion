@@ -64,6 +64,7 @@ interface MasaPendiente {
   estado_empaque: string;
   estado_horneado: string;
   horneado_completo: boolean;
+  lote_produccion: string | null;
   empaque_iniciado: boolean;
   empaque_id: number | null;
   fecha_vencimiento: string | null;
@@ -412,6 +413,11 @@ const PanelPendientes: React.FC<{
                   <span>{masa.tipo_masa}</span>
                   <span>{masa.total_kilos_con_merma.toFixed(2)} kg</span>
                   <span>{fmtFecha(masa.fecha_produccion)}</span>
+                  {masa.lote_produccion && (
+                    <span className="font-mono font-semibold text-indigo-700 bg-indigo-50 px-1.5 rounded">
+                      Lote: {masa.lote_produccion}
+                    </span>
+                  )}
                   <span>{totalOVs > 0 ? `${totalOVs} OV${totalOVs > 1 ? 's' : ''}` : 'Sin OV asignada'}</span>
                   <span>{totalProductos} producto{totalProductos !== 1 ? 's' : ''}</span>
                 </div>
@@ -503,6 +509,22 @@ const PanelEmpaqueMasa: React.FC<{
 }> = ({ masa, onVolver, onCompletado, tiposMO }) => {
   const qc = useQueryClient();
 
+  // Re-fetch del estado real de la masa para detectar cambios post-iniciar
+  const { data: masaActualData, refetch: refetchMasaActual } = useQuery({
+    queryKey: ['empaque-masa-actual', masa.id],
+    queryFn: () => api(`/empaque/${masa.id}`),
+    refetchInterval: false,
+  });
+  const estadoEmpaqueActual: string =
+    masaActualData?.data?.masa?.estado_empaque || masa.estado_empaque;
+  const empaque_iniciado: boolean =
+    masaActualData?.data?.registro_empaque != null || masa.empaque_iniciado;
+  const lote_produccion: string | null =
+    masa.lote_produccion || masaActualData?.data?.masa?.lote_produccion || null;
+  // El formulario activo solo cuando EMPAQUE está EN_PROGRESO (horneado terminado)
+  // Si está PENDIENTE → solo consulta, sin iniciar ni guardar
+  const puedeOperar = estadoEmpaqueActual === 'EN_PROGRESO';
+
   const [detalles, setDetalles] = useState<Record<number, { emp: string; merma: string }>>(() => {
     const init: Record<number, { emp: string; merma: string }> = {};
     masa.ovs.forEach(ov => ov.productos.forEach(p => {
@@ -532,8 +554,9 @@ const PanelEmpaqueMasa: React.FC<{
         method: 'POST',
         body: JSON.stringify({ fecha_vencimiento: fechaVenc }),
       });
+      await refetchMasaActual();
       qc.invalidateQueries({ queryKey: ['empaque-pendientes'] });
-      mostrar('ok', 'Empaque iniciado');
+      mostrar('ok', 'Empaque iniciado — ya puedes ingresar las cantidades');
     } catch (e: any) { mostrar('err', e.message); }
     finally { setSaving(false); }
   };
@@ -607,13 +630,37 @@ const PanelEmpaqueMasa: React.FC<{
           <h2 className="text-lg font-bold text-gray-800">{masa.nombre_masa}</h2>
           <p className="text-xs text-gray-500 font-mono">{masa.codigo_masa} · {masa.total_kilos_con_merma.toFixed(2)} kg</p>
         </div>
-        <button
-          onClick={() => setModalMO(true)}
-          className="text-xs px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50 text-gray-600"
-        >
-          + Mano de obra
-        </button>
+        {empaque_iniciado && puedeOperar && (
+          <button
+            onClick={() => setModalMO(true)}
+            className="text-xs px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50 text-gray-600"
+          >
+            + Mano de obra
+          </button>
+        )}
       </div>
+
+      {/* Banner de lote */}
+      {lote_produccion && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-lg">
+          <span className="text-indigo-600 font-medium text-sm">Lote:</span>
+          <span className="font-mono font-bold text-indigo-800 text-base tracking-wider">{lote_produccion}</span>
+        </div>
+      )}
+
+      {/* Banner PENDIENTE — horneado no terminado aún */}
+      {!puedeOperar && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex items-start gap-3">
+          <span className="text-amber-500 text-xl">⏳</span>
+          <div>
+            <p className="text-amber-800 font-semibold text-sm">Empaque en alistamiento</p>
+            <p className="text-amber-700 text-xs mt-0.5">
+              El horneado aún no ha finalizado. Puedes consultar los productos y materiales,
+              pero el empaque se habilitará cuando se complete el horneado.
+            </p>
+          </div>
+        </div>
+      )}
 
       {msg && (
         <div className={`px-4 py-2 rounded text-sm font-medium ${
@@ -648,7 +695,7 @@ const PanelEmpaqueMasa: React.FC<{
         </div>
       </div>
 
-      {!masa.empaque_iniciado && (
+      {puedeOperar && !empaque_iniciado && (
         <Card className="p-4">
           <label className="block text-sm font-semibold text-gray-700 mb-2">
             Fecha de vencimiento del lote <span className="text-red-500">*</span>
@@ -662,12 +709,27 @@ const PanelEmpaqueMasa: React.FC<{
             />
             <button
               onClick={iniciar}
-              disabled={saving || !fechaVenc}
+              disabled={saving || !fechaVenc || !puedeOperar || empaque_iniciado}
               className="bg-blue-600 text-white px-5 py-2 rounded hover:bg-blue-700 disabled:opacity-50 font-medium text-sm"
             >
               {saving ? 'Iniciando...' : 'Iniciar empaque'}
             </button>
           </div>
+        </Card>
+      )}
+
+      {/* Fecha de vencimiento editable en modo PENDIENTE (pre-llenado para cuando se habilite) */}
+      {!puedeOperar && (
+        <Card className="p-4">
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Fecha de vencimiento <span className="text-gray-400 font-normal text-xs">(se guardará al iniciar)</span>
+          </label>
+          <input
+            type="date"
+            value={fechaVenc}
+            onChange={e => setFechaVenc(e.target.value)}
+            className="border border-gray-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400"
+          />
         </Card>
       )}
 
@@ -726,7 +788,7 @@ const PanelEmpaqueMasa: React.FC<{
                         )}
                       </td>
                       <td className="p-2 text-right">
-                        {masa.empaque_iniciado ? (
+                        {empaque_iniciado && puedeOperar ? (
                           <input
                             type="number" min="0"
                             value={det.emp}
@@ -740,7 +802,7 @@ const PanelEmpaqueMasa: React.FC<{
                         )}
                       </td>
                       <td className="p-2 text-right">
-                        {masa.empaque_iniciado ? (
+                        {empaque_iniciado && puedeOperar ? (
                           <input
                             type="number" min="0"
                             value={det.merma}
@@ -754,7 +816,7 @@ const PanelEmpaqueMasa: React.FC<{
                         )}
                       </td>
                       <td className="p-2 text-right">
-                        {masa.empaque_iniciado ? (
+                        {empaque_iniciado && puedeOperar ? (
                           <span className={`font-mono text-sm font-bold ${
                             faltante > 0 ? 'text-red-600' : faltante < 0 ? 'text-blue-600' : 'text-green-600'
                           }`}>
@@ -766,7 +828,7 @@ const PanelEmpaqueMasa: React.FC<{
                       </td>
                       <td className="p-2">
                         <div className="flex gap-1 justify-end">
-                          {masa.empaque_iniciado && (
+                          {empaque_iniciado && puedeOperar && (
                             <button
                               onClick={() => guardarDetalle(p.id)}
                               disabled={savingId === p.id}
@@ -793,7 +855,7 @@ const PanelEmpaqueMasa: React.FC<{
         </Card>
       ))}
 
-      {masa.empaque_iniciado && (
+      {empaque_iniciado && puedeOperar && (
         <div className="flex justify-end">
           <button
             onClick={() => handleCompletar()}

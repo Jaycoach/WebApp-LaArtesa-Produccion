@@ -109,7 +109,8 @@ exports.registrarEntradaCamara = async (req, res) => {
     const {
       temperatura_camara,
       humedad_camara,
-      observaciones
+      observaciones,
+      hora_entrada_real
     } = req.body;
 
     const usuario = req.user;
@@ -166,8 +167,8 @@ exports.registrarEntradaCamara = async (req, res) => {
         observaciones
       ) VALUES (
         $1,
-        NOW(),
-        NOW() + INTERVAL '${tiempoEstandar} minutes',
+        COALESCE($9::timestamptz, NOW()),
+        COALESCE($9::timestamptz, NOW()) + INTERVAL '${tiempoEstandar} minutes',
         $2,
         $3,
         $4,
@@ -187,7 +188,8 @@ exports.registrarEntradaCamara = async (req, res) => {
       requiereFrio,
       usuario.id,
       usuario.nombre_completo,
-      observaciones || null
+      observaciones || null,
+      hora_entrada_real || null
     ]);
 
     // Actualizar progreso de fase FERMENTACION a EN_PROGRESO
@@ -198,12 +200,12 @@ exports.registrarEntradaCamara = async (req, res) => {
         fecha_inicio = NOW(),
         usuario_responsable = $2,
         datos_fase = jsonb_build_object(
-          'entrada_camara', NOW(),
-          'salida_sugerida', NOW() + INTERVAL '${tiempoEstandar} minutes'
+          'entrada_camara', COALESCE($3::timestamptz, NOW()),
+          'salida_sugerida', COALESCE($3::timestamptz, NOW()) + INTERVAL '${tiempoEstandar} minutes'
         )
       WHERE masa_id = $1 AND fase = 'FERMENTACION'
     `;
-    await client.query(updateFaseQuery, [masaId, usuario.id]);
+    await client.query(updateFaseQuery, [masaId, usuario.id, hora_entrada_real || null]);
 
     // Actualizar fase_actual de la masa
     const updateMasaQuery = `
@@ -270,10 +272,12 @@ exports.registrarSalidaCamara = async (req, res) => {
 
     const registro = registroResult.rows[0];
 
-    // Actualizar con hora de salida real
+    // Fix defensivo: si hora_entrada_camara es NULL (registro creado por flujo antiguo),
+    // rellenarla con la hora de salida para no violar check_salida_camara
     const updateQuery = `
       UPDATE registros_fermentacion
       SET
+        hora_entrada_camara     = COALESCE(hora_entrada_camara, COALESCE($3::timestamptz, NOW())),
         hora_salida_camara_real = COALESCE($3::timestamptz, NOW()),
         observaciones = COALESCE($2, observaciones)
       WHERE id = $1
