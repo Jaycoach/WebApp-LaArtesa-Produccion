@@ -626,8 +626,8 @@ const PanelEmpaqueMasa: React.FC<{
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-3">
-        <button onClick={onVolver} className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1">
-          ← Volver
+        <button onClick={onVolver} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm font-medium">
+          ← Volver a la lista
         </button>
         <div className="flex-1">
           <h2 className="text-lg font-bold text-gray-800">{masa.nombre_masa}</h2>
@@ -891,7 +891,7 @@ const PanelEmpaqueMasa: React.FC<{
       )}
 
       <div className="pt-2 border-t border-gray-100">
-        <button onClick={onVolver} className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1">
+        <button onClick={onVolver} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm font-medium">
           ← Volver a la lista
         </button>
       </div>

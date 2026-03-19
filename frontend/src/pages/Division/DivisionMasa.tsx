@@ -217,10 +217,16 @@ export const DivisionMasa: React.FC = () => {
                 </p>
               )}
             </div>
-            <div className="text-right">
+            <div className="text-right flex flex-col items-end gap-2">
               <span className="px-4 py-2 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
                 {masa.fase_actual}
               </span>
+              <button
+                onClick={() => navigate(`/planificacion/masas/${masaId}`)}
+                className="text-sm text-gray-500 hover:text-gray-800"
+              >
+                ← Volver
+              </button>
             </div>
           </div>
         </div>
