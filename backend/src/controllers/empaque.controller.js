@@ -170,9 +170,11 @@ exports.getEmpaqueInfo = async (req, res) => {
     const masaR = await db.query(
       `SELECT mp.id, mp.uuid, mp.codigo_masa, mp.tipo_masa, mp.nombre_masa,
               mp.estado, mp.fase_actual, mp.lote_produccion, mp.fecha_produccion,
-              rh.fecha_vencimiento_sugerida
+              rh.fecha_vencimiento_sugerida,
+              pf_e.estado AS estado_empaque
        FROM masas_produccion mp
        LEFT JOIN registros_horneado rh ON rh.masa_id = mp.id
+       LEFT JOIN progreso_fases pf_e ON pf_e.masa_id = mp.id AND pf_e.fase = 'EMPAQUE'
        WHERE mp.id = $1
        ORDER BY rh.fecha_registro DESC
        LIMIT 1`,
@@ -598,6 +600,7 @@ exports.getMasasPendientesEmpaque = async (req, res) => {
       SELECT mp.id, mp.codigo_masa, mp.nombre_masa, mp.tipo_masa,
              mp.total_kilos_con_merma, mp.fecha_produccion,
              mp.es_subdivision, mp.masa_padre_id,
+             mp.lote_produccion,
              pf_e.estado AS estado_empaque,
              COALESCE(pf_h.estado, 'BLOQUEADA') AS estado_horneado
       FROM masas_produccion mp
@@ -718,6 +721,7 @@ exports.getMasasPendientesEmpaque = async (req, res) => {
         estado_empaque:          masa.estado_empaque,
         estado_horneado:         masa.estado_horneado,
         horneado_completo:       masa.estado_horneado === 'COMPLETADA',
+        lote_produccion:         masa.lote_produccion || null,
         empaque_iniciado:        empR.rows.length > 0,
         empaque_id:              empR.rows[0]?.id || null,
         fecha_vencimiento:       empR.rows[0]?.fecha_vencimiento || null,
@@ -895,7 +899,7 @@ exports.getEtiqueta = async (req, res) => {
         registro_invima:  etq.registro_invima || '',
         fabricante_txt:   etq.fabricante_txt || 'La Artesa SAS – Bogotá, Colombia',
         fecha_vencimiento: prod.fecha_vencimiento,
-        lote:                 prod.lote_produccion || prod.sap_doc_num || '',
+        lote:                 prod.lote_produccion || prod.sap_doc_num || prod.codigo_masa || '',
         costo_unitario_final: prod.costo_unitario_final,
         costo_pan_unitario:   prod.costo_pan_unitario,
       },

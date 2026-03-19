@@ -53,7 +53,16 @@ export const FermentacionMasa: React.FC = () => {
   const [humedad, setHumedad] = useState('');
   const [observaciones, setObservaciones] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [horaEntradaReal, setHoraEntradaReal] = useState('');
   const [horaSalidaReal, setHoraSalidaReal] = useState('');
+
+  // Hora actual del cliente en formato datetime-local (timezone Colombia)
+  const ahoraLocal = () => {
+    const now = new Date();
+    const offset = now.getTimezoneOffset();
+    const local = new Date(now.getTime() - offset * 60000);
+    return local.toISOString().slice(0, 16);
+  };
 
   const { data, isLoading } = useQuery({
     queryKey: ['fermentacion', masaId],
@@ -64,13 +73,19 @@ export const FermentacionMasa: React.FC = () => {
   useEffect(() => {
     if (!data?.registro_actual) return;
     const reg = data.registro_actual;
-    // Columnas del controller: hora_entrada_camara, hora_salida_camara_real, requiere_camara_frio, hora_entrada_frio, hora_salida_frio
     if (!reg.hora_entrada_camara) setSubEtapa('entrada_camara');
     else if (!reg.hora_salida_camara_real) setSubEtapa('salida_camara');
     else if (reg.requiere_camara_frio && !reg.hora_entrada_frio) setSubEtapa('entrada_frio');
     else if (reg.requiere_camara_frio && !reg.hora_salida_frio) setSubEtapa('salida_frio');
     else setSubEtapa('completada');
   }, [data]);
+
+  // Pre-rellenar con hora actual del cliente cada vez que cambia la sub-etapa
+  useEffect(() => {
+    const ahora = ahoraLocal();
+    if (subEtapa === 'entrada_camara') setHoraEntradaReal(ahora);
+    if (subEtapa === 'salida_camara' || subEtapa === 'salida_frio') setHoraSalidaReal(ahora);
+  }, [subEtapa]);
 
   const mutacion = useMutation({
     mutationFn: async ({ endpoint, body }: { endpoint: string; body: object }) =>
@@ -179,6 +194,17 @@ export const FermentacionMasa: React.FC = () => {
           {subEtapa === 'entrada_camara' && (
             <>
               <h2 className="text-lg font-semibold text-gray-800">Entrada a Cámara de Fermentación</h2>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Hora real de entrada <span className="text-gray-400 font-normal">(por defecto hora actual)</span>
+                </label>
+                <input
+                  type="datetime-local"
+                  value={horaEntradaReal}
+                  onChange={e => setHoraEntradaReal(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Temperatura °C</label>
@@ -197,7 +223,11 @@ export const FermentacionMasa: React.FC = () => {
                   rows={2} className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none" />
               </div>
               <button
-                onClick={() => avanzar('camara/entrada', { temperatura_camara: parseFloat(temperatura), humedad_camara: parseFloat(humedad) })}
+                onClick={() => avanzar('camara/entrada', {
+                  temperatura_camara: parseFloat(temperatura) || null,
+                  humedad_camara: parseFloat(humedad) || null,
+                  hora_entrada_real: horaEntradaReal || undefined,
+                })}
                 disabled={mutacion.isPending}
                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-semibold py-3 rounded-lg transition-colors"
               >
