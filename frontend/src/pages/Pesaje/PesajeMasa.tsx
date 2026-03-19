@@ -265,6 +265,15 @@ export const PesajeMasa: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto space-y-6">
+        {/* Botón Volver superior */}
+        <div>
+          <button
+            onClick={() => navigate(`/planificacion/masas/${masaId}`)}
+            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm font-medium"
+          >
+            ← Volver al detalle
+          </button>
+        </div>
         {/* Header */}
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex justify-between items-start">
