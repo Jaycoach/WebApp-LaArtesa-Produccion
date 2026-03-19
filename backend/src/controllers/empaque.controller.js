@@ -593,6 +593,7 @@ exports.completarEmpaque = async (req, res) => {
 // en la masa padre (mismo sap_item_code).
 exports.getMasasPendientesEmpaque = async (req, res) => {
   try {
+    const fecha = req.query.fecha || new Date().toISOString().slice(0, 10);
     const masasR = await db.query(`
       SELECT mp.id, mp.codigo_masa, mp.nombre_masa, mp.tipo_masa,
              mp.total_kilos_con_merma, mp.fecha_produccion,
@@ -604,8 +605,9 @@ exports.getMasasPendientesEmpaque = async (req, res) => {
       LEFT JOIN progreso_fases pf_h ON pf_h.masa_id = mp.id AND pf_h.fase = 'HORNEADO'
       WHERE pf_e.estado IN ('PENDIENTE', 'EN_PROGRESO')
         AND mp.estado NOT IN ('SUBDIVIDIDA', 'CANCELADA', 'PLANIFICACION')
-      ORDER BY mp.fecha_produccion DESC, mp.id DESC
-    `);
+        AND mp.fecha_produccion = $1
+      ORDER BY mp.id DESC
+    `, [fecha]);
 
     if (!masasR.rows.length)
       return res.json({ success: true, data: [] });
@@ -625,7 +627,8 @@ exports.getMasasPendientesEmpaque = async (req, res) => {
                END AS unidades_referencia,
                COALESCE(ppm.division_completada, false) AS division_completada,
                COALESCE(ppm.unidades_producidas, 0) AS unidades_producidas,
-               ppm.sap_doc_num, ppm.sap_doc_entry
+               ppm.sap_doc_num, ppm.sap_doc_entry,
+               ppm.unidades_por_paquete
         FROM productos_por_masa ppm
         WHERE ppm.masa_id = $1
         ORDER BY ppm.sap_doc_num, ppm.producto_nombre

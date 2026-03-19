@@ -37,6 +37,7 @@ interface ProductoPendiente {
   unidades_referencia: number;
   division_completada: boolean;
   unidades_producidas: number;
+  unidades_por_paquete: number | null;
   sap_doc_num: string | null;
   sap_doc_entry: number | null;
 }
@@ -441,7 +442,16 @@ const PanelPendientes: React.FC<{
                       </div>
                       <div className="flex items-center gap-3 ml-3 shrink-0">
                         <span className="text-gray-500">
-                          <span className="font-semibold text-gray-700">{p.unidades_programadas}</span> uds prog.
+                          <span className="font-semibold text-gray-700">{p.unidades_programadas}</span> uds
+                        </span>
+                        <span className="text-purple-700 font-semibold">
+                          {(() => {
+                            const xSAP = parseFloat(String(p.unidades_por_paquete || 0));
+                            const xNombre = p.producto_nombre?.match(/ X ?(\d+)/i);
+                            const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
+                            const paquetes = xPaq > 1 ? Math.ceil(p.unidades_programadas / xPaq) : p.unidades_programadas;
+                            return `${paquetes} paq`;
+                          })()}
                         </span>
                         {p.division_completada && (
                           <span className="text-blue-600 font-semibold">{p.unidades_referencia} div.</span>
@@ -1189,6 +1199,7 @@ export const EmpaqueMasa: React.FC = () => {
   const qc = useQueryClient();
 
   const [modo, setModo] = useState<'lista' | 'masa' | 'ov' | 'resumen'>('lista');
+  const [fechaLista, setFechaLista] = useState(new Date().toISOString().slice(0, 10));
   const [fechaResumen, setFechaResumen] = useState(new Date().toISOString().slice(0, 10));
   const [masaSeleccionada, setMasaSeleccionada] = useState<MasaPendiente | null>(null);
 
@@ -1209,8 +1220,8 @@ export const EmpaqueMasa: React.FC = () => {
 
   const { data: pendientesData, isLoading: loadingPendientes, refetch: refetchPendientes } =
     useQuery<{ data: MasaPendiente[] }>({
-      queryKey: ['empaque-pendientes'],
-      queryFn: () => api('/empaque/pendientes'),
+      queryKey: ['empaque-pendientes', fechaLista],
+      queryFn: () => api(`/empaque/pendientes?fecha=${fechaLista}`),
       refetchInterval: 30000,
     });
   const masasPendientes = pendientesData?.data || [];
@@ -1341,6 +1352,15 @@ export const EmpaqueMasa: React.FC = () => {
       {/* Tab: lista de masas pendientes */}
       {modo === 'lista' && (
         <div>
+          <div className="flex items-center gap-3 mb-4">
+            <label className="text-sm font-medium text-gray-700">Fecha de producción:</label>
+            <input
+              type="date"
+              value={fechaLista}
+              onChange={e => setFechaLista(e.target.value)}
+              className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-400"
+            />
+          </div>
           {loadingPendientes ? (
             <div className="text-center py-10 text-gray-400 text-sm">Cargando masas...</div>
           ) : (

@@ -217,7 +217,7 @@ const sincronizarSAP = async (req, res, next) => {
       }
 
       // Crear registros de progreso para todas las fases
-      const fases = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO'];
+      const fases = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO', 'EMPAQUE'];
       for (let i = 0; i < fases.length; i++) {
         const fase = fases[i];
         // PLANIFICACION inicia EN_PROGRESO, las demás bloqueadas
@@ -602,7 +602,7 @@ const sincronizarDemo = async (req, res, next) => {
       }
 
       // Crear registros de progreso
-      const fases = ['PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO'];
+      const fases = ['PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO', 'EMPAQUE'];
       for (let i = 0; i < fases.length; i++) {
         const fase = fases[i];
         const estado = i === 0 ? 'EN_PROGRESO' : 'BLOQUEADA';
@@ -892,7 +892,11 @@ const sincronizarDesdeOV = async (req, res, next) => {
                   prod.kilosPedidos || 0,
                   prod.kilosPedidos || 0,
                   prod.itemCode,
-                  prod.unidadesPorPaquete,
+                  (() => {
+                    if (prod.unidadesPorPaquete && prod.unidadesPorPaquete > 1) return prod.unidadesPorPaquete;
+                    const m = prod.descripcion?.match(/ X ?(\d+)/i);
+                    return m ? parseInt(m[1]) : 1;
+                  })(),
                   prod.cantidadPaquetes,
                   prod.docEntry,
                   String(prod.docNum)
@@ -1056,7 +1060,12 @@ const sincronizarDesdeOV = async (req, res, next) => {
             prod.unidadesPedidas,                                   // $5 unidades_pedidas / unidades_programadas
             kiloPorItemCode[prod.itemCode] * prod.cantidadPaquetes, // $6 kilos_pedidos / kilos_programados
             prod.itemCode,                                          // $7 sap_item_code
-            prod.unidadesPorPaquete,                                // $8
+            (() => {
+              // Usar dato de SAP si viene > 1, si no extraer del nombre (ej: "X 4", "X6", "X 20")
+              if (prod.unidadesPorPaquete && prod.unidadesPorPaquete > 1) return prod.unidadesPorPaquete;
+              const m = prod.descripcion?.match(/ X ?(\d+)/i);
+              return m ? parseInt(m[1]) : 1;
+            })(),                                                   // $8 unidades_por_paquete
             prod.cantidadPaquetes,                                  // $9
             prod.docEntry,                                          // $10
             String(prod.docNum),                                    // $11
@@ -1145,7 +1154,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
       // ── Fin población ingredientes_masa ──────────────────────────────
 
       // Crear registros de progreso para todas las fases
-      const fases = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO'];
+      const fases = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO', 'EMPAQUE'];
       for (let i = 0; i < fases.length; i++) {
         await client.query(
           `INSERT INTO progreso_fases (masa_id, fase, estado, porcentaje_completado)
