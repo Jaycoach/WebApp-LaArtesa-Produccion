@@ -171,7 +171,8 @@ exports.getEmpaqueInfo = async (req, res) => {
       `SELECT mp.id, mp.uuid, mp.codigo_masa, mp.tipo_masa, mp.nombre_masa,
               mp.estado, mp.fase_actual, mp.lote_produccion, mp.fecha_produccion,
               rh.fecha_vencimiento_sugerida,
-              pf_e.estado AS estado_empaque
+              pf_e.estado AS estado_empaque,
+              pf_e.datos_fase AS empaque_datos_fase
        FROM masas_produccion mp
        LEFT JOIN registros_horneado rh ON rh.masa_id = mp.id
        LEFT JOIN progreso_fases pf_e ON pf_e.masa_id = mp.id AND pf_e.fase = 'EMPAQUE'

@@ -344,6 +344,12 @@ export const FermentacionMasa: React.FC = () => {
                 >
                   🔥 Ir a Horneado →
                 </button>
+                <button
+                  onClick={() => navigate(`/planificacion/masas/${masaId}`)}
+                  className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-medium"
+                >
+                  ← Volver al detalle
+                </button>
               </div>
             </div>
           )}

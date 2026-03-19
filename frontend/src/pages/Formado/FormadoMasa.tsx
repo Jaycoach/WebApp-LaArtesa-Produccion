@@ -300,6 +300,12 @@ export const FormadoMasa: React.FC = () => {
               >
                 Ir a Fermentación →
               </button>
+              <button
+                onClick={() => navigate(`/planificacion/masas/${masaId}`)}
+                className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-medium"
+              >
+                ← Volver al detalle
+              </button>
             </div>
           </div>
         )}

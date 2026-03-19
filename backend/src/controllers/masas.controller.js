@@ -268,6 +268,8 @@ const aprobarMasa = async (req, res, next) => {
     }
 
     // Marcar masa como APROBADA
+    const { fecha_vencimiento_sugerida } = req.body;
+
     await db.query(
       `UPDATE masas_produccion
        SET estado = 'APROBADA',
@@ -277,6 +279,14 @@ const aprobarMasa = async (req, res, next) => {
        WHERE id = $1`,
       [id, req.user.id]
     );
+    if (fecha_vencimiento_sugerida) {
+      await db.query(
+        `UPDATE progreso_fases
+         SET datos_fase = COALESCE(datos_fase, '{}'::jsonb) || $2::jsonb
+         WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
+        [id, JSON.stringify({ fecha_vencimiento_sugerida })]
+      );
+    }
 
     // Intentar subdivisión (conPesaje=false → sub-masas arrancan en PLANIFICACION)
     const resultadoSubdivision = await ejecutarSubdivision(id, req.user.id, false);
@@ -312,6 +322,14 @@ const aprobarMasa = async (req, res, next) => {
            WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
           [subMasa.id]
         );
+        if (fecha_vencimiento_sugerida) {
+          await db.query(
+            `UPDATE progreso_fases
+             SET datos_fase = COALESCE(datos_fase, '{}'::jsonb) || $2::jsonb
+             WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
+            [subMasa.id, JSON.stringify({ fecha_vencimiento_sugerida })]
+          );
+        }
       }
 
       logger.info(`Masa ${id} subdividida en ${resultadoSubdivision.n_tandas} tandas y aprobadas por usuario ${req.user.id}`);
@@ -336,6 +354,14 @@ const aprobarMasa = async (req, res, next) => {
        WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
       [id]
     );
+    if (fecha_vencimiento_sugerida) {
+      await db.query(
+        `UPDATE progreso_fases
+         SET datos_fase = COALESCE(datos_fase, '{}'::jsonb) || $2::jsonb
+         WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
+        [id, JSON.stringify({ fecha_vencimiento_sugerida })]
+      );
+    }
 
     logger.info(`Masa ${id} APROBADA por usuario ${req.user.id}`);
 

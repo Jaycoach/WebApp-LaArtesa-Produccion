@@ -307,12 +307,20 @@ export const HorneadoMasa: React.FC = () => {
                 <p className="text-green-600 text-sm">¡Producción exitosa! Listo para empaque.</p>
               </div>
             </div>
-            <button
-              onClick={() => navigate(`/empaque/${masaId}`)}
-              className="bg-amber-600 hover:bg-amber-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
-            >
-              📦 Ir a Empaque →
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={() => navigate(`/empaque/${masaId}`)}
+                className="bg-amber-600 hover:bg-amber-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
+              >
+                📦 Ir a Empaque →
+              </button>
+              <button
+                onClick={() => navigate(`/planificacion/masas/${masaId}`)}
+                className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-medium"
+              >
+                ← Volver al detalle
+              </button>
+            </div>
           </div>
         )}
       </div>

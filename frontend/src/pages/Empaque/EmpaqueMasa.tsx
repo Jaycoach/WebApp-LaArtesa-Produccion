@@ -533,7 +533,10 @@ const PanelEmpaqueMasa: React.FC<{
     return init;
   });
 
-  const [fechaVenc, setFechaVenc] = useState(masa.fecha_vencimiento || '');
+  const fechaVencInicial = masa.fecha_vencimiento
+    || (masaActualData?.data?.masa?.empaque_datos_fase as Record<string, string> | null)?.fecha_vencimiento_sugerida
+    || '';
+  const [fechaVenc, setFechaVenc] = useState(fechaVencInicial);
   const [saving, setSaving] = useState(false);
   const [savingId, setSavingId] = useState<number | null>(null);
   const [msg, setMsg] = useState<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
@@ -886,6 +889,12 @@ const PanelEmpaqueMasa: React.FC<{
       {etiquetaData && (
         <Etiqueta data={etiquetaData} onClose={() => setEtiquetaData(null)} />
       )}
+
+      <div className="pt-2 border-t border-gray-100">
+        <button onClick={onVolver} className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1">
+          ← Volver a la lista
+        </button>
+      </div>
     </div>
   );
 };
