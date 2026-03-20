@@ -91,8 +91,9 @@ export const ListaMasas: React.FC = () => {
     try {
       await pendienteMutation.mutateAsync({ masaId: masaPendienteId, motivo: motivoPendiente });
       setMasaPendienteId(null);
-    } catch (error) {
-      console.error('Error marcando pendiente:', error);
+    } catch (error: any) {
+      const msg = error?.message || 'Error desconocido al marcar como pendiente';
+      alert(`⚠️ No se pudo marcar como pendiente:\n\n${msg}`);
     }
   };
 
@@ -135,23 +136,23 @@ export const ListaMasas: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-gray-50 p-3 md:p-6">
       <div className="max-w-7xl mx-auto">
 
         {/* Header */}
-        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-          <div className="flex justify-between items-center">
+        <div className="bg-white rounded-lg shadow-sm p-4 md:p-6 mb-4 md:mb-6">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">Masas de Producción</h1>
-              <p className="text-gray-600 mt-1">Gestiona las masas programadas para el día</p>
+              <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Masas de Producción</h1>
+              <p className="text-gray-600 mt-1 text-sm md:text-base">Gestiona las masas programadas para el día</p>
             </div>
 
-            <div className="flex gap-3 items-center">
+            <div className="flex flex-wrap gap-2 items-center">
               <input
                 type="date"
                 value={fecha}
                 onChange={(e) => setFecha(e.target.value)}
-                className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm w-full sm:w-auto"
               />
 
               {/* Botón sincronizar BOM */}
@@ -159,7 +160,7 @@ export const ListaMasas: React.FC = () => {
                 onClick={handleSincronizarBOM}
                 disabled={sincronizarBOMMutation.isPending || sincronizarMutation.isPending}
                 title="Sincronizar listas de materiales (BOM) desde SAP. Ejecutar antes de completar Planificación."
-                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2 text-sm"
+                className="px-3 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2 text-sm flex-1 sm:flex-none justify-center"
               >
                 {sincronizarBOMMutation.isPending ? (
                   <>
@@ -183,7 +184,7 @@ export const ListaMasas: React.FC = () => {
               <button
                 onClick={handleSincronizar}
                 disabled={sincronizarMutation.isPending || sincronizarBOMMutation.isPending}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 flex-1 sm:flex-none justify-center text-sm"
               >
                 {sincronizarMutation.isPending ? (
                   <>
@@ -287,7 +288,7 @@ export const ListaMasas: React.FC = () => {
 
         {/* Lista de masas */}
         {!isLoading && masas && masas.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-6">
             {[...masas].sort((a, b) => Number(b.es_repeticion) - Number(a.es_repeticion)).map((masa: MasaProduccionResumen) => (
               <div
                 key={masa.id}
@@ -302,7 +303,7 @@ export const ListaMasas: React.FC = () => {
                 }`}
                 onClick={() => handleVerDetalle(masa.id)}
               >
-                <div className="p-6">
+                <div className="p-4 md:p-6">
                   {/* Header de la card */}
                   <div className="flex justify-between items-start mb-4">
                     <div className="flex-1 min-w-0">
@@ -328,7 +329,7 @@ export const ListaMasas: React.FC = () => {
                         </span>
                       )}
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className={`text-xl font-bold ${masa.es_repeticion ? 'text-red-600' : 'text-gray-900'}`}>
+                        <h3 className={`text-lg md:text-xl font-bold ${masa.es_repeticion ? 'text-red-600' : 'text-gray-900'}`}>
                           {masa.tipo_masa}
                         </h3>
                       </div>
