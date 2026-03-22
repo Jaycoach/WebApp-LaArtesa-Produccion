@@ -205,6 +205,19 @@ class AuthService {
   }
 
   /**
+   * Solicitar verificación de email para usuario existente sin verificar
+   */
+  async requestEmailVerification(username: string, email: string): Promise<void> {
+    const response = await apiService.post<{ message: string }>(
+      API_CONFIG.ENDPOINTS.AUTH.REQUEST_VERIFICATION,
+      { username, email }
+    );
+    if (!response.success) {
+      throw new Error(response.message || 'Error al solicitar verificación');
+    }
+  }
+
+  /**
    * Verificar email con token
    */
   async verifyEmail(token: string): Promise<{ email: string; nombre: string }> {

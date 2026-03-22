@@ -53,6 +53,13 @@ class AuthController {
       });
     } catch (error) {
       logger.error('Error en login:', error);
+      if (error.code === 'EMAIL_NOT_VERIFIED') {
+        return res.status(403).json({
+          success: false,
+          code: 'EMAIL_NOT_VERIFIED',
+          message: error.message,
+        });
+      }
       next(error);
     }
   }
@@ -237,6 +244,33 @@ class AuthController {
       });
     } catch (error) {
       logger.error('Error al actualizar perfil:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Solicitar verificación de email (usuario existente sin verificar)
+   * POST /api/auth/request-verification
+   */
+  async requestEmailVerification(req, res, next) {
+    try {
+      const { username, email } = req.body;
+
+      if (!username || !email) {
+        return res.status(400).json({
+          success: false,
+          message: 'Usuario y correo son requeridos',
+        });
+      }
+
+      const result = await authService.requestEmailVerification(username, email);
+
+      res.json({
+        success: true,
+        message: result.message,
+      });
+    } catch (error) {
+      logger.error('Error en requestEmailVerification:', error);
       next(error);
     }
   }

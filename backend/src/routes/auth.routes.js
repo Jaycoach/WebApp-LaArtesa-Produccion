@@ -536,4 +536,7 @@ router.get('/verify', verifyToken, authController.verifyToken);
 // Verificación de email (sin auth — el token en query string es la credencial)
 router.get('/verify-email', authController.verifyEmail);
 
+// Solicitar verificación de email para usuario existente sin verificar
+router.post('/request-verification', authController.requestEmailVerification);
+
 module.exports = router;

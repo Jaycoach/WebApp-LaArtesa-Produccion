@@ -20,6 +20,7 @@ export const API_CONFIG = {
       FORGOT_PASSWORD: '/auth/forgot-password',
       RESET_PASSWORD: '/auth/reset-password',
       VERIFY_EMAIL: '/auth/verify-email',
+      REQUEST_VERIFICATION: '/auth/request-verification',
       REGISTER: '/auth/register',
     },
 
