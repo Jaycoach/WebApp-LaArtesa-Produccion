@@ -98,9 +98,9 @@ class AuthService {
     try {
       // Buscar usuario
       const result = await client.query(
-        `SELECT id, username, email, password_hash, nombre_completo, rol, activo, 
-                intentos_fallidos, bloqueado_hasta
-         FROM usuarios 
+        `SELECT id, username, email, password_hash, nombre_completo, rol, activo,
+                email_verificado, intentos_fallidos, bloqueado_hasta
+         FROM usuarios
          WHERE username = $1 OR email = $1`,
         [username],
       );
@@ -119,6 +119,13 @@ class AuthService {
       // Verificar si está activo
       if (!user.activo) {
         throw new Error('Cuenta desactivada');
+      }
+
+      // Verificar email verificado
+      if (!user.email_verificado) {
+        const err = new Error('Debes verificar tu correo antes de iniciar sesión');
+        err.code = 'EMAIL_NOT_VERIFIED';
+        throw err;
       }
 
       // Verificar contraseña
@@ -436,6 +443,74 @@ class AuthService {
     } catch (error) {
       await client.query('ROLLBACK');
       logger.error('Error al cambiar contraseña:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Solicitar verificación de email para usuario existente sin verificar
+   */
+  async requestEmailVerification(username, email) {
+    const client = await pool.getClient();
+
+    try {
+      // Buscar usuario por username
+      const result = await client.query(
+        `SELECT id, username, nombre_completo, email_verificado
+         FROM usuarios
+         WHERE username = $1 AND activo = false`,
+        [username],
+      );
+
+      if (result.rows.length === 0) {
+        throw new Error('Usuario no encontrado');
+      }
+
+      const user = result.rows[0];
+
+      if (user.email_verificado) {
+        throw new Error('Este usuario ya tiene el correo verificado');
+      }
+
+      // Verificar que el email no esté en uso por otro usuario
+      const emailExists = await client.query(
+        'SELECT id FROM usuarios WHERE email = $1 AND id != $2',
+        [email, user.id],
+      );
+
+      if (emailExists.rows.length > 0) {
+        throw new Error('Ese correo ya está registrado en otro usuario');
+      }
+
+      // Generar token de verificación
+      const rawToken = crypto.randomBytes(32).toString('hex');
+      const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+      // Actualizar email y token en DB
+      await client.query(
+        `UPDATE usuarios
+         SET email = $1,
+             token_verificacion = $2,
+             email_verificado = false,
+             fecha_actualizacion = NOW()
+         WHERE id = $3`,
+        [email, hashedToken, user.id],
+      );
+
+      // Enviar email de verificación
+      await emailService.sendVerificationEmail({
+        to: email,
+        nombre: user.nombre_completo,
+        token: rawToken,
+      });
+
+      logger.info(`Verificación de email solicitada para ${username} → ${email}`);
+
+      return { message: 'Correo de verificación enviado' };
+    } catch (error) {
+      logger.error('Error en requestEmailVerification:', error);
       throw error;
     } finally {
       client.release();
