@@ -1,6 +1,6 @@
 {
   "name": "la-artesa-frontend",
-  "version": "1.0.0",
+  "version": "1.6.0",
   "type": "module",
   "description": "Sistema de Control de Producción - La Artesa",
   "scripts": {

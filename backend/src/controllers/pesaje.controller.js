@@ -14,6 +14,37 @@ const db        = require('../database/connection');
 const logger     = require('../utils/logger');
 const sapService    = require('../services/sap.service');
 const { ejecutarSubdivision } = require('./fases.controller');
+const { sendPesajeCompletadoEmail } = require('../services/email.service');
+
+/**
+ * Notifica a correos_empaque al completar pesaje. Fire-and-forget — nunca bloquea.
+ */
+const notificarPesajeCompletado = async (masaId) => {
+  try {
+    const configResult = await db.query(
+      `SELECT valor FROM configuracion_sistema WHERE clave = 'correos_empaque'`
+    );
+    const valor = configResult.rows[0]?.valor || '';
+    const destinatarios = valor.split(',').map(e => e.trim()).filter(Boolean);
+    if (destinatarios.length === 0) return;
+
+    const masaResult = await db.query(
+      `SELECT codigo_masa, tipo_masa, fecha_produccion,
+              total_kilos_con_merma, lote_produccion, es_repeticion
+       FROM masas_produccion WHERE id = $1`,
+      [masaId]
+    );
+    if (!masaResult.rows.length) return;
+
+    await sendPesajeCompletadoEmail({
+      to: destinatarios.join(','),
+      masa: masaResult.rows[0],
+    });
+    logger.info(`Notificación pesaje enviada para masa ${masaId} a: ${destinatarios.join(', ')}`);
+  } catch (err) {
+    logger.warn(`Notificación pesaje masa ${masaId} falló (no bloquea): ${err.message}`);
+  }
+};
 
 /**
  * @desc    Obtener checklist de pesaje de una masa
@@ -695,6 +726,7 @@ const confirmarPesaje = async (req, res, next) => {
         }
       }
 
+      notificarPesajeCompletado(masaId); // fire-and-forget
       return res.json({
         success: true,
         message: `Pesaje confirmado. La masa supera el límite de ${subdivision.limite_kg} kg y fue dividida en ${subdivision.n_tandas} tandas. Cada tanda ya tiene el pesaje registrado.`,
@@ -816,6 +848,7 @@ const confirmarPesaje = async (req, res, next) => {
       }
     }
 
+    notificarPesajeCompletado(masaId); // fire-and-forget
     res.json({
       success: true,
       message: 'Pesaje confirmado exitosamente',

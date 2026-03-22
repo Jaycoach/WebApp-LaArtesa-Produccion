@@ -65,6 +65,17 @@ export const useUpdateCorreos = () => {
 };
 
 /**
+ * Hook para obtener correos de empaque actuales desde DB
+ */
+export const useCorreosEmpaque = () => {
+  return useQuery({
+    queryKey: ['config', 'correos-empaque'],
+    queryFn: () => configService.getCorreos(),
+    staleTime: 1000 * 60 * 5,
+  });
+};
+
+/**
  * Hook para obtener el costo del agua
  */
 export const useCostoAgua = () => {
