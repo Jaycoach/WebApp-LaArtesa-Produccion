@@ -8,6 +8,9 @@ const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const compression = require('compression');
+const mongoSanitize = require('express-mongo-sanitize');
+const xss = require('xss-clean');
+const hpp = require('hpp');
 const swaggerUi = require('swagger-ui-express');
 const swaggerJsdoc = require('swagger-jsdoc');
 
@@ -22,6 +25,24 @@ const swaggerConfig = require('./swagger/swaggerConfig');
 // Importar rutas
 const routes = require('./routes');
 
+/**
+ * Middleware: restringe endpoints sensibles a red interna o token de servicio.
+ * - Permite acceso desde 127.0.0.1 / ::1 (loopback) y rangos privados AWS (172.x, 10.x)
+ * - Permite acceso con header x-internal-token coincidente con INTERNAL_TOKEN en .env
+ * - En producción, Swagger y /health nunca deben ser públicos
+ */
+const internalOnly = (req, res, next) => {
+  const ip = req.ip || req.connection.remoteAddress || '';
+  const isPrivate = ['127.0.0.1', '::1'].includes(ip)
+    || ip.startsWith('172.')
+    || ip.startsWith('10.')
+    || ip.startsWith('::ffff:127.');
+  const hasToken = process.env.INTERNAL_TOKEN
+    && req.headers['x-internal-token'] === process.env.INTERNAL_TOKEN;
+  if (isPrivate || hasToken) return next();
+  return res.status(403).json({ success: false, message: 'Acceso restringido' });
+};
+
 // Crear aplicación Express
 const app = express();
 
@@ -30,8 +51,8 @@ const app = express();
  */
 if (config.swagger.enabled) {
   const specs = swaggerJsdoc(swaggerConfig);
-  app.use('/api-docs', swaggerUi.serve);
-  app.get('/api-docs', swaggerUi.setup(specs, {
+  app.use('/api-docs', internalOnly, swaggerUi.serve);
+  app.get('/api-docs', internalOnly, swaggerUi.setup(specs, {
     swaggerOptions: {
       docExpansion: 'list',
       filter: true,
@@ -69,6 +90,18 @@ app.use(compression());
 
 // Request logger (array de middlewares)
 app.use(requestLoggers);
+
+// Sanitización contra inyección NoSQL ({ "$gt": "" } en body/query/params)
+app.use(mongoSanitize());
+
+// Limpieza de inputs contra XSS (strip <script>, atributos on*, html malicioso)
+app.use(xss());
+
+// Prevención de HTTP Parameter Pollution (?estado=A&estado=B)
+// whitelist: params de ARTESA que legítimamente pueden repetirse en query string
+app.use(hpp({
+  whitelist: ['fecha', 'estado', 'fase', 'tipo', 'ids'],
+}));
 
 // Rate limiting general
 app.use('/api/', generalLimiter);
@@ -166,7 +199,7 @@ app.use('/api/', generalLimiter);
  *                   type: string
  *                   example: "Error al conectar con la base de datos"
  */
-app.get('/health', async (req, res) => {
+app.get('/health', internalOnly, async (req, res) => {
   try {
     const dbConnected = await db.checkConnection();
 
