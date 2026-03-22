@@ -179,6 +179,45 @@ class AuthService {
   }
 
   /**
+   * Solicitar recuperación de contraseña
+   */
+  async forgotPassword(email: string): Promise<void> {
+    const response = await apiService.post<{ message: string }>(
+      API_CONFIG.ENDPOINTS.AUTH.FORGOT_PASSWORD,
+      { email }
+    );
+    if (!response.success) {
+      throw new Error(response.message || 'Error al solicitar recuperación');
+    }
+  }
+
+  /**
+   * Resetear contraseña con token
+   */
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    const response = await apiService.post<{ message: string }>(
+      API_CONFIG.ENDPOINTS.AUTH.RESET_PASSWORD,
+      { resetToken: token, newPassword }
+    );
+    if (!response.success) {
+      throw new Error(response.message || 'Token inválido o expirado');
+    }
+  }
+
+  /**
+   * Verificar email con token
+   */
+  async verifyEmail(token: string): Promise<{ email: string; nombre: string }> {
+    const response = await apiService.get<{ email: string; nombre: string }>(
+      `${API_CONFIG.ENDPOINTS.AUTH.VERIFY_EMAIL}?token=${token}`
+    );
+    if (!response.success || !response.data) {
+      throw new Error(response.message || 'Token inválido o ya utilizado');
+    }
+    return response.data;
+  }
+
+  /**
    * Mapear rol del backend al formato del frontend
    */
   private mapRol(rol: string): 'admin' | 'operador' | 'supervisor' {

@@ -17,6 +17,19 @@ export const API_CONFIG = {
       LOGOUT: '/auth/logout',
       REFRESH: '/auth/refresh',
       ME: '/auth/me',
+      FORGOT_PASSWORD: '/auth/forgot-password',
+      RESET_PASSWORD: '/auth/reset-password',
+      VERIFY_EMAIL: '/auth/verify-email',
+      REGISTER: '/auth/register',
+    },
+
+    USERS: {
+      BASE: '/users',
+      PENDING: '/users/pending',
+      APPROVE: (id: number) => `/users/${id}/approve`,
+      DEACTIVATE: (id: number) => `/users/${id}/deactivate`,
+      CREATE: '/users',
+      LIST: '/users',
     },
 
     // Masas

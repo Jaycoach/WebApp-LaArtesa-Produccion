@@ -276,6 +276,51 @@ class UserController {
       next(error);
     }
   }
+
+  /**
+   * Obtener usuarios pendientes de aprobación (activo=false)
+   * GET /api/users/pending
+   */
+  async getPendingUsers(req, res, next) {
+    try {
+      const result = await require('../database/connection').query(
+        `SELECT id, username, email, nombre_completo, rol, activo, email_verificado, fecha_creacion
+         FROM usuarios
+         WHERE activo = false
+         ORDER BY fecha_creacion DESC`,
+      );
+      res.json({ success: true, data: result.rows });
+    } catch (error) {
+      logger.error('Error al obtener usuarios pendientes:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Aprobar usuario — activa acceso tras verificación de email
+   * POST /api/users/:id/approve
+   * Permite admin y supervisor (a diferencia de /activate que es solo admin)
+   */
+  async approveUser(req, res, next) {
+    try {
+      const { id } = req.params;
+      const result = await require('../database/connection').query(
+        `UPDATE usuarios
+         SET activo = true, fecha_actualizacion = NOW(), actualizado_por = $2
+         WHERE id = $1
+         RETURNING id, username, email, nombre_completo, rol`,
+        [id, req.user.id],
+      );
+      if (result.rows.length === 0) {
+        return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+      }
+      logger.info(`Usuario ${result.rows[0].username} aprobado por ${req.user.username}`);
+      res.json({ success: true, message: 'Usuario aprobado exitosamente', data: result.rows[0] });
+    } catch (error) {
+      logger.error('Error al aprobar usuario:', error);
+      next(error);
+    }
+  }
 }
 
 module.exports = new UserController();
