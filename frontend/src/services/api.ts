@@ -83,7 +83,8 @@ class ApiService {
         console.error('Forbidden:', data?.error);
         return Promise.reject({
           success: false,
-          message: MESSAGES.ERROR.FORBIDDEN,
+          code: (data as any)?.code,
+          message: (data as any)?.message || MESSAGES.ERROR.FORBIDDEN,
           error: data?.error,
         });
 
