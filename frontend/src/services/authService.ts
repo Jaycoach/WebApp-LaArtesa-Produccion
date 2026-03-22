@@ -75,6 +75,11 @@ class AuthService {
       };
     } catch (error: any) {
       console.error('Error en login:', error);
+      if (error.code === 'EMAIL_NOT_VERIFIED') {
+        const err = new Error(error.message || 'Debes verificar tu correo antes de iniciar sesión');
+        (err as any).code = 'EMAIL_NOT_VERIFIED';
+        throw err;
+      }
       throw new Error(error.message || 'Error al iniciar sesión');
     }
   }
