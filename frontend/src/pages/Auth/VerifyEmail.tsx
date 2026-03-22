@@ -57,21 +57,24 @@ export const VerifyEmail: React.FC = () => {
             </div>
             <h2 className="text-2xl font-bold text-gray-900">¡Correo verificado!</h2>
             <Alert variant="success">
-              Hola {nombre}, tu correo fue verificado exitosamente.
-              Un administrador activará tu cuenta pronto.
+              Hola {nombre}, tu correo fue verificado exitosamente. ¡Ya puedes iniciar sesión!
             </Alert>
-            <p className="text-sm text-gray-500">
-              Recibirás una notificación cuando tu cuenta esté lista.
-            </p>
+            <div className="text-center pt-2">
+              <Link to="/login" className="text-sm text-primary-600 hover:text-primary-700 font-medium">
+                ← Ir al inicio de sesión
+              </Link>
+            </div>
           </div>
         )}
 
         {estado === 'error' && (
           <div className="space-y-4">
             <Alert variant="error">{mensaje}</Alert>
-            <Link to="/login" className="text-sm text-primary-600 hover:text-primary-700 font-medium">
-              ← Volver al inicio de sesión
-            </Link>
+            <div className="text-center">
+              <Link to="/login" className="text-sm text-primary-600 hover:text-primary-700 font-medium">
+                ← Volver al inicio de sesión
+              </Link>
+            </div>
           </div>
         )}
       </div>
