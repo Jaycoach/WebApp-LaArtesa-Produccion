@@ -460,7 +460,7 @@ class AuthService {
       const result = await client.query(
         `SELECT id, username, nombre_completo, email_verificado
          FROM usuarios
-         WHERE username = $1 AND activo = false`,
+         WHERE username = $1`,
         [username],
       );
 
