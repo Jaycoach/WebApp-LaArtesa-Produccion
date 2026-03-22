@@ -67,7 +67,7 @@ const sendEmail = async ({ to, subject, html, text }) => {
  */
 const sendVerificationEmail = async ({ to, nombre, token }) => {
   const baseUrl = process.env.APP_URL || `http://${process.env.HOST || 'localhost'}`;
-  const verifyUrl = `${baseUrl}/verificar-email?token=${token}`;
+  const verifyUrl = `${baseUrl}/verify-email?token=${token}`;
 
   const html = `
     <!DOCTYPE html>
