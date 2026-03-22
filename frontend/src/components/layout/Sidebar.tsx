@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import clsx from 'clsx';
+import { useAuthStore } from '@/store';
 
 interface NavItem {
   name: string;
@@ -63,6 +64,8 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
   const location = useLocation();
+  const usuario = useAuthStore((state) => state.user);
+  const puedeGestionarUsuarios = usuario?.rol === 'admin' || usuario?.rol === 'supervisor';
 
   const handleNavClick = () => {
     if (onClose) onClose();
@@ -108,6 +111,27 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
               </li>
             );
           })}
+          {puedeGestionarUsuarios && (
+            <li>
+              <Link
+                to="/configuracion/usuarios"
+                onClick={handleNavClick}
+                className={clsx(
+                  'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors',
+                  location.pathname === '/configuracion/usuarios'
+                    ? 'bg-primary-50 text-primary-700 font-medium'
+                    : 'text-gray-700 hover:bg-gray-50'
+                )}
+              >
+                <span className={location.pathname === '/configuracion/usuarios' ? 'text-primary-600' : 'text-gray-500'}>
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                  </svg>
+                </span>
+                <span>Usuarios</span>
+              </Link>
+            </li>
+          )}
         </ul>
       </nav>
 

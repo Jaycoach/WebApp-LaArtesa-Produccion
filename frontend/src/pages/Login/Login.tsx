@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '@/store';
 import { Button, Alert } from '@/components/common';
 import { authService } from '@/services/authService';
@@ -96,6 +96,14 @@ export const Login: React.FC = () => {
             >
               Iniciar Sesión
             </Button>
+          </div>
+          <div className="text-center">
+            <Link
+              to="/forgot-password"
+              className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+            >
+              ¿Olvidaste tu contraseña?
+            </Link>
           </div>
         </form>
       </div>

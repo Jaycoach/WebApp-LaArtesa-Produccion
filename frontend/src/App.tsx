@@ -26,6 +26,10 @@ import EmpaqueMasa from '@/pages/Empaque/EmpaqueMasa';
 import ReporteCostos from '@/pages/Reportes/ReporteCostos';
 import ConfiguracionSistema from '@/pages/Configuracion/ConfiguracionSistema';
 import CostosConfig from '@/pages/Configuracion/CostosConfig';
+import GestionUsuarios from '@/pages/Configuracion/GestionUsuarios';
+import ForgotPassword from '@/pages/Auth/ForgotPassword';
+import ResetPassword from '@/pages/Auth/ResetPassword';
+import VerifyEmail from '@/pages/Auth/VerifyEmail';
 import FaseListado from '@/pages/Fases/FaseListado';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -39,6 +43,9 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/verify-email" element={<VerifyEmail />} />
 
         <Route
           path="/"
@@ -107,6 +114,7 @@ function App() {
           {/* Configuración */}
           <Route path="configuracion" element={<ConfiguracionSistema />} />
           <Route path="configuracion/costos" element={<CostosConfig />} />
+          <Route path="configuracion/usuarios" element={<GestionUsuarios />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

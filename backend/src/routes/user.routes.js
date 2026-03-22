@@ -71,6 +71,8 @@ router.use(verifyToken);
  *         description: Acceso denegado - Se requiere rol Admin o Supervisor
  */
 router.get('/stats', checkRole(['admin', 'supervisor']), userController.getUserStats);
+router.get('/pending', checkRole(['admin', 'supervisor']), userController.getPendingUsers);
+router.post('/:id/approve', checkRole(['admin', 'supervisor']), userIdValidation, userController.approveUser);
 
 /**
  * @swagger
