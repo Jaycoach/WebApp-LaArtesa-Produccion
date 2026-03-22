@@ -533,4 +533,7 @@ router.put('/profile', verifyToken, updateProfileValidation, authController.upda
  */
 router.get('/verify', verifyToken, authController.verifyToken);
 
+// Verificación de email (sin auth — el token en query string es la credencial)
+router.get('/verify-email', authController.verifyEmail);
+
 module.exports = router;

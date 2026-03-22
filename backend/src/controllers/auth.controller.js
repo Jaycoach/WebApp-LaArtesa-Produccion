@@ -258,6 +258,58 @@ class AuthController {
       next(error);
     }
   }
+
+  /**
+   * Verificar email con token
+   * GET /api/auth/verify-email?token=<token>
+   */
+  async verifyEmail(req, res, next) {
+    try {
+      const { token } = req.query;
+
+      if (!token) {
+        return res.status(400).json({
+          success: false,
+          message: 'Token de verificación requerido',
+        });
+      }
+
+      const hashedToken = require('crypto')
+        .createHash('sha256')
+        .update(token)
+        .digest('hex');
+
+      const result = await require('../database/connection').query(
+        `UPDATE usuarios
+         SET email_verificado = true,
+             activo = true,
+             token_verificacion = NULL,
+             fecha_actualizacion = NOW()
+         WHERE token_verificacion = $1
+           AND email_verificado = false
+         RETURNING id, username, email, nombre_completo`,
+        [hashedToken],
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Token inválido o ya utilizado',
+        });
+      }
+
+      const user = result.rows[0];
+      require('../utils/logger').info(`Email verificado: ${user.email}`);
+
+      return res.json({
+        success: true,
+        message: '¡Correo verificado exitosamente! Ya puedes iniciar sesión.',
+        data: { email: user.email, nombre: user.nombre_completo },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 module.exports = new AuthController();

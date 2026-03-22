@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const pool = require('../database/connection');
 const logger = require('../utils/logger');
 const { generateTokens, verifyRefreshToken } = require('../utils/jwt');
+const emailService = require('./email.service');
 
 class AuthService {
   /**
@@ -36,29 +37,34 @@ class AuthService {
       // Hash de la contraseña
       const hashedPassword = await bcrypt.hash(password, 12);
 
-      // Insertar usuario
+      // Generar token de verificación de email
+      const verificationToken = crypto.randomBytes(32).toString('hex');
+      const hashedVerificationToken = crypto
+        .createHash('sha256')
+        .update(verificationToken)
+        .digest('hex');
+
+      // Insertar usuario con token de verificación (activo=false hasta verificar)
       const result = await client.query(
-        `INSERT INTO usuarios (username, email, password_hash, nombre_completo, rol, activo, ultimo_cambio_password)
-         VALUES ($1, $2, $3, $4, $5, $6, NULL)
+        `INSERT INTO usuarios (username, email, password_hash, nombre_completo, rol, activo,
+                               email_verificado, token_verificacion, ultimo_cambio_password)
+         VALUES ($1, $2, $3, $4, $5, false, false, $6, NULL)
          RETURNING id, username, email, nombre_completo, rol, activo, fecha_creacion`,
-        [username, email, hashedPassword, nombre_completo, rol, true],
+        [username, email, hashedPassword, nombre_completo, rol, hashedVerificationToken],
       );
 
       const user = result.rows[0];
 
-      // Generar tokens
-      const tokens = generateTokens(user);
-
-      // Guardar refresh token en la base de datos
-      await client.query(
-        `INSERT INTO usuarios_sesiones (usuario_id, refresh_token, expires_at)
-         VALUES ($1, $2, NOW() + INTERVAL '7 days')`,
-        [user.id, tokens.refreshToken],
-      );
-
       await client.query('COMMIT');
 
-      logger.info(`Nuevo usuario registrado: ${username}`);
+      // Enviar email de verificación (fuera de la transacción — no bloquea el registro)
+      emailService.sendVerificationEmail({
+        to: user.email,
+        nombre: user.nombre_completo,
+        token: verificationToken, // token sin hash — el hash va en DB
+      }).catch(err => logger.error('Error enviando email de verificación:', err));
+
+      logger.info(`Nuevo usuario registrado (pendiente verificación): ${username}`);
 
       return {
         user: {
@@ -67,9 +73,10 @@ class AuthService {
           email: user.email,
           nombre_completo: user.nombre_completo,
           rol: user.rol,
-          activo: user.activo,
+          activo: false,
+          email_verificado: false,
         },
-        ...tokens,
+        message: 'Registro exitoso. Revisa tu correo para verificar tu cuenta.',
       };
     } catch (error) {
       await client.query('ROLLBACK');
@@ -303,11 +310,15 @@ class AuthService {
 
       logger.info(`Token de recuperación generado para ${email}`);
 
-      // TODO: Enviar email con el token
-      // Por ahora, devolver el token (SOLO PARA DESARROLLO)
+      // Enviar email con el token (fuera de la transacción)
+      emailService.sendPasswordResetEmail({
+        to: user.email,
+        nombre: user.nombre_completo,
+        token: resetToken,
+      }).catch(err => logger.error('Error enviando email de recuperación:', err));
+
       return {
         message: 'Si el email existe, recibirás instrucciones para recuperar tu contraseña',
-        resetToken, // REMOVER EN PRODUCCIÓN
       };
     } catch (error) {
       logger.error('Error en forgot password:', error);
