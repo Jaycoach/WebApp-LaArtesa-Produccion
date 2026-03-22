@@ -204,8 +204,103 @@ const sendPasswordResetEmail = async ({ to, nombre, token }) => {
   return sendEmail({ to, subject: '🔐 Recuperación de contraseña — La Artesa Producción', html });
 };
 
+/**
+ * Email de notificación al completar pesaje
+ * Se envía a correos_empaque al confirmar pesaje exitosamente
+ */
+const sendPesajeCompletadoEmail = async ({ to, masa }) => {
+  const fecha = new Date(masa.fecha_produccion).toLocaleDateString('es-CO', {
+    timeZone: 'America/Bogota',
+    day: '2-digit', month: 'long', year: 'numeric',
+  });
+
+  const html = `
+    <!DOCTYPE html>
+    <html lang="es">
+    <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+    <body style="margin:0;padding:0;background:#F5F0E4;font-family:Inter,Arial,sans-serif;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:#F5F0E4;padding:40px 0;">
+        <tr><td align="center">
+          <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+            <tr>
+              <td style="background:#dc2626;padding:32px 40px;text-align:center;">
+                <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;letter-spacing:-0.5px;">
+                  🍞 La Artesa Panadería
+                </h1>
+                <p style="margin:8px 0 0;color:#fecaca;font-size:14px;">Sistema de Control de Producción</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:40px;">
+                <h2 style="margin:0 0 8px;color:#1e293b;font-size:20px;">✅ Pesaje completado</h2>
+                <p style="margin:0 0 24px;color:#475569;font-size:15px;line-height:1.6;">
+                  Se ha confirmado el pesaje de la siguiente masa. El área de producción puede continuar con el amasado.
+                </p>
+                <table width="100%" cellpadding="0" cellspacing="0"
+                       style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:24px;">
+                  <tr>
+                    <td style="padding:20px;">
+                      <table width="100%" cellpadding="0" cellspacing="0">
+                        <tr>
+                          <td style="padding:6px 0;color:#64748b;font-size:13px;width:140px;">Código masa</td>
+                          <td style="padding:6px 0;color:#1e293b;font-size:13px;font-weight:600;">${masa.codigo_masa}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:6px 0;color:#64748b;font-size:13px;">Tipo</td>
+                          <td style="padding:6px 0;color:#1e293b;font-size:13px;font-weight:600;">${masa.tipo_masa}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:6px 0;color:#64748b;font-size:13px;">Fecha producción</td>
+                          <td style="padding:6px 0;color:#1e293b;font-size:13px;font-weight:600;">${fecha}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:6px 0;color:#64748b;font-size:13px;">Total kilos</td>
+                          <td style="padding:6px 0;color:#1e293b;font-size:13px;font-weight:600;">${parseFloat(masa.total_kilos_con_merma).toFixed(1)} kg</td>
+                        </tr>
+                        ${masa.lote_produccion ? `
+                        <tr>
+                          <td style="padding:6px 0;color:#64748b;font-size:13px;">Lote</td>
+                          <td style="padding:6px 0;color:#dc2626;font-size:13px;font-weight:700;">${masa.lote_produccion}</td>
+                        </tr>` : ''}
+                        ${masa.es_repeticion ? `
+                        <tr>
+                          <td colspan="2" style="padding:8px 0 0;">
+                            <span style="background:#fef2f2;color:#dc2626;font-size:12px;font-weight:600;padding:4px 10px;border-radius:4px;">🔁 REPETICIÓN</span>
+                          </td>
+                        </tr>` : ''}
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+                <p style="margin:0;color:#475569;font-size:14px;line-height:1.6;">
+                  La masa pasará a la fase de <strong>Amasado</strong>. Coordine con el equipo de producción.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="background:#f8fafc;padding:20px 40px;text-align:center;">
+                <p style="margin:0;color:#94a3b8;font-size:12px;">
+                  © ${new Date().getFullYear()} La Artesa SAS — Bogotá, Colombia
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td></tr>
+      </table>
+    </body>
+    </html>
+  `;
+
+  return sendEmail({
+    to,
+    subject: `✅ Pesaje completado — ${masa.tipo_masa} (${masa.codigo_masa})`,
+    html,
+  });
+};
+
 module.exports = {
   sendEmail,
   sendVerificationEmail,
   sendPasswordResetEmail,
+  sendPesajeCompletadoEmail,
 };

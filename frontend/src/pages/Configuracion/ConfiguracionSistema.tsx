@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card } from '@/components/common';
-import { useUpdateFactorAbsorcion, useUpdateCorreos, useCostoAgua, useUpdateCostoAgua, useCostoAgua2, useUpdateCostoAgua2 } from '@/hooks/useConfig';
+import { useUpdateFactorAbsorcion, useUpdateCorreos, useCorreosEmpaque, useCostoAgua, useUpdateCostoAgua, useCostoAgua2, useUpdateCostoAgua2 } from '@/hooks/useConfig';
 
 export const ConfiguracionSistema: React.FC = () => {
   // State local para formularios
@@ -19,8 +19,16 @@ export const ConfiguracionSistema: React.FC = () => {
   const updateCorreosMutation = useUpdateCorreos();
   const updateCostoAguaMutation = useUpdateCostoAgua();
   const updateCostoAgua2Mutation = useUpdateCostoAgua2();
+  const { data: correosData } = useCorreosEmpaque();
   const { data: costoAguaData } = useCostoAgua();
   const { data: costoAgua2Data } = useCostoAgua2();
+
+  // Sincronizar correos desde servidor
+  React.useEffect(() => {
+    if (correosData?.correos !== undefined) {
+      setEmailsText(correosData.correos);
+    }
+  }, [correosData]);
 
   // Sincronizar costo agua desde servidor
   React.useEffect(() => {

@@ -45,6 +45,13 @@ export const configService = {
   /**
    * Actualizar emails de notificación
    */
+  getCorreos: async (): Promise<{ correos: string }> => {
+    const response = await apiClient.get<ApiResponse<{ correos: string }>>(
+      API_CONFIG.ENDPOINTS.CONFIG.CORREOS
+    );
+    return handleApiResponse(response);
+  },
+
   updateCorreos: async (emails: string[]): Promise<ConfiguracionSistema> => {
     const response = await apiClient.put<ApiResponse<ConfiguracionSistema>>(
       API_CONFIG.ENDPOINTS.CONFIG.CORREOS,
