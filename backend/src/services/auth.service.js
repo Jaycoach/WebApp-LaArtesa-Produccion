@@ -302,8 +302,8 @@ class AuthService {
 
       // Guardar token en la BD (válido por 1 hora)
       await client.query(
-        `UPDATE usuarios 
-         SET reset_token = $1, reset_token_expires = NOW() + INTERVAL '1 hour'
+        `UPDATE usuarios
+         SET token_recuperacion = $1, token_recuperacion_expira = NOW() + INTERVAL '1 hour'
          WHERE id = $2`,
         [hashedToken, user.id],
       );
@@ -342,10 +342,10 @@ class AuthService {
 
       // Buscar usuario con el token válido
       const result = await client.query(
-        `SELECT id, email 
-         FROM usuarios 
-         WHERE reset_token = $1 
-         AND reset_token_expires > NOW()
+        `SELECT id, email
+         FROM usuarios
+         WHERE token_recuperacion = $1
+         AND token_recuperacion_expira > NOW()
          AND activo = true`,
         [hashedToken],
       );
@@ -363,8 +363,9 @@ class AuthService {
       await client.query(
         `UPDATE usuarios 
          SET password_hash = $1,
-             reset_token = NULL,
-             reset_token_expires = NULL,
+             token_recuperacion = NULL,
+             token_recuperacion_expira = NULL,
+             ultimo_cambio_password = NOW(),
              fecha_actualizacion = NOW()
          WHERE id = $2`,
         [hashedPassword, user.id],
