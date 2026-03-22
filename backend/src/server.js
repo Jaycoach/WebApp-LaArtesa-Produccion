@@ -63,7 +63,7 @@ if (config.swagger.enabled) {
   }));
 
   // Endpoint alternativo para el JSON de OpenAPI
-  app.get('/api-docs/swagger.json', (req, res) => {
+  app.get('/api-docs/swagger.json', internalOnly, (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.send(specs);
   });
