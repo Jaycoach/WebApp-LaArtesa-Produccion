@@ -57,11 +57,31 @@ const navItems: NavItem[] = [
   },
 ];
 
-export const Sidebar: React.FC = () => {
+interface SidebarProps {
+  onClose?: () => void;
+}
+
+export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
   const location = useLocation();
 
+  const handleNavClick = () => {
+    if (onClose) onClose();
+  };
+
   return (
-    <aside className="w-64 border-r border-gray-200 min-h-screen" style={{ backgroundColor: '#F5F0E4' }}>
+    <aside className="w-64 border-r border-gray-200 min-h-screen flex flex-col" style={{ backgroundColor: '#F5F0E4' }}>
+      {/* Botón cerrar (solo visible en móvil) */}
+      <div className="lg:hidden flex justify-end p-3 pt-4">
+        <button
+          onClick={onClose}
+          className="p-2 rounded-md text-gray-500 hover:bg-gray-100"
+          aria-label="Cerrar menú"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
       <nav className="mt-8 px-4">
         <ul className="space-y-2">
           {navItems.map((item) => {
@@ -72,6 +92,7 @@ export const Sidebar: React.FC = () => {
               <li key={item.path}>
                 <Link
                   to={item.path}
+                  onClick={handleNavClick}
                   className={clsx(
                     'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors',
                     isActive
@@ -110,6 +131,7 @@ export const Sidebar: React.FC = () => {
               <li key={key}>
                 <Link
                   to={path}
+                  onClick={handleNavClick}
                   className={clsx(
                     'flex items-center gap-3 px-4 py-2 text-sm rounded-lg transition-colors',
                     isActive
