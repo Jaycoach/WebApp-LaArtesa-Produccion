@@ -289,6 +289,26 @@ export const PesajeMasa: React.FC = () => {
               </p>
               <p className="text-sm text-gray-500 mt-1">ID Masa: {masaId}</p>
             </div>
+            {checklist.productos_resumen && checklist.productos_resumen.length > 0 && (
+              <div className="mt-3 border-t border-gray-100 pt-3">
+                <p className="text-xs font-semibold text-gray-500 mb-2">PRODUCTOS A PRODUCIR</p>
+                <div className="space-y-1">
+                  {checklist.productos_resumen.map((p: any) => (
+                    <div key={p.sap_item_code} className="flex items-center justify-between text-sm">
+                      <span className="text-gray-700">{p.producto_nombre}</span>
+                      <div className="flex items-center gap-3 ml-4">
+                        <span className="text-gray-400 text-xs">{p.unidades_pedidas} paq</span>
+                        <span className="font-bold text-indigo-700">
+                          {p.panes_totales} panes
+                          <span className="text-xs font-normal text-indigo-400 ml-1">×{p.unidades_por_paquete}</span>
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
             <div className="text-right">
               <div className="text-sm text-gray-600">Progreso</div>
               <div className="text-3xl font-bold text-blue-600">{checklist.progreso}%</div>

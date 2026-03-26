@@ -405,10 +405,13 @@ export const DivisionMasa: React.FC = () => {
                           Producto
                         </th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                          Pedidas
+                          Paquetes
                         </th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                          A cortar
+                          Panes sugeridos
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                          A cortar (piezas)
                         </th>
                         <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
                           Divisor
@@ -440,12 +443,27 @@ export const DivisionMasa: React.FC = () => {
                               <p className="text-xs text-gray-400 font-mono">{producto.sap_item_code}</p>
                             </td>
 
-                            {/* Pedidas */}
+                            {/* Paquetes */}
                             <td className="px-4 py-3 text-right">
                               <span className="text-sm text-gray-600">{pedidas}</span>
                             </td>
 
-                            {/* A cortar (ajustadas) */}
+                            {/* Panes sugeridos */}
+                            <td className="px-4 py-3 text-right">
+                              {(() => {
+                                const xSAP = parseFloat(String(producto.unidades_por_paquete || 0));
+                                const xNombre = producto.producto_nombre?.match(/ X ?(\d+)/i);
+                                const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
+                                return (
+                                  <span className="text-base font-bold text-indigo-700">
+                                    {pedidas * xPaq}
+                                    <span className="text-xs font-normal text-indigo-400 ml-1">×{xPaq}</span>
+                                  </span>
+                                );
+                              })()}
+                            </td>
+
+                            {/* A cortar (piezas físicas de masa) */}
                             <td className="px-4 py-3 text-right">
                               <span className={`text-base font-bold ${excedente > 0 ? 'text-orange-700' : 'text-blue-700'}`}>
                                 {ajustadas}
