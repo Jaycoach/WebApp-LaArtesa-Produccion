@@ -323,13 +323,18 @@ async function distribuirProductos(productos, limiteKg, subMasaIds) {
  * Inserta un producto en una sub-masa con las cantidades indicadas.
  */
 async function insertarProductoEnMasa(masaId, prod, unidadesProg, unidadesPedidas, kgPedidos, kgProgramados) {
+  const upq = (prod.unidades_por_paquete && parseFloat(prod.unidades_por_paquete) > 1)
+    ? parseFloat(prod.unidades_por_paquete)
+    : (() => { const m = (prod.producto_nombre || '').match(/ X ?(\d+)/i); return m ? parseInt(m[1]) : 1; })();
+  const cantPaquetes = unidadesPedidas * upq;
+
   await db.query(`
     INSERT INTO productos_por_masa
       (masa_id, producto_codigo, producto_nombre, presentacion, gramaje_unitario,
        unidades_pedidas, unidades_programadas, unidades_producidas,
        kilos_pedidos, kilos_programados, kilos_producidos,
-       sap_item_code)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,0,$8,$9,0,$10)
+       sap_item_code, unidades_por_paquete, cantidad_paquetes)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,0,$8,$9,0,$10,$11,$12)
   `, [
     masaId,
     prod.producto_codigo,
@@ -341,6 +346,8 @@ async function insertarProductoEnMasa(masaId, prod, unidadesProg, unidadesPedida
     kgPedidos,
     kgProgramados,
     prod.sap_item_code || null,
+    upq,
+    cantPaquetes,
   ]);
 }
 
@@ -788,7 +795,7 @@ const completarFase = async (req, res, next) => {
       // 1. Obtener productos de la masa con ajuste de múltiplo
       const productosResult = await db.query(
         `SELECT id, producto_nombre, presentacion,
-                unidades_pedidas, unidades_programadas,
+                unidades_pedidas, unidades_programadas, unidades_por_paquete,
                 unidades_ajustadas, unidades_excedente,
                 multiplo_divisor
          FROM productos_por_masa
@@ -850,6 +857,11 @@ const completarFase = async (req, res, next) => {
             const faltante       = Math.max(0, requeridoFinal - cantidad);
             const esParcial      = faltante > 0;
 
+            const upqDiv = (prod.unidades_por_paquete && parseFloat(prod.unidades_por_paquete) > 1)
+              ? parseFloat(prod.unidades_por_paquete)
+              : (() => { const m = (prod.producto_nombre || '').match(/ X ?(\d+)/i); return m ? parseInt(m[1]) : 1; })();
+            const panesRealesCortados = cantidad * upqDiv;
+
             await db.query(
               `UPDATE productos_por_masa
                SET cantidad_divisiones  = $1,
@@ -857,9 +869,10 @@ const completarFase = async (req, res, next) => {
                    unidades_excedente   = $2,
                    unidades_faltantes   = $3,
                    division_parcial     = $4,
+                   unidades_producidas  = $5,
                    updated_at           = NOW()
-               WHERE id = $5`,
-              [cantidad, excedenteReal, faltante, esParcial, prod.id]
+               WHERE id = $6`,
+              [cantidad, excedenteReal, faltante, esParcial, panesRealesCortados, prod.id]
             );
           }
         }

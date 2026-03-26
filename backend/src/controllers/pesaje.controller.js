@@ -191,6 +191,28 @@ const getChecklist = async (req, res, next) => {
     const productosConAjuste = productosAjusteResult.rows;
     const hayAjustesDiv      = productosConAjuste.length > 0;
 
+    // Productos con total de panes calculado
+    const productosResult = await db.query(
+      `SELECT producto_nombre, sap_item_code, unidades_pedidas,
+              unidades_por_paquete, cantidad_paquetes
+       FROM productos_por_masa
+       WHERE masa_id = $1
+       ORDER BY producto_nombre`,
+      [masaId]
+    );
+    const productosResumen = productosResult.rows.map(p => {
+      const upq = (p.unidades_por_paquete && parseFloat(p.unidades_por_paquete) > 1)
+        ? parseFloat(p.unidades_por_paquete)
+        : (() => { const m = (p.producto_nombre || '').match(/ X ?(\d+)/i); return m ? parseInt(m[1]) : 1; })();
+      return {
+        producto_nombre:      p.producto_nombre,
+        sap_item_code:        p.sap_item_code,
+        unidades_pedidas:     parseInt(p.unidades_pedidas),
+        unidades_por_paquete: upq,
+        panes_totales:        parseInt(p.unidades_pedidas) * upq,
+      };
+    });
+
     const checklist = {
       masa_id:              masa.id,
       tipo_masa:            masa.tipo_masa,
@@ -207,6 +229,7 @@ const getChecklist = async (req, res, next) => {
       hay_ajustes_divisor:  hayAjustesDiv,
       sin_stock_count:           ingredientesConStock.filter(i => i.sin_stock).length,
       ingredientes_sin_stock:    ingredientesConStock.filter(i => i.sin_stock).map(i => i.ingrediente_nombre),
+      productos_resumen:         productosResumen,
     };
 
     res.json({ success: true, data: checklist });
