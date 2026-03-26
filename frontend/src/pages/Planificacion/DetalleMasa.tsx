@@ -342,6 +342,8 @@ export const DetalleMasa: React.FC = () => {
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Un. Pedidas</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Un. Ajustadas</th>
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Excedente</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">× Paq</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Panes</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Kilos</th>
                   </tr>
                 </thead>
@@ -369,6 +371,18 @@ export const DetalleMasa: React.FC = () => {
                             <span className="text-gray-300 text-xs">—</span>
                           )}
                         </td>
+                        <td className="px-4 py-3 text-sm text-gray-500 text-right">
+                          {Number(producto.unidades_por_paquete) > 1
+                            ? <span className="font-medium text-indigo-600">×{Number(producto.unidades_por_paquete)}</span>
+                            : <span className="text-gray-300">×1</span>}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className="text-sm font-bold text-emerald-700">
+                            {Number(producto.cantidad_paquetes) > 0
+                              ? Number(producto.cantidad_paquetes).toLocaleString('es-CO')
+                              : (producto.unidades_pedidas * Math.max(1, Number(producto.unidades_por_paquete))).toLocaleString('es-CO')}
+                          </span>
+                        </td>
                         <td className="px-4 py-3 text-sm text-gray-900 text-right">
                           {Number(producto.kilos_programados).toFixed(2)} kg
                         </td>
@@ -377,6 +391,16 @@ export const DetalleMasa: React.FC = () => {
                   })}
                 </tbody>
               </table>
+              <div className="mt-3 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-between">
+                <span className="text-sm font-medium text-emerald-800">🍞 Total panes a producir:</span>
+                <span className="text-xl font-bold text-emerald-700">
+                  {(productos as any[]).reduce((sum: number, p: any) => {
+                    const upq = Math.max(1, Number(p.unidades_por_paquete) || 1);
+                    const unidades = Number(p.unidades_pedidas) || 0;
+                    return sum + (Number(p.cantidad_paquetes) > 0 ? Number(p.cantidad_paquetes) : unidades * upq);
+                  }, 0).toLocaleString('es-CO')} panes
+                </span>
+              </div>
               {(productos as any[]).some((p: any) => parseInt(p.unidades_excedente || 0) > 0) && (
                 <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
                   <p className="text-xs text-orange-800">

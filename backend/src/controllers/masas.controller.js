@@ -41,6 +41,8 @@ const getMasasByFecha = async (req, res, next) => {
       total_productos:            parseInt(m.total_productos)              || 0,
       total_unidades_pedidas:     parseInt(m.total_unidades_pedidas)       || 0,
       total_unidades_programadas: parseInt(m.total_unidades_programadas)   || 0,
+      total_panes:                parseInt(m.total_panes)                  || 0,
+      productos_resumen:          m.productos_resumen || [],
     }));
 
     res.json({
