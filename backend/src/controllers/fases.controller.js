@@ -267,54 +267,55 @@ async function distribuirEmpaque(empaques, subMasaIds) {
 }
 
 /**
- * Distribuye productos entre N sub-masas.
+ * Distribuye productos entre N sub-masas proporcionalmente.
+ * Cada sub-masa recibe 1/N de cada producto (distribución uniforme por tanda).
+ * La última tanda absorbe los residuos de redondeo.
  */
 async function distribuirProductos(productos, limiteKg, subMasaIds) {
-  const n        = subMasaIds.length;
-  const kgUsados = new Array(n).fill(0);
-
+  const n = subMasaIds.length;
   for (const prod of productos) {
-    let unidadesRestantes    = parseInt(prod.unidades_programadas);
-    let unidadesPedRestantes = parseInt(prod.unidades_pedidas);
-    let kgPedRestantes       = parseFloat(prod.kilos_pedidos);
-    let kgProgRestantes      = parseFloat(prod.kilos_programados);
+    const totalUnidadesProg = parseInt(prod.unidades_programadas);
+    const totalUnidadesPed  = parseInt(prod.unidades_pedidas);
+    const totalKgPed        = parseFloat(prod.kilos_pedidos);
+    const totalKgProg       = parseFloat(prod.kilos_programados);
 
-    const gramaje     = parseFloat(prod.gramaje_unitario);
-    const kgPorUnidad = gramaje / 1000;
+    let unidadesProgRestantes = totalUnidadesProg;
+    let unidadesPedRestantes  = totalUnidadesPed;
+    let kgPedRestantes        = totalKgPed;
+    let kgProgRestantes       = totalKgProg;
 
-    for (let i = 0; i < n && unidadesRestantes > 0; i++) {
-      const kgDisponible  = limiteKg - kgUsados[i];
-      const unidadesMax   = kgPorUnidad > 0
-        ? Math.floor(kgDisponible / kgPorUnidad)
-        : unidadesRestantes;
-      const unidadesTanda = Math.min(unidadesMax, unidadesRestantes);
+    // Unidades base por tanda (piso) — la última absorbe el residuo
+    const unidadesProgBase = Math.floor(totalUnidadesProg / n);
+    const unidadesPedBase  = Math.floor(totalUnidadesPed  / n);
 
-      if (unidadesTanda <= 0) continue;
+    for (let i = 0; i < n; i++) {
+      const esUltima = (i === n - 1);
 
-      const esUltimo = (unidadesTanda === unidadesRestantes);
-      const frac     = unidadesTanda / parseInt(prod.unidades_programadas);
+      const unidadesProg = esUltima ? unidadesProgRestantes : unidadesProgBase;
+      const unidadesPed  = esUltima ? unidadesPedRestantes  : unidadesPedBase;
 
-      const kgPedTanda  = esUltimo
+      // Kg proporcional a las unidades de esta tanda
+      const frac = unidadesProg / totalUnidadesProg;
+      const kgPed  = esUltima
         ? parseFloat(kgPedRestantes.toFixed(3))
-        : parseFloat((parseFloat(prod.kilos_pedidos) * frac).toFixed(3));
-      const kgProgTanda = esUltimo
+        : parseFloat((totalKgPed  * frac).toFixed(3));
+      const kgProg = esUltima
         ? parseFloat(kgProgRestantes.toFixed(3))
-        : parseFloat((parseFloat(prod.kilos_programados) * frac).toFixed(3));
-      const unidadesPedTanda = esUltimo
-        ? unidadesPedRestantes
-        : Math.round(parseInt(prod.unidades_pedidas) * frac);
+        : parseFloat((totalKgProg * frac).toFixed(3));
 
-      await insertarProductoEnMasa(
-        subMasaIds[i], prod,
-        unidadesTanda, unidadesPedTanda,
-        kgPedTanda, kgProgTanda
-      );
+      // Solo insertar si hay al menos 1 unidad para esta tanda
+      if (unidadesProg > 0) {
+        await insertarProductoEnMasa(
+          subMasaIds[i], prod,
+          unidadesProg, unidadesPed,
+          kgPed, kgProg
+        );
+      }
 
-      kgUsados[i]          = parseFloat((kgUsados[i] + kgProgTanda).toFixed(3));
-      unidadesRestantes    -= unidadesTanda;
-      unidadesPedRestantes -= unidadesPedTanda;
-      kgPedRestantes        = parseFloat((kgPedRestantes  - kgPedTanda).toFixed(3));
-      kgProgRestantes       = parseFloat((kgProgRestantes - kgProgTanda).toFixed(3));
+      unidadesProgRestantes -= unidadesProg;
+      unidadesPedRestantes  -= unidadesPed;
+      kgPedRestantes         = parseFloat((kgPedRestantes  - kgPed).toFixed(3));
+      kgProgRestantes        = parseFloat((kgProgRestantes - kgProg).toFixed(3));
     }
   }
 }
