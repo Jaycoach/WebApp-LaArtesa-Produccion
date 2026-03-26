@@ -48,6 +48,13 @@ export interface MasaProduccionResumen {
   total_productos: number;
   total_unidades_pedidas: number;
   total_unidades_programadas: number;
+  total_panes?: number;
+  productos_resumen?: {
+    producto_nombre: string;
+    sap_item_code: string | null;
+    unidades_por_paquete: number;
+    cantidad_paquetes: number;
+  }[];
   es_repeticion: boolean;
   es_adicional?: boolean;
   masa_adicional_referencia_id?: number | null;
@@ -68,15 +75,20 @@ export interface ProductoMasa {
   id: number;
   masa_id: number;
   producto_codigo: string;
+  sap_item_code?: string;
   producto_nombre: string;
   presentacion: string;
   gramaje_unitario: number;
   unidades_pedidas: number;
   unidades_programadas: number;
   unidades_producidas: number;
+  unidades_ajustadas?: number;
+  unidades_excedente?: number;
   kilos_pedidos: number;
   kilos_programados: number;
   kilos_producidos: number;
+  unidades_por_paquete: number;
+  cantidad_paquetes: number;
 }
 
 // Ingrediente de una masa

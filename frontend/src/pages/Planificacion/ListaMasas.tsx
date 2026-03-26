@@ -359,20 +359,36 @@ export const ListaMasas: React.FC = () => {
                   </div>
 
                   {/* Estadísticas */}
-                  <div className="grid grid-cols-3 gap-4 pt-4 border-t border-gray-200 mb-4">
+                  <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-200 mb-3">
                     <div className="text-center">
                       <p className="text-2xl font-bold text-gray-900">{masa.total_ordenes}</p>
                       <p className="text-xs text-gray-500">Órdenes</p>
                     </div>
                     <div className="text-center">
-                      <p className="text-2xl font-bold text-gray-900">{masa.total_productos}</p>
-                      <p className="text-xs text-gray-500">Productos</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-2xl font-bold text-gray-900">{masa.total_unidades_programadas}</p>
-                      <p className="text-xs text-gray-500">Unidades</p>
+                      <p className="text-2xl font-bold text-emerald-700">
+                        {Number(masa.total_panes) > 0
+                          ? Number(masa.total_panes).toLocaleString('es-CO')
+                          : masa.total_unidades_programadas}
+                      </p>
+                      <p className="text-xs text-gray-500">Total panes</p>
                     </div>
                   </div>
+                  {masa.productos_resumen && masa.productos_resumen.length > 0 && (
+                    <div className="mb-3 rounded-lg bg-gray-50 border border-gray-100 divide-y divide-gray-100">
+                      {masa.productos_resumen.map((p, i) => (
+                        <div key={i} className="flex items-center justify-between px-3 py-1.5">
+                          <span className="text-xs text-gray-700 truncate flex-1 mr-2" title={p.producto_nombre}>
+                            {p.producto_nombre}
+                          </span>
+                          <span className="text-xs font-bold text-emerald-700 shrink-0">
+                            {Number(p.cantidad_paquetes) > 0
+                              ? Number(p.cantidad_paquetes).toLocaleString('es-CO')
+                              : '—'} panes
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   {/* Botones acción SUPERVISOR/ADMIN */}
                   {esSupervisor && (masa.estado === 'PLANIFICACION' || masa.estado === 'PENDIENTE' || masa.estado === 'APROBADA') && (

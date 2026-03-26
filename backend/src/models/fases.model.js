@@ -63,7 +63,16 @@ const getMasasByFecha = async (fecha, fase = null) => {
       COUNT(DISTINCT omr.orden_sap_docentry) as total_ordenes,
       COUNT(pm.id) as total_productos,
       SUM(pm.unidades_pedidas) as total_unidades_pedidas,
-      SUM(pm.unidades_programadas) as total_unidades_programadas
+      SUM(pm.unidades_programadas) as total_unidades_programadas,
+      SUM(pm.cantidad_paquetes) as total_panes,
+      json_agg(
+        json_build_object(
+          'producto_nombre', pm.producto_nombre,
+          'sap_item_code', pm.sap_item_code,
+          'unidades_por_paquete', pm.unidades_por_paquete,
+          'cantidad_paquetes', pm.cantidad_paquetes
+        ) ORDER BY pm.producto_nombre
+      ) FILTER (WHERE pm.id IS NOT NULL) as productos_resumen
     FROM masas_produccion m
     LEFT JOIN orden_masa_relacion omr ON m.id = omr.masa_id
     LEFT JOIN productos_por_masa pm ON m.id = pm.masa_id
