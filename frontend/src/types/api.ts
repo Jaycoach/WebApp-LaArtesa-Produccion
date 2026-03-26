@@ -132,6 +132,17 @@ export interface ChecklistPesaje {
   todosPesados: boolean;
   completado: boolean;
   progreso: number; // 0-100
+  productos_con_ajuste?: any[];
+  hay_ajustes_divisor?: boolean;
+  sin_stock_count?: number;
+  ingredientes_sin_stock?: string[];
+  productos_resumen?: {
+    producto_nombre: string;
+    sap_item_code: string;
+    unidades_pedidas: number;
+    unidades_por_paquete: number;
+    panes_totales: number;
+  }[];
 }
 
 export interface LoteConsumo {
