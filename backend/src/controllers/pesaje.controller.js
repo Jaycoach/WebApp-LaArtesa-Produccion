@@ -330,7 +330,7 @@ const descontarInventarioLocal = async (rows, masaId) => {
 };
 
 // Envía InventoryGenExit a SAP. Retorna { success, docEntry, rows } o { success: false, error }
-const enviarInventoryGenExits = async (masaId, usuarioId) => {
+const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
   const inicio = Date.now();
   let requestPayload = null;
   try {
@@ -362,7 +362,7 @@ const enviarInventoryGenExits = async (masaId, usuarioId) => {
       return { success: true, docEntry: null, rows: [] };
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = fechaLocal || new Date().toISOString().split('T')[0];
 
     // Leer lotes reservados en pesaje_lotes_consumo para esta masa
     const lotesResult = await db.query(
@@ -533,6 +533,7 @@ const enviarInventoryGenExits = async (masaId, usuarioId) => {
 const confirmarPesaje = async (req, res, next) => {
   try {
     const { masaId } = req.params;
+    const fecha_local = req.body?.fecha_local || null;
     logger.info(`Confirmando pesaje para masa ${masaId}`);
 
     // Validar que la masa esté APROBADA
@@ -712,7 +713,7 @@ const confirmarPesaje = async (req, res, next) => {
       logger.info(`Masa ${masaId} subdividida en ${subdivision.n_tandas} tandas después del pesaje.`);
 
       // Enviar a SAP — bloqueante
-      const sapResult = await enviarInventoryGenExits(masaId, req.user.id);
+      const sapResult = await enviarInventoryGenExits(masaId, req.user.id, fecha_local);
       if (!sapResult.success) {
         // Rollback: revertir PESAJE a EN_PROGRESO y AMASADO a BLOQUEADA
         try {

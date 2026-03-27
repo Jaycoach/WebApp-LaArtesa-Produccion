@@ -123,7 +123,9 @@ const FaseListado = () => {
   const user = useAuthStore((state) => state.user);
 
   const hoy = new Date().toISOString().split('T')[0];
-  const [fecha, setFecha] = useState(hoy);
+  const [fecha, setFecha] = useState(() => {
+    return sessionStorage.getItem('artesa_fecha_produccion') || hoy;
+  });
 
   const faseKey = (nombreFase ?? '').toLowerCase();
   const cfg = FASE_CONFIG[faseKey];
@@ -138,6 +140,7 @@ const FaseListado = () => {
   const masas: Masa[] = (data as any)?.data ?? (data as any) ?? [];
 
   const handleNavigate = (masaId: number, fase: string) => {
+    sessionStorage.setItem('artesa_masa_activa', String(masaId));
     const rutasMap: Record<string, string> = {
       pesaje:       `/pesaje/${masaId}`,
       amasado:      `/amasado/${masaId}`,
@@ -179,7 +182,7 @@ const FaseListado = () => {
             <input
               type="date"
               value={fecha}
-              onChange={(e) => setFecha(e.target.value)}
+              onChange={(e) => { sessionStorage.setItem('artesa_fecha_produccion', e.target.value); setFecha(e.target.value); }}
               className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
           </div>

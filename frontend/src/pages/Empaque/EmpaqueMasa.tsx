@@ -598,9 +598,11 @@ const PanelEmpaqueMasa: React.FC<{
 
     setSaving(true);
     try {
+      const ahora = new Date();
+      const fecha_local = `${ahora.getFullYear()}-${String(ahora.getMonth()+1).padStart(2,'0')}-${String(ahora.getDate()).padStart(2,'0')}`;
       await api(`/empaque/${masa.id}/completar`, {
         method: 'POST',
-        body: JSON.stringify({ observaciones: obsOverride || null }),
+        body: JSON.stringify({ observaciones: obsOverride || null, fecha_local }),
       });
       qc.invalidateQueries({ queryKey: ['empaque-pendientes'] });
       mostrar('ok', 'Empaque completado');
@@ -1012,11 +1014,11 @@ const PanelResumenVariedad: React.FC<{ fecha: string }> = ({ fecha }) => {
             <div className="text-xs text-blue-500">Variedades</div>
           </div>
           <div className="bg-green-50 border border-green-100 rounded-lg p-3 text-center">
-            <div className="text-2xl font-bold text-green-700">{resumen.total_unidades.toLocaleString()}</div>
+            <div className="text-2xl font-bold text-green-700">{Math.ceil(resumen.total_paquetes).toLocaleString()}</div>
             <div className="text-xs text-green-500">Unidades totales</div>
           </div>
           <div className="bg-purple-50 border border-purple-100 rounded-lg p-3 text-center">
-            <div className="text-2xl font-bold text-purple-700">{Math.ceil(resumen.total_paquetes).toLocaleString()}</div>
+            <div className="text-2xl font-bold text-purple-700">{resumen.total_unidades.toLocaleString()}</div>
             <div className="text-xs text-purple-500">Paquetes totales</div>
           </div>
         </div>
