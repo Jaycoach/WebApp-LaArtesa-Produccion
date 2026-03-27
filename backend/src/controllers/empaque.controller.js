@@ -231,7 +231,31 @@ exports.getEmpaqueInfo = async (req, res) => {
       `SELECT unidades_terminadas FROM registros_horneado
        WHERE masa_id = $1 ORDER BY fecha_registro DESC LIMIT 1`, [masaId]
     );
-    const unidades_terminadas = horneadoR.rows[0]?.unidades_terminadas || null;
+    const unidades_terminadas_total = horneadoR.rows[0]?.unidades_terminadas || null;
+
+    // Distribuir unidades_terminadas del horneado proporcionalmente por producto
+    // según cantidad_divisiones de cada uno
+    if (unidades_terminadas_total && unidades_terminadas_total > 0) {
+      const totalDiv = productos.reduce((s, p) => s + parseInt(p.cantidad_divisiones || 0), 0);
+      if (totalDiv > 0) {
+        let asignado = 0;
+        productos = productos.map((p, idx) => {
+          const divProd = parseInt(p.cantidad_divisiones || 0);
+          let terminadasProd;
+          if (idx === productos.length - 1) {
+            terminadasProd = unidades_terminadas_total - asignado;
+          } else {
+            terminadasProd = Math.round((divProd / totalDiv) * unidades_terminadas_total);
+          }
+          asignado += terminadasProd;
+          return { ...p, unidades_terminadas_horneado: terminadasProd };
+        });
+      } else {
+        productos = productos.map(p => ({ ...p, unidades_terminadas_horneado: null }));
+      }
+    } else {
+      productos = productos.map(p => ({ ...p, unidades_terminadas_horneado: null }));
+    }
 
     const registroR = await db.query(
       `SELECT id, fecha_vencimiento, estado FROM registros_empaque WHERE masa_id = $1 LIMIT 1`,
@@ -242,7 +266,7 @@ exports.getEmpaqueInfo = async (req, res) => {
       masa: masaInfo,
       productos,
       registro_empaque: registroR.rows[0] || null,
-      unidades_terminadas,
+      unidades_terminadas_total,
     }});
   } catch (error) {
     logger.error('Error getEmpaqueInfo:', error);

@@ -41,6 +41,7 @@ interface ProductoPendiente {
   unidades_por_paquete: number | null;
   sap_doc_num: string | null;
   sap_doc_entry: number | null;
+  unidades_terminadas_horneado: number | null;
 }
 interface OVPendiente {
   doc_num: string;
@@ -530,7 +531,7 @@ const PanelEmpaqueMasa: React.FC<{
   const [detalles, setDetalles] = useState<Record<number, { emp: string; merma: string }>>(() => {
     const init: Record<number, { emp: string; merma: string }> = {};
     masa.ovs.forEach(ov => ov.productos.forEach(p => {
-      init[p.id] = { emp: String(p.unidades_referencia ?? p.unidades_programadas ?? '0'), merma: '0' };
+      init[p.id] = { emp: '0', merma: '0' };
     }));
     return init;
   });
@@ -623,8 +624,13 @@ const PanelEmpaqueMasa: React.FC<{
   const totalProductos = masa.ovs.reduce((s, o) => s + o.productos.length, 0);
   const totalProgramadas = masa.ovs.reduce((s, o) =>
     s + o.productos.reduce((ss, p) => ss + (p.unidades_programadas || 0), 0), 0);
+  // totalDivision: solo suma productos con división completada (panes reales cortados)
   const totalDivision = masa.ovs.reduce((s, o) =>
-    s + o.productos.reduce((ss, p) => ss + (p.unidades_referencia || 0), 0), 0);
+    s + o.productos.reduce((ss, p) =>
+      ss + (p.division_completada ? (p.unidades_referencia || 0) : 0), 0), 0);
+  // totalHorneadas: suma de unidades_terminadas distribuidas por producto
+  const totalHorneadas = masa.ovs.reduce((s, o) =>
+    s + o.productos.reduce((ss, p) => ss + (p.unidades_terminadas_horneado || 0), 0), 0);
   const totalEmpacadas = Object.values(detalles).reduce((s, v) => s + (parseInt(v.emp) || 0), 0);
 
   return (
@@ -696,16 +702,27 @@ const PanelEmpaqueMasa: React.FC<{
           <div className="text-2xl font-bold text-blue-700">{totalDivision}</div>
           <div className="text-xs text-blue-500">De división</div>
         </div>
-        <div className={`rounded-lg p-3 text-center ${
-          totalEmpacadas >= totalDivision ? 'bg-green-50' : 'bg-amber-50'
-        }`}>
-          <div className={`text-2xl font-bold ${
-            totalEmpacadas >= totalDivision ? 'text-green-700' : 'text-amber-700'
-          }`}>{totalEmpacadas}</div>
-          <div className={`text-xs ${
-            totalEmpacadas >= totalDivision ? 'text-green-500' : 'text-amber-500'
-          }`}>Empacadas</div>
-        </div>
+        {masa.estado_empaque === 'COMPLETADA' ? (
+          <div className={`rounded-lg p-3 text-center ${
+            totalEmpacadas >= totalDivision ? 'bg-green-50' : 'bg-amber-50'
+          }`}>
+            <div className={`text-2xl font-bold ${
+              totalEmpacadas >= totalDivision ? 'text-green-700' : 'text-amber-700'
+            }`}>{totalEmpacadas}</div>
+            <div className={`text-xs ${
+              totalEmpacadas >= totalDivision ? 'text-green-500' : 'text-amber-500'
+            }`}>Empacadas</div>
+          </div>
+        ) : (
+          <div className="bg-orange-50 rounded-lg p-3 text-center">
+            <div className="text-2xl font-bold text-orange-700">
+              {totalHorneadas > 0 ? totalHorneadas : totalDivision}
+            </div>
+            <div className="text-xs text-orange-500">
+              {totalHorneadas > 0 ? 'Horneadas' : 'De división'}
+            </div>
+          </div>
+        )}
       </div>
 
       {puedeOperar && !empaque_iniciado && (
@@ -796,6 +813,11 @@ const PanelEmpaqueMasa: React.FC<{
                         }`}>
                           {p.division_completada ? p.unidades_referencia : '—'}
                         </span>
+                        {p.division_completada && p.unidades_terminadas_horneado != null && (
+                          <div className="text-xs text-orange-500 font-mono font-semibold">
+                            🔥 {p.unidades_terminadas_horneado} horn.
+                          </div>
+                        )}
                         {!p.division_completada && (
                           <div className="text-xs text-gray-400">Sin división</div>
                         )}
@@ -1334,9 +1356,13 @@ export const EmpaqueMasa: React.FC = () => {
       const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
       // Panes sugeridos = paquetes pedidos × unidades por paquete
       const panesSugeridos = (p.unidades_pedidas || 0) * xPaq;
-      // Panes de referencia: terminados horneado > divididos > sugeridos
-      const panesReferencia = directMasaData?.data?.unidades_terminadas
-        || (p.division_completada && p.cantidad_divisiones > 0 ? p.cantidad_divisiones : 0)
+      // Panes divididos reales por este producto
+      const panesDivididos = p.division_completada && (p.cantidad_divisiones || 0) > 0
+        ? p.cantidad_divisiones
+        : 0;
+      // Referencia por producto: terminados_horneado_este_producto > divididos > sugeridos
+      const panesReferencia = p.unidades_terminadas_horneado
+        || panesDivididos
         || panesSugeridos;
       ovsMap[ov].push({
         id: p.id,
