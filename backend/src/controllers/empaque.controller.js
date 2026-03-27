@@ -324,7 +324,7 @@ exports.completarEmpaque = async (req, res) => {
   const client = await db.getClient();
   try {
     const { masaId } = req.params;
-    const { observaciones } = req.body;
+    const { observaciones, fecha_local } = req.body;
 
     await client.query('BEGIN');
 
@@ -481,7 +481,7 @@ exports.completarEmpaque = async (req, res) => {
             ExpiryDate:        fechaVencimiento
               ? new Date(fechaVencimiento).toISOString().split('T')[0]
               : null,
-            ManufacturingDate: new Date().toISOString().split('T')[0],
+            ManufacturingDate: fecha_local || new Date().toISOString().split('T')[0],
           }],
         };
         entradaLines.push(linea);
@@ -489,7 +489,7 @@ exports.completarEmpaque = async (req, res) => {
 
       if (entradaLines.length) {
         const sapRespEntrada = await sapServiceEntrada.client.post('/InventoryGenEntries', {
-          DocDate:       new Date().toISOString().split('T')[0],
+          DocDate:       fecha_local || new Date().toISOString().split('T')[0],
           Comments:      `Producción terminada masa ${masaId} - Lote ${loteProduccion}`,
           DocumentLines: entradaLines,
         });
@@ -551,7 +551,7 @@ exports.completarEmpaque = async (req, res) => {
 
       if (docLines.length) {
         const sapResp = await sapService.client.post('/InventoryGenExits', {
-          DocDate:       new Date().toISOString().split('T')[0],
+          DocDate:       fecha_local || new Date().toISOString().split('T')[0],
           Comments:      `Consumo empaque masa ${masaId}`,
           DocumentLines: docLines,
         });

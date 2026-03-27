@@ -60,7 +60,7 @@ const getMasasByFecha = async (fecha, fase = null) => {
   const result = await db.query(`
     SELECT
       m.*,
-      COUNT(DISTINCT omr.orden_sap_docentry) as total_ordenes,
+      COUNT(DISTINCT pm.sap_doc_entry) as total_ordenes,
       COUNT(pm.id) as total_productos,
       SUM(pm.unidades_pedidas) as total_unidades_pedidas,
       SUM(pm.unidades_programadas) as total_unidades_programadas,
@@ -74,7 +74,6 @@ const getMasasByFecha = async (fecha, fase = null) => {
         ) ORDER BY pm.producto_nombre
       ) FILTER (WHERE pm.id IS NOT NULL) as productos_resumen
     FROM masas_produccion m
-    LEFT JOIN orden_masa_relacion omr ON m.id = omr.masa_id
     LEFT JOIN productos_por_masa pm ON m.id = pm.masa_id
     WHERE m.fecha_produccion = $1
     ${whereExtra}

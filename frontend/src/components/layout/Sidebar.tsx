@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { useAuthStore } from '@/store';
 
@@ -67,8 +67,31 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
   const usuario = useAuthStore((state) => state.user);
   const puedeGestionarUsuarios = usuario?.rol === 'admin' || usuario?.rol === 'supervisor';
 
+  const params = useParams<{ masaId?: string; nombreFase?: string }>();
+  const masaActiva = params.masaId || sessionStorage.getItem('artesa_masa_activa') || null;
+
+  React.useEffect(() => {
+    if (params.masaId) {
+      sessionStorage.setItem('artesa_masa_activa', params.masaId);
+    }
+  }, [params.masaId]);
+
   const handleNavClick = () => {
     if (onClose) onClose();
+  };
+
+  const getFaseLink = (key: string, defaultPath: string): string => {
+    if (!masaActiva) return defaultPath;
+    const rutas: Record<string, string> = {
+      pesaje:       `/pesaje/${masaActiva}`,
+      amasado:      `/amasado/${masaActiva}`,
+      division:     `/division/${masaActiva}`,
+      formado:      `/formado/${masaActiva}`,
+      fermentacion: `/fermentacion/${masaActiva}`,
+      horneado:     `/horneado/${masaActiva}`,
+      empaque:      `/empaque`,
+    };
+    return rutas[key] ?? defaultPath;
   };
 
   return (
@@ -150,11 +173,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
             { key: 'horneado',     label: 'Horneado',     color: 'bg-red-500',    path: '/fase/horneado'     },
             { key: 'empaque',      label: 'Empaque',      color: 'bg-amber-500',  path: '/empaque'           },
           ].map(({ key, label, color, path }) => {
-            const isActive = location.pathname.startsWith(path);
+            const resolvedPath = getFaseLink(key, path);
+            const isActive = location.pathname.startsWith(path) ||
+              (masaActiva !== null && location.pathname === resolvedPath);
             return (
               <li key={key}>
                 <Link
-                  to={path}
+                  to={resolvedPath}
                   onClick={handleNavClick}
                   className={clsx(
                     'flex items-center gap-3 px-4 py-2 text-sm rounded-lg transition-colors',
@@ -164,7 +189,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
                   )}
                 >
                   <span className={`w-2 h-2 rounded-full ${color} shrink-0`} />
-                  {label}
+                  <span className="flex-1">{label}</span>
+                  {masaActiva && key !== 'empaque' && (
+                    <span className="text-xs text-gray-400 font-mono">#{masaActiva}</span>
+                  )}
                 </Link>
               </li>
             );

@@ -88,8 +88,11 @@ export const checklistService = {
    * Confirmar que todo el pesaje está completo
    */
   confirmarPesaje: async (masaId: number): Promise<ConfirmarPesajeResponse> => {
+    const ahora = new Date();
+    const fecha_local = `${ahora.getFullYear()}-${String(ahora.getMonth()+1).padStart(2,'0')}-${String(ahora.getDate()).padStart(2,'0')}`;
     const response = await apiService.post<ConfirmarPesajeResponse>(
-      API_CONFIG.ENDPOINTS.PESAJE.CONFIRMAR(masaId)
+      API_CONFIG.ENDPOINTS.PESAJE.CONFIRMAR(masaId),
+      { fecha_local }
     );
     return response.data!;
   },
