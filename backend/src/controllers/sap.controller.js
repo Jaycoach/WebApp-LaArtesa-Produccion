@@ -819,7 +819,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
       const estaEnPlanificacion = masaExistente &&
         masaExistente.fase_actual === 'PLANIFICACION' &&
         masaExistente.estado === 'PLANIFICACION';
-      // Completada: ya terminó todo el ciclo — NO crear masa adicional, omitir
+      // Completada: ya terminó todo el ciclo — se trata como en producción (masa ADICIONAL si llega OV nueva)
       const estaCompletada = masaExistente &&
         masaExistente.estado === 'COMPLETADA';
       // En producción: aprobada, pendiente, o ya avanzó de fase (pero NO completada)
@@ -827,21 +827,11 @@ const sincronizarDesdeOV = async (req, res, next) => {
         masaExistente.estado !== 'PLANIFICACION' ||
         masaExistente.fase_actual !== 'PLANIFICACION'
       );
-      // Si ya está COMPLETADA: los productos ya fueron procesados, omitir completamente
+      // Si ya está COMPLETADA o en producción: crear masa ADICIONAL con código único
+      // No omitir — puede ser una OV genuinamente nueva para el mismo tipo de masa
       if (estaCompletada) {
-        logger.info(`Tipo ${tipoMasa} ya COMPLETADA (masa ${masaExistente.id}) — omitiendo sincronización`);
-        masasCreadas.push({
-          id: masaExistente.id,
-          uuid: masaExistente.uuid,
-          codigo: masaExistente.codigo_masa,
-          tipo_masa: tipoMasa,
-          accion: 'OMITIDA_COMPLETADA',
-          productos_agregados: 0
-        });
-        ordenCounter++;
-        continue;
+        logger.info(`Tipo ${tipoMasa} ya COMPLETADA (masa ${masaExistente.id}) — nueva OV, se creará masa ADICIONAL`);
       }
-      // Si ya está en producción (forzar=false): crear masa adicional
       if (estaEnProduccion) {
         logger.info(`Tipo ${tipoMasa} ya en fase ${masaExistente.fase_actual} — creando masa ADICIONAL`);
         // continuar el flujo normal de creación pero marcando es_adicional=true
