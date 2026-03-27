@@ -189,7 +189,9 @@ exports.getEmpaqueInfo = async (req, res) => {
               gramaje_unitario, unidades_pedidas,
               COALESCE(unidades_ajustadas, unidades_programadas) AS unidades_ajustadas,
               COALESCE(unidades_producidas, 0) AS unidades_producidas,
+              COALESCE(cantidad_divisiones, 0) AS cantidad_divisiones,
               COALESCE(unidades_excedente, 0) AS unidades_excedente,
+              division_completada,
               sap_doc_entry, sap_doc_num,
               COALESCE(unidades_por_paquete, 1) AS unidades_por_paquete,
               COALESCE(unidades_pan_por_paquete, 1) AS unidades_pan_por_paquete,
@@ -198,15 +200,49 @@ exports.getEmpaqueInfo = async (req, res) => {
       [masaId]
     );
 
+    // Heredar sap_doc_num del padre si es sub-masa y productos sin OV
+    const masaInfo = masaR.rows[0];
+    let productos = productosR.rows;
+    const masaPadreR = await db.query(
+      `SELECT masa_padre_id, es_subdivision FROM masas_produccion WHERE id = $1`, [masaId]
+    );
+    const { masa_padre_id, es_subdivision } = masaPadreR.rows[0] || {};
+    if (es_subdivision && masa_padre_id) {
+      const padreProdsR = await db.query(
+        `SELECT sap_item_code, sap_doc_num, sap_doc_entry
+         FROM productos_por_masa WHERE masa_id = $1`, [masa_padre_id]
+      );
+      const mapaDoc = {};
+      for (const pp of padreProdsR.rows) {
+        if (pp.sap_item_code) mapaDoc[pp.sap_item_code] = {
+          sap_doc_num: pp.sap_doc_num,
+          sap_doc_entry: pp.sap_doc_entry,
+        };
+      }
+      productos = productos.map(p => ({
+        ...p,
+        sap_doc_num:   p.sap_doc_num   || mapaDoc[p.sap_item_code]?.sap_doc_num   || null,
+        sap_doc_entry: p.sap_doc_entry || mapaDoc[p.sap_item_code]?.sap_doc_entry || null,
+      }));
+    }
+
+    // Unidades terminadas del horneado
+    const horneadoR = await db.query(
+      `SELECT unidades_terminadas FROM registros_horneado
+       WHERE masa_id = $1 ORDER BY fecha_registro DESC LIMIT 1`, [masaId]
+    );
+    const unidades_terminadas = horneadoR.rows[0]?.unidades_terminadas || null;
+
     const registroR = await db.query(
       `SELECT id, fecha_vencimiento, estado FROM registros_empaque WHERE masa_id = $1 LIMIT 1`,
       [masaId]
     );
 
     res.json({ success: true, data: {
-      masa: masaR.rows[0],
-      productos: productosR.rows,
+      masa: masaInfo,
+      productos,
       registro_empaque: registroR.rows[0] || null,
+      unidades_terminadas,
     }});
   } catch (error) {
     logger.error('Error getEmpaqueInfo:', error);

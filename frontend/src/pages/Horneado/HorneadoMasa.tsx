@@ -385,6 +385,12 @@ export const HorneadoMasa: React.FC = () => {
                     <div className="font-semibold text-gray-800">{data.registro_actual.calidad_coccion}</div>
                   </div>
                 )}
+                {data.registro_actual.unidades_terminadas != null && (
+                  <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
+                    <div className="text-xs text-blue-500 mb-0.5">Panes entregados</div>
+                    <div className="font-bold text-blue-800 text-lg">{data.registro_actual.unidades_terminadas}</div>
+                  </div>
+                )}
                 {data.registro_actual.hora_entrada && (
                   <div className="bg-white rounded-lg p-3 border border-green-100">
                     <div className="text-xs text-gray-500 mb-0.5">Entrada horno</div>

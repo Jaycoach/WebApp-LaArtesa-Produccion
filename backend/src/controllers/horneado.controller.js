@@ -114,6 +114,7 @@ exports.getHorneadoInfo = async (req, res) => {
         rh.tiempo_fin_damper_real,
         rh.calidad_color,
         rh.calidad_coccion,
+        rh.unidades_terminadas,
         rh.usuario_id,
         rh.usuario_nombre,
         rh.observaciones,
