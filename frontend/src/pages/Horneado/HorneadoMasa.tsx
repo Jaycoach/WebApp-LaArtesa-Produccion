@@ -47,7 +47,7 @@ export const HorneadoMasa: React.FC = () => {
   // Form completar — claves coinciden con el campo del controller (calidad_color, calidad_coccion)
   const [calidadColor, setCalidadColor] = useState('PERFECTO');
   const [calidadCoccion, setCalidadCoccion] = useState('PERFECTO');
-  const [fechaVencimientoSugerida, setFechaVencimientoSugerida] = useState('');
+  const [unidadesTerminadas, setUnidadesTerminadas] = useState('');
 
   const { data, isLoading } = useQuery({
     queryKey: ['horneado', masaId],
@@ -97,7 +97,7 @@ export const HorneadoMasa: React.FC = () => {
           calidad_color: calidadColor,
           calidad_coccion: calidadCoccion,
           observaciones,
-          fecha_vencimiento_sugerida: fechaVencimientoSugerida || null
+          unidades_terminadas: parseInt(unidadesTerminadas) || null
         })
       });
       const d = await res.json();
@@ -266,14 +266,30 @@ export const HorneadoMasa: React.FC = () => {
               </div>
             </div>
 
+            {/* Unidades divididas (referencia de división, solo lectura) */}
+            {(data?.unidades_divididas ?? 0) > 0 && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+                <p className="text-xs text-blue-500 mb-0.5">Unidades divididas (de división)</p>
+                <p className="text-2xl font-bold text-blue-700">{data.unidades_divididas}</p>
+              </div>
+            )}
+
+            {/* Unidades terminadas — ingresadas por el hornero */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Fecha de vencimiento sugerida
+                Unidades terminadas <span className="text-red-500">*</span>
+                {(data?.unidades_divididas ?? 0) > 0 && (
+                  <span className="ml-2 text-xs font-normal text-gray-400">
+                    (referencia: {data.unidades_divididas} divididas)
+                  </span>
+                )}
               </label>
               <input
-                type="date"
-                value={fechaVencimientoSugerida}
-                onChange={e => setFechaVencimientoSugerida(e.target.value)}
+                type="number"
+                min="0"
+                value={unidadesTerminadas}
+                onChange={e => setUnidadesTerminadas(e.target.value)}
+                placeholder={String(data?.unidades_divididas ?? '')}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-400"
               />
             </div>

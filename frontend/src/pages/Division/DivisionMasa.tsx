@@ -408,10 +408,7 @@ export const DivisionMasa: React.FC = () => {
                           Paquetes
                         </th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                          Panes sugeridos
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                          A cortar (piezas)
+                          Panes sugeridos a cortar
                         </th>
                         <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
                           Divisor
@@ -463,13 +460,6 @@ export const DivisionMasa: React.FC = () => {
                               })()}
                             </td>
 
-                            {/* A cortar (piezas físicas de masa) */}
-                            <td className="px-4 py-3 text-right">
-                              <span className={`text-base font-bold ${excedente > 0 ? 'text-orange-700' : 'text-blue-700'}`}>
-                                {ajustadas}
-                              </span>
-                            </td>
-
                             {/* Divisor badge */}
                             <td className="px-4 py-3 text-center">
                               {divisor > 0 ? (
@@ -512,11 +502,17 @@ export const DivisionMasa: React.FC = () => {
                                 {error && (
                                   <p className="text-xs text-red-600 text-right max-w-xs">{error}</p>
                                 )}
-                                {esCorrecto && cantidad > ajustadas && (
-                                  <p className="text-xs text-amber-600 text-right">
-                                    +{cantidad - pedidas} excedente real
-                                  </p>
-                                )}
+                                {esCorrecto && (() => {
+                                  const xSAP = parseFloat(String(producto.unidades_por_paquete || 0));
+                                  const xNombre = producto.producto_nombre?.match(/ X ?(\d+)/i);
+                                  const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
+                                  const panesSugeridos = pedidas * xPaq;
+                                  return cantidad > panesSugeridos ? (
+                                    <p className="text-xs text-amber-600 text-right">
+                                      +{cantidad - panesSugeridos} excedente real
+                                    </p>
+                                  ) : null;
+                                })()}
                               </div>
                             </td>
                           </tr>
@@ -530,8 +526,8 @@ export const DivisionMasa: React.FC = () => {
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <p className="text-sm text-blue-800">
                     <strong>Columnas:</strong>{' '}
-                    <span className="font-semibold">Pedidas</span> = unidades en la orden de venta.{' '}
-                    <span className="font-semibold">A cortar</span> = mínimo requerido ajustado al múltiplo del divisor de la máquina.{' '}
+                    <span className="font-semibold">Paquetes</span> = unidades en la orden de venta.{' '}
+                    <span className="font-semibold">Panes sugeridos a cortar</span> = total de panes a producir (paquetes × unidades por paquete), ajustado al múltiplo del divisor de la máquina.{' '}
                     <span className="font-semibold">Excedente</span> = unidades adicionales que se registrarán como inventario extra en SAP.
                     Los productos con <span className="inline-flex items-center px-1 rounded bg-orange-100 text-orange-800 text-xs font-semibold">×N</span> deben cortarse en múltiplos exactos.
                   </p>
