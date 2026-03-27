@@ -8,7 +8,7 @@
  * Si hay faltantes, se exige observación obligatoria antes de completar.
  */
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card } from '@/components/common';
 
@@ -509,6 +509,7 @@ const PanelEmpaqueMasa: React.FC<{
   tiposMO: any[];
 }> = ({ masa, onVolver, onCompletado, tiposMO }) => {
   const qc = useQueryClient();
+  const navigate = useNavigate();
 
   // Re-fetch del estado real de la masa para detectar cambios post-iniciar
   const { data: masaActualData, refetch: refetchMasaActual } = useQuery({
@@ -630,7 +631,13 @@ const PanelEmpaqueMasa: React.FC<{
     <div className="space-y-5">
       <div className="flex items-center gap-3">
         <button onClick={onVolver} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm font-medium">
-          ← Volver a la lista
+          ← Lista
+        </button>
+        <button
+          onClick={() => navigate(`/horneado/${masa.id}`)}
+          className="flex items-center gap-1 px-4 py-2 bg-white border border-gray-200 hover:border-red-300 hover:bg-red-50 text-gray-600 hover:text-red-700 rounded-lg text-sm font-medium shadow-sm transition-colors"
+        >
+          ← Horneado
         </button>
         <div className="flex-1">
           <h2 className="text-lg font-bold text-gray-800">{masa.nombre_masa}</h2>
@@ -1301,18 +1308,68 @@ export const EmpaqueMasa: React.FC = () => {
     });
   const masasPendientes = pendientesData?.data || [];
 
-  // Pre-seleccionar masa desde URL param o sessionStorage
+  // ID objetivo: URL param o sessionStorage
+  const targetMasaId = masaIdParam || sessionStorage.getItem('artesa_masa_activa') || null;
+
+  // Fetch directo por masaId cuando hay contexto — independiente de fecha y lista
+  const { data: directMasaData } = useQuery({
+    queryKey: ['empaque-direct', targetMasaId],
+    queryFn: () => api(`/empaque/${targetMasaId}`),
+    enabled: !!targetMasaId && !masaSeleccionada,
+  });
+
   useEffect(() => {
-    if (masasPendientes.length === 0) return;
-    if (masaSeleccionada) return;
-    const targetId = masaIdParam || sessionStorage.getItem('artesa_masa_activa');
-    if (!targetId) return;
-    const masa = masasPendientes.find((m: MasaPendiente) => String(m.id) === targetId);
-    if (masa) {
-      setMasaSeleccionada(masa);
-      setModo('masa');
+    if (!directMasaData?.data || masaSeleccionada) return;
+    const m = directMasaData.data.masa;
+    const registro = directMasaData.data.registro_empaque;
+    const productos = directMasaData.data.productos || [];
+
+    // Construir MasaPendiente compatible desde getEmpaqueInfo
+    const ovsMap: Record<string, any[]> = {};
+    for (const p of productos) {
+      const ov = p.sap_doc_num || 'SIN_OV';
+      if (!ovsMap[ov]) ovsMap[ov] = [];
+      ovsMap[ov].push({
+        id: p.id,
+        sap_item_code: p.sap_item_code,
+        producto_nombre: p.producto_nombre,
+        presentacion: p.presentacion,
+        gramaje_unitario: p.gramaje_unitario,
+        unidades_programadas: p.unidades_ajustadas || p.unidades_pedidas || 0,
+        unidades_referencia: p.unidades_ajustadas || p.unidades_pedidas || 0,
+        division_completada: true,
+        unidades_producidas: p.unidades_producidas || 0,
+        unidades_por_paquete: p.unidades_por_paquete || null,
+        sap_doc_num: p.sap_doc_num || null,
+        sap_doc_entry: p.sap_doc_entry || null,
+      });
     }
-  }, [masasPendientes, masaIdParam]);
+    const ovs: { doc_num: string; productos: any[] }[] = Object.entries(ovsMap).map(
+      ([doc_num, prods]) => ({ doc_num, productos: prods })
+    );
+
+    const masaCompatible: MasaPendiente = {
+      id: m.id,
+      codigo_masa: m.codigo_masa,
+      nombre_masa: m.nombre_masa,
+      tipo_masa: m.tipo_masa,
+      total_kilos_con_merma: parseFloat(m.total_kilos_con_merma) || 0,
+      fecha_produccion: m.fecha_produccion?.slice(0, 10) || '',
+      es_subdivision: false,
+      estado_empaque: m.estado_empaque || 'PENDIENTE',
+      estado_horneado: 'COMPLETADA',
+      horneado_completo: true,
+      lote_produccion: m.lote_produccion || null,
+      empaque_iniciado: registro != null,
+      empaque_id: registro?.id || null,
+      fecha_vencimiento: registro?.fecha_vencimiento || m.empaque_datos_fase?.fecha_vencimiento_sugerida || null,
+      materiales_alistamiento: [],
+      ovs,
+    };
+
+    setMasaSeleccionada(masaCompatible);
+    setModo('masa');
+  }, [directMasaData]);
 
   const { data: ovData, isLoading: loadingOV, error: ovError } = useQuery<{ data: OVData[] }>({
     queryKey: ['empaque-ov', docNumBuscar],
