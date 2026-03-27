@@ -132,19 +132,27 @@ exports.getHorneadoInfo = async (req, res) => {
 
     const registroResult = await db.query(registroQuery, [masaId]);
 
-    // Sumar unidades cortadas reales de la fase de división
-    const unidadesDivisionQuery = `
-      SELECT COALESCE(SUM(unidades_producidas), 0)::integer AS total
+    // Productos con cantidad_divisiones reales para formulario por producto
+    const productosHorneadoResult = await db.query(`
+      SELECT id, producto_nombre, sap_item_code,
+             COALESCE(cantidad_divisiones, 0) AS cantidad_divisiones,
+             COALESCE(unidades_producidas, 0) AS unidades_producidas,
+             division_completada
       FROM productos_por_masa
       WHERE masa_id = $1
-    `;
-    const unidadesDivisionResult = await db.query(unidadesDivisionQuery, [masaId]);
-    const unidadesDivididas = unidadesDivisionResult.rows[0]?.total || 0;
+      ORDER BY producto_nombre
+    `, [masaId]);
+
+    // Total divididas = suma real de cantidad_divisiones (no unidades_producidas que ya fue sobreescrita por horneado)
+    const unidadesDivididas = productosHorneadoResult.rows.reduce(
+      (s, p) => s + parseInt(p.cantidad_divisiones || 0), 0
+    );
 
     res.json({
       success: true,
       data: {
         unidades_divididas: unidadesDivididas,
+        productos_horneado: productosHorneadoResult.rows,
         masa: {
           id: masa.id,
           uuid: masa.uuid,
@@ -560,6 +568,108 @@ exports.actualizarDamper = async (req, res) => {
  * Completar horneado
  * POST /api/horneado/:masaId/completar
  */
+/**
+ * PATCH /api/horneado/:masaId/unidades-por-producto
+ * Edición retroactiva de unidades terminadas por producto — solo admin/supervisor
+ */
+exports.editarUnidadesPorProducto = async (req, res) => {
+  const client = await db.getClient();
+  try {
+    const { masaId } = req.params;
+    const { unidades_por_producto, motivo } = req.body;
+    const usuario = req.user;
+
+    // Verificar rol
+    if (!['admin', 'supervisor'].includes(usuario.rol)) {
+      return res.status(403).json({ success: false, message: 'Solo admin o supervisor pueden editar valores históricos' });
+    }
+    if (!unidades_por_producto || typeof unidades_por_producto !== 'object') {
+      return res.status(400).json({ success: false, message: 'unidades_por_producto requerido' });
+    }
+    if (!motivo || motivo.trim().length < 5) {
+      return res.status(400).json({ success: false, message: 'Debe ingresar un motivo de modificación (mínimo 5 caracteres)' });
+    }
+
+    await client.query('BEGIN');
+
+    // Obtener registro actual para auditoría
+    const regR = await client.query(
+      `SELECT id, unidades_terminadas, unidades_terminadas_por_producto
+       FROM registros_horneado WHERE masa_id = $1 ORDER BY fecha_registro DESC LIMIT 1`,
+      [masaId]
+    );
+    if (!regR.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Registro de horneado no encontrado' });
+    }
+    const reg = regR.rows[0];
+
+    // Calcular nuevo total
+    const nuevoTotal = Object.values(unidades_por_producto).reduce((s, v) => s + parseInt(String(v)), 0);
+
+    // Helper auditoría
+    const insertAudit = async (campo, anterior, nuevo) => {
+      await client.query(
+        `INSERT INTO auditoria_modificaciones
+           (tabla, registro_id, campo, valor_anterior, valor_nuevo, motivo,
+            usuario_id, usuario_nombre, usuario_rol, masa_id)
+         VALUES ('registros_horneado', $1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [reg.id, campo, String(anterior ?? ''), String(nuevo ?? ''), motivo,
+         Number(usuario.id), usuario.nombre_completo || usuario.username, usuario.rol, Number(masaId)]
+      );
+    };
+
+    await insertAudit('unidades_terminadas', reg.unidades_terminadas, nuevoTotal);
+    await insertAudit('unidades_terminadas_por_producto',
+      JSON.stringify(reg.unidades_terminadas_por_producto),
+      JSON.stringify(unidades_por_producto));
+
+    // Actualizar registros_horneado
+    await client.query(
+      `UPDATE registros_horneado
+       SET unidades_terminadas = $2,
+           unidades_terminadas_por_producto = $3,
+           fecha_actualizacion = NOW()
+       WHERE id = $1`,
+      [reg.id, nuevoTotal, JSON.stringify(unidades_por_producto)]
+    );
+
+    // Actualizar productos_por_masa por producto
+    for (const [prodId, cantidad] of Object.entries(unidades_por_producto)) {
+      const cant = parseInt(String(cantidad));
+      const prevR = await client.query(
+        `SELECT unidades_producidas FROM productos_por_masa WHERE id = $1`, [parseInt(prodId)]
+      );
+      await insertAudit(`unidades_producidas_prod_${prodId}`,
+        prevR.rows[0]?.unidades_producidas, cant);
+
+      await client.query(
+        `UPDATE productos_por_masa SET unidades_producidas = $2, updated_at = NOW()
+         WHERE id = $1 AND masa_id = $3`,
+        [parseInt(prodId), cant, Number(masaId)]
+      );
+    }
+
+    // Actualizar datos_fase HORNEADO
+    await client.query(
+      `UPDATE progreso_fases
+       SET datos_fase = datos_fase || $2::jsonb
+       WHERE masa_id = $1 AND fase = 'HORNEADO'`,
+      [masaId, JSON.stringify({ unidades_terminadas: nuevoTotal, unidades_por_producto })]
+    );
+
+    await client.query('COMMIT');
+    logger.info(`Edición retroactiva horneado masa ${masaId} por ${usuario.username}: ${JSON.stringify(unidades_por_producto)}`);
+    res.json({ success: true, message: 'Unidades actualizadas y auditadas correctamente', data: { nuevoTotal, unidades_por_producto } });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    logger.error('Error editarUnidadesPorProducto:', error);
+    res.status(500).json({ success: false, message: error.message });
+  } finally {
+    client.release();
+  }
+};
+
 exports.completarHorneado = async (req, res) => {
   const client = await db.getClient();
 
@@ -569,7 +679,8 @@ exports.completarHorneado = async (req, res) => {
       calidad_color,
       calidad_coccion,
       observaciones,
-      unidades_terminadas
+      unidades_terminadas,
+      unidades_por_producto   // objeto { "prod_id": cantidad, ... }
     } = req.body;
 
     const usuario = req.user;
@@ -620,13 +731,52 @@ exports.completarHorneado = async (req, res) => {
       unidades_terminadas ? parseInt(unidades_terminadas) : null
     ]);
 
-    // Actualizar unidades_producidas en productos_por_masa si se informaron terminadas
-    if (unidades_terminadas && parseInt(unidades_terminadas) > 0) {
+    // Actualizar unidades_producidas en productos_por_masa
+    if (unidades_por_producto && typeof unidades_por_producto === 'object') {
+      // Guardar desglose por producto en registros_horneado
       await client.query(`
-        UPDATE productos_por_masa
-        SET unidades_producidas = $2
-        WHERE masa_id = $1
-      `, [Number(masaId), parseInt(unidades_terminadas)]);
+        UPDATE registros_horneado
+        SET unidades_terminadas_por_producto = $2
+        WHERE id = $1
+      `, [registro.id, JSON.stringify(unidades_por_producto)]);
+
+      // Actualizar cada producto individualmente
+      for (const [prodId, cantidad] of Object.entries(unidades_por_producto)) {
+        const cant = parseInt(String(cantidad));
+        if (cant >= 0) {
+          await client.query(`
+            UPDATE productos_por_masa
+            SET unidades_producidas = $2, updated_at = NOW()
+            WHERE id = $1 AND masa_id = $3
+          `, [parseInt(prodId), cant, Number(masaId)]);
+        }
+      }
+    } else if (unidades_terminadas && parseInt(unidades_terminadas) > 0) {
+      // Fallback: distribuir proporcionalmente por cantidad_divisiones
+      const prodsDiv = await client.query(`
+        SELECT id, COALESCE(cantidad_divisiones, 0) AS cantidad_divisiones
+        FROM productos_por_masa WHERE masa_id = $1 ORDER BY id
+      `, [Number(masaId)]);
+      const totalDiv = prodsDiv.rows.reduce((s, p) => s + parseInt(p.cantidad_divisiones), 0);
+      const totalTerm = parseInt(unidades_terminadas);
+      if (totalDiv > 0) {
+        let asignado = 0;
+        for (let i = 0; i < prodsDiv.rows.length; i++) {
+          const p = prodsDiv.rows[i];
+          const cant = i === prodsDiv.rows.length - 1
+            ? totalTerm - asignado
+            : Math.round((parseInt(p.cantidad_divisiones) / totalDiv) * totalTerm);
+          asignado += cant;
+          await client.query(`
+            UPDATE productos_por_masa SET unidades_producidas = $2, updated_at = NOW()
+            WHERE id = $1
+          `, [p.id, cant]);
+        }
+      } else {
+        await client.query(`
+          UPDATE productos_por_masa SET unidades_producidas = $2 WHERE masa_id = $1
+        `, [Number(masaId), totalTerm]);
+      }
     }
 
     // Marcar fase HORNEADO como COMPLETADA

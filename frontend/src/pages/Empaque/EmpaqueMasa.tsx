@@ -34,8 +34,10 @@ interface ProductoPendiente {
   producto_nombre: string;
   presentacion: string;
   gramaje_unitario: number;
-  unidades_programadas: number;
-  unidades_referencia: number;
+  unidades_programadas: number;    // panes sugeridos (pedidas × xPaq)
+  unidades_divididas: number;      // cantidad_divisiones real por producto
+  unidades_horneadas: number;      // unidades_producidas post-horneado por producto
+  unidades_referencia: number;     // para faltante: horneadas > divididas > sugeridas
   division_completada: boolean;
   unidades_producidas: number;
   unidades_por_paquete: number | null;
@@ -624,13 +626,10 @@ const PanelEmpaqueMasa: React.FC<{
   const totalProductos = masa.ovs.reduce((s, o) => s + o.productos.length, 0);
   const totalProgramadas = masa.ovs.reduce((s, o) =>
     s + o.productos.reduce((ss, p) => ss + (p.unidades_programadas || 0), 0), 0);
-  // totalDivision: solo suma productos con división completada (panes reales cortados)
   const totalDivision = masa.ovs.reduce((s, o) =>
-    s + o.productos.reduce((ss, p) =>
-      ss + (p.division_completada ? (p.unidades_referencia || 0) : 0), 0), 0);
-  // totalHorneadas: suma de unidades_terminadas distribuidas por producto
+    s + o.productos.reduce((ss, p) => ss + (p.unidades_divididas || 0), 0), 0);
   const totalHorneadas = masa.ovs.reduce((s, o) =>
-    s + o.productos.reduce((ss, p) => ss + (p.unidades_terminadas_horneado || 0), 0), 0);
+    s + o.productos.reduce((ss, p) => ss + (p.unidades_horneadas || 0), 0), 0);
   const totalEmpacadas = Object.values(detalles).reduce((s, v) => s + (parseInt(v.emp) || 0), 0);
 
   return (
@@ -689,40 +688,39 @@ const PanelEmpaqueMasa: React.FC<{
         }`}>{msg.texto}</div>
       )}
 
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-5 gap-2">
         <div className="bg-gray-50 rounded-lg p-3 text-center">
-          <div className="text-2xl font-bold text-gray-800">{totalProductos}</div>
+          <div className="text-xl font-bold text-gray-800">{totalProductos}</div>
           <div className="text-xs text-gray-500">Productos</div>
         </div>
         <div className="bg-gray-50 rounded-lg p-3 text-center">
-          <div className="text-2xl font-bold text-gray-600">{totalProgramadas}</div>
-          <div className="text-xs text-gray-400">Programadas</div>
+          <div className="text-xl font-bold text-gray-600">{totalProgramadas}</div>
+          <div className="text-xs text-gray-400">Pedidas</div>
         </div>
         <div className="bg-blue-50 rounded-lg p-3 text-center">
-          <div className="text-2xl font-bold text-blue-700">{totalDivision}</div>
-          <div className="text-xs text-blue-500">De división</div>
+          <div className="text-xl font-bold text-blue-700">{totalDivision || '—'}</div>
+          <div className="text-xs text-blue-500">Divididas</div>
         </div>
-        {masa.estado_empaque === 'COMPLETADA' ? (
-          <div className={`rounded-lg p-3 text-center ${
-            totalEmpacadas >= totalDivision ? 'bg-green-50' : 'bg-amber-50'
+        <div className="bg-orange-50 rounded-lg p-3 text-center">
+          <div className="text-xl font-bold text-orange-700">{totalHorneadas || '—'}</div>
+          <div className="text-xs text-orange-500">Horneadas</div>
+        </div>
+        <div className={`rounded-lg p-3 text-center ${
+          masa.estado_empaque === 'COMPLETADA'
+            ? (totalEmpacadas >= totalHorneadas ? 'bg-green-50' : 'bg-amber-50')
+            : 'bg-gray-100'
+        }`}>
+          <div className={`text-xl font-bold ${
+            masa.estado_empaque === 'COMPLETADA'
+              ? (totalEmpacadas >= totalHorneadas ? 'text-green-700' : 'text-amber-700')
+              : 'text-gray-400'
           }`}>
-            <div className={`text-2xl font-bold ${
-              totalEmpacadas >= totalDivision ? 'text-green-700' : 'text-amber-700'
-            }`}>{totalEmpacadas}</div>
-            <div className={`text-xs ${
-              totalEmpacadas >= totalDivision ? 'text-green-500' : 'text-amber-500'
-            }`}>Empacadas</div>
+            {masa.estado_empaque === 'COMPLETADA' ? totalEmpacadas : '—'}
           </div>
-        ) : (
-          <div className="bg-orange-50 rounded-lg p-3 text-center">
-            <div className="text-2xl font-bold text-orange-700">
-              {totalHorneadas > 0 ? totalHorneadas : totalDivision}
-            </div>
-            <div className="text-xs text-orange-500">
-              {totalHorneadas > 0 ? 'Horneadas' : 'De división'}
-            </div>
-          </div>
-        )}
+          <div className={`text-xs ${
+            masa.estado_empaque === 'COMPLETADA' ? 'text-green-500' : 'text-gray-400'
+          }`}>Empacadas</div>
+        </div>
       </div>
 
       {puedeOperar && !empaque_iniciado && (
@@ -783,8 +781,9 @@ const PanelEmpaqueMasa: React.FC<{
               <thead>
                 <tr className="bg-gray-50 text-gray-600 text-xs">
                   <th className="text-left p-2 border-b">Producto</th>
-                  <th className="text-right p-2 border-b">Programadas</th>
-                  <th className="text-right p-2 border-b">De división</th>
+                  <th className="text-right p-2 border-b">Pedidas</th>
+                  <th className="text-right p-2 border-b">Divididas</th>
+                  <th className="text-right p-2 border-b">Horneadas</th>
                   <th className="text-right p-2 border-b">Empacadas</th>
                   <th className="text-right p-2 border-b">Merma</th>
                   <th className="text-right p-2 border-b">Faltante</th>
@@ -809,18 +808,20 @@ const PanelEmpaqueMasa: React.FC<{
                       </td>
                       <td className="p-2 text-right">
                         <span className={`font-mono font-medium ${
-                          p.division_completada ? 'text-blue-700' : 'text-gray-400'
+                          p.division_completada && p.unidades_divididas > 0 ? 'text-blue-700' : 'text-gray-400'
                         }`}>
-                          {p.division_completada ? p.unidades_referencia : '—'}
+                          {p.division_completada && p.unidades_divididas > 0 ? p.unidades_divididas : '—'}
                         </span>
-                        {p.division_completada && p.unidades_terminadas_horneado != null && (
-                          <div className="text-xs text-orange-500 font-mono font-semibold">
-                            🔥 {p.unidades_terminadas_horneado} horn.
-                          </div>
-                        )}
                         {!p.division_completada && (
                           <div className="text-xs text-gray-400">Sin división</div>
                         )}
+                      </td>
+                      <td className="p-2 text-right">
+                        <span className={`font-mono font-medium ${
+                          p.unidades_horneadas > 0 ? 'text-orange-600' : 'text-gray-400'
+                        }`}>
+                          {p.unidades_horneadas > 0 ? p.unidades_horneadas : '—'}
+                        </span>
                       </td>
                       <td className="p-2 text-right">
                         {empaque_iniciado && puedeOperar ? (
@@ -1354,16 +1355,18 @@ export const EmpaqueMasa: React.FC = () => {
       const xSAP = parseFloat(String(p.unidades_por_paquete || 0));
       const xNombre = p.producto_nombre?.match(/ X ?(\d+)/i);
       const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
-      // Panes sugeridos = paquetes pedidos × unidades por paquete
+      // 1. Panes sugeridos = paquetes pedidos × xPaq
       const panesSugeridos = (p.unidades_pedidas || 0) * xPaq;
-      // Panes divididos reales por este producto
+      // 2. Panes divididos = cantidad_divisiones real por producto
       const panesDivididos = p.division_completada && (p.cantidad_divisiones || 0) > 0
-        ? p.cantidad_divisiones
+        ? parseInt(p.cantidad_divisiones)
         : 0;
-      // Referencia por producto: terminados_horneado_este_producto > divididos > sugeridos
-      const panesReferencia = p.unidades_terminadas_horneado
-        || panesDivididos
-        || panesSugeridos;
+      // 3. Panes horneados = unidades_producidas (ya actualizado por completarHorneado por producto)
+      //    Si es 0 fallback a unidades_terminadas_horneado distribuido
+      const panesHorneados = p.unidades_terminadas_horneado
+        ?? (p.unidades_producidas > 0 ? p.unidades_producidas : 0);
+      // Referencia para faltante: horneadas > divididas > sugeridas
+      const panesReferencia = panesHorneados || panesDivididos || panesSugeridos;
       ovsMap[ov].push({
         id: p.id,
         sap_item_code: p.sap_item_code,
@@ -1371,6 +1374,8 @@ export const EmpaqueMasa: React.FC = () => {
         presentacion: p.presentacion,
         gramaje_unitario: p.gramaje_unitario,
         unidades_programadas: panesSugeridos,
+        unidades_divididas: panesDivididos,
+        unidades_horneadas: panesHorneados,
         unidades_referencia: panesReferencia,
         division_completada: p.division_completada || false,
         unidades_producidas: p.unidades_producidas || 0,
