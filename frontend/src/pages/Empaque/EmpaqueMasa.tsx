@@ -7,7 +7,7 @@
  * Para masas con múltiples OVs, el formulario agrupa los productos por OV.
  * Si hay faltantes, se exige observación obligatoria antes de completar.
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card } from '@/components/common';
 
@@ -1298,6 +1298,18 @@ export const EmpaqueMasa: React.FC = () => {
       refetchInterval: 30000,
     });
   const masasPendientes = pendientesData?.data || [];
+
+  // Pre-seleccionar masa desde sessionStorage (cuando se llega desde /horneado/:id)
+  useEffect(() => {
+    if (masasPendientes.length === 0) return;
+    const masaActivaId = sessionStorage.getItem('artesa_masa_activa');
+    if (!masaActivaId || masaSeleccionada) return;
+    const masa = masasPendientes.find((m: MasaPendiente) => String(m.id) === masaActivaId);
+    if (masa) {
+      setMasaSeleccionada(masa);
+      setModo('masa');
+    }
+  }, [masasPendientes]);
 
   const { data: ovData, isLoading: loadingOV, error: ovError } = useQuery<{ data: OVData[] }>({
     queryKey: ['empaque-ov', docNumBuscar],

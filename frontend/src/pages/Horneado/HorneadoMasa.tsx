@@ -309,30 +309,86 @@ export const HorneadoMasa: React.FC = () => {
           </div>
         )}
 
+        {/* Navegación entre fases */}
+        <div className="flex items-center justify-between">
+          <button
+            onClick={() => navigate(`/fermentacion/${masaId}`)}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 hover:border-blue-300 hover:bg-blue-50 text-gray-700 hover:text-blue-700 rounded-lg text-sm font-medium shadow-sm transition-colors"
+          >
+            ← Fermentación
+          </button>
+          {etapa === 'completado' && (
+            <button
+              onClick={() => navigate('/empaque')}
+              className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold shadow-sm transition-colors"
+            >
+              📦 Empaque →
+            </button>
+          )}
+        </div>
+
         {/* Completado */}
         {etapa === 'completado' && (
-          <div className="bg-green-50 border border-green-200 rounded-xl p-6">
-            <div className="flex items-center gap-3 mb-4">
+          <div className="bg-green-50 border border-green-200 rounded-xl p-6 space-y-4">
+            <div className="flex items-center gap-3">
               <span className="text-3xl">✅</span>
               <div>
                 <h2 className="text-lg font-semibold text-green-800">Horneado completado</h2>
                 <p className="text-green-600 text-sm">¡Producción exitosa! Listo para empaque.</p>
               </div>
             </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => navigate(`/empaque/${masaId}`)}
-                className="bg-amber-600 hover:bg-amber-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
-              >
-                📦 Ir a Empaque →
-              </button>
-              <button
-                onClick={() => navigate(`/planificacion/masas/${masaId}`)}
-                className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-medium"
-              >
-                ← Volver al detalle
-              </button>
-            </div>
+            {data?.registro_actual && (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                {data.registro_actual.horno_nombre && (
+                  <div className="bg-white rounded-lg p-3 border border-green-100">
+                    <div className="text-xs text-gray-500 mb-0.5">Horno</div>
+                    <div className="font-semibold text-gray-800">{data.registro_actual.horno_nombre}</div>
+                  </div>
+                )}
+                {data.registro_actual.temperatura_inicial_real != null && (
+                  <div className="bg-white rounded-lg p-3 border border-green-100">
+                    <div className="text-xs text-gray-500 mb-0.5">Temp. entrada real</div>
+                    <div className="font-semibold text-gray-800">{data.registro_actual.temperatura_inicial_real}°C</div>
+                  </div>
+                )}
+                {data.registro_actual.uso_damper_real != null && (
+                  <div className="bg-white rounded-lg p-3 border border-green-100">
+                    <div className="text-xs text-gray-500 mb-0.5">Damper</div>
+                    <div className="font-semibold text-gray-800">{data.registro_actual.uso_damper_real ? 'Sí' : 'No'}</div>
+                  </div>
+                )}
+                {data.registro_actual.calidad_color && (
+                  <div className="bg-white rounded-lg p-3 border border-green-100">
+                    <div className="text-xs text-gray-500 mb-0.5">Color</div>
+                    <div className="font-semibold text-gray-800">{data.registro_actual.calidad_color}</div>
+                  </div>
+                )}
+                {data.registro_actual.calidad_coccion && (
+                  <div className="bg-white rounded-lg p-3 border border-green-100">
+                    <div className="text-xs text-gray-500 mb-0.5">Cocción</div>
+                    <div className="font-semibold text-gray-800">{data.registro_actual.calidad_coccion}</div>
+                  </div>
+                )}
+                {data.registro_actual.hora_entrada && (
+                  <div className="bg-white rounded-lg p-3 border border-green-100">
+                    <div className="text-xs text-gray-500 mb-0.5">Entrada horno</div>
+                    <div className="font-semibold text-gray-800">{new Date(data.registro_actual.hora_entrada).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</div>
+                  </div>
+                )}
+                {data.registro_actual.hora_salida && (
+                  <div className="bg-white rounded-lg p-3 border border-green-100">
+                    <div className="text-xs text-gray-500 mb-0.5">Salida horno</div>
+                    <div className="font-semibold text-gray-800">{new Date(data.registro_actual.hora_salida).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</div>
+                  </div>
+                )}
+              </div>
+            )}
+            {data?.registro_actual?.observaciones && (
+              <div className="bg-white rounded-lg p-3 border border-green-100 text-sm">
+                <div className="text-xs text-gray-500 mb-0.5">Observaciones</div>
+                <div className="text-gray-800">{data.registro_actual.observaciones}</div>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -76,8 +76,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
     }
   }, [params.masaId]);
 
-  const handleNavClick = () => {
+  const handleNavClick = (targetPath?: string) => {
     if (onClose) onClose();
+    if (targetPath === '/planificacion') {
+      sessionStorage.removeItem('artesa_masa_activa');
+    }
   };
 
   const getFaseLink = (key: string, defaultPath: string): string => {
@@ -118,7 +121,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
               <li key={item.path}>
                 <Link
                   to={item.path}
-                  onClick={handleNavClick}
+                  onClick={() => handleNavClick(item.path)}
                   className={clsx(
                     'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors',
                     isActive
@@ -180,7 +183,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
               <li key={key}>
                 <Link
                   to={resolvedPath}
-                  onClick={handleNavClick}
+                  onClick={() => handleNavClick(resolvedPath)}
                   className={clsx(
                     'flex items-center gap-3 px-4 py-2 text-sm rounded-lg transition-colors',
                     isActive

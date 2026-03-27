@@ -149,12 +149,30 @@ export const FormadoMasa: React.FC = () => {
                 {masa.codigo} — {masa.nombre}
               </p>
             </div>
-            <button
-              onClick={() => navigate(`/planificacion/masas/${masaId}`)}
-              className="text-sm text-gray-500 hover:text-gray-800 flex items-center gap-1"
-            >
-              ← Volver al detalle
-            </button>
+            <div className="flex flex-col items-end gap-2">
+              <button
+                onClick={() => navigate(`/planificacion/masas/${masaId}`)}
+                className="text-sm text-gray-500 hover:text-gray-800"
+              >
+                ← Volver al detalle
+              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => navigate(`/division/${masaId}`)}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-white border border-gray-200 hover:border-yellow-300 hover:bg-yellow-50 text-gray-600 hover:text-yellow-700 rounded-lg text-xs font-medium shadow-sm transition-colors"
+                >
+                  ← División
+                </button>
+                {etapa === 'completar' && (
+                  <button
+                    onClick={() => navigate(`/fermentacion/${masaId}`)}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors"
+                  >
+                    🌡️ Fermentación →
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
