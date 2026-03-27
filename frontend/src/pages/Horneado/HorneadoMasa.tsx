@@ -17,6 +17,13 @@ const getToken = () => {
   } catch { return ''; }
 };
 
+const getUsuarioRol = (): string => {
+  try {
+    const auth = JSON.parse(localStorage.getItem('auth-storage') || '{}');
+    return auth?.state?.usuario?.rol || auth?.state?.user?.rol || '';
+  } catch { return ''; }
+};
+
 const fetchHorneado = async (masaId: string) => {
   const res = await fetch(`/api/horneado/${masaId}`, {
     headers: { Authorization: `Bearer ${getToken()}` }
@@ -48,6 +55,14 @@ export const HorneadoMasa: React.FC = () => {
   const [calidadColor, setCalidadColor] = useState('PERFECTO');
   const [calidadCoccion, setCalidadCoccion] = useState('PERFECTO');
   const [unidadesTerminadas, setUnidadesTerminadas] = useState('');
+  const [unidadesPorProducto, setUnidadesPorProducto] = useState<Record<number, string>>({});
+  const [modoEdicionRetro, setModoEdicionRetro] = useState(false);
+  const [unidadesRetro, setUnidadesRetro] = useState<Record<number, string>>({});
+  const [motivoRetro, setMotivoRetro] = useState('');
+  const [guardandoRetro, setGuardandoRetro] = useState(false);
+  const [msgRetro, setMsgRetro] = useState<{tipo:'ok'|'err', texto:string}|null>(null);
+  const rolUsuario = getUsuarioRol();
+  const esAdminOSupervisor = ['admin', 'supervisor'].includes(rolUsuario);
 
   const { data, isLoading } = useQuery({
     queryKey: ['horneado', masaId],
@@ -58,12 +73,25 @@ export const HorneadoMasa: React.FC = () => {
   useEffect(() => {
     if (!data?.registro_actual) return;
     const reg = data.registro_actual;
-    // Columnas del controller: hora_entrada (inicio) y hora_salida (fin)
     if (!reg.hora_entrada) setEtapa('inicio');
     else if (!reg.hora_salida) {
       setEtapa('en_progreso');
       setTipoHornoId(reg.tipo_horno_id);
     } else setEtapa('completado');
+
+    // Inicializar inputs por producto con datos existentes si los hay
+    if (reg.unidades_terminadas_por_producto && data?.productos_horneado?.length) {
+      const init: Record<number, string> = {};
+      for (const p of data.productos_horneado) {
+        const val = reg.unidades_terminadas_por_producto[String(p.id)];
+        init[p.id] = val != null ? String(val) : '';
+      }
+      setUnidadesPorProducto(init);
+    } else if (data?.productos_horneado?.length) {
+      const init: Record<number, string> = {};
+      for (const p of data.productos_horneado) init[p.id] = '';
+      setUnidadesPorProducto(init);
+    }
   }, [data]);
 
   const iniciarMutation = useMutation({
@@ -97,7 +125,10 @@ export const HorneadoMasa: React.FC = () => {
           calidad_color: calidadColor,
           calidad_coccion: calidadCoccion,
           observaciones,
-          unidades_terminadas: parseInt(unidadesTerminadas) || null
+          unidades_terminadas: Object.values(unidadesPorProducto).reduce((s, v) => s + (parseInt(v) || 0), 0) || null,
+          unidades_por_producto: Object.fromEntries(
+            Object.entries(unidadesPorProducto).map(([k, v]) => [k, parseInt(v) || 0])
+          )
         })
       });
       const d = await res.json();
@@ -266,33 +297,74 @@ export const HorneadoMasa: React.FC = () => {
               </div>
             </div>
 
-            {/* Unidades divididas (referencia de división, solo lectura) */}
-            {(data?.unidades_divididas ?? 0) > 0 && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
-                <p className="text-xs text-blue-500 mb-0.5">Unidades divididas (de división)</p>
-                <p className="text-2xl font-bold text-blue-700">{data.unidades_divididas}</p>
+            {/* Unidades terminadas por producto */}
+            {data?.productos_horneado && data.productos_horneado.length > 0 ? (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Unidades terminadas por producto <span className="text-red-500">*</span>
+                </label>
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="text-left px-3 py-2 text-xs text-gray-500 font-medium">Producto</th>
+                        <th className="text-right px-3 py-2 text-xs text-gray-500 font-medium">Divididas</th>
+                        <th className="text-right px-3 py-2 text-xs text-gray-500 font-medium">Terminadas <span className="text-red-500">*</span></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {data.productos_horneado.map((p: any) => (
+                        <tr key={p.id} className="hover:bg-gray-50">
+                          <td className="px-3 py-2">
+                            <div className="font-medium text-gray-800 text-xs">{p.producto_nombre}</div>
+                            <div className="text-xs text-gray-400 font-mono">{p.sap_item_code}</div>
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <span className="font-mono text-blue-600 font-semibold">
+                              {p.cantidad_divisiones > 0 ? p.cantidad_divisiones : '—'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <input
+                              type="number"
+                              min="0"
+                              value={unidadesPorProducto[p.id] ?? ''}
+                              onChange={e => setUnidadesPorProducto(prev => ({ ...prev, [p.id]: e.target.value }))}
+                              placeholder={String(p.cantidad_divisiones || 0)}
+                              className="w-24 border border-gray-300 rounded px-2 py-1 text-right text-sm focus:ring-1 focus:ring-red-400"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-gray-50 border-t border-gray-200">
+                      <tr>
+                        <td className="px-3 py-2 text-xs font-semibold text-gray-600">Total</td>
+                        <td className="px-3 py-2 text-right font-mono font-bold text-blue-700">
+                          {data.productos_horneado.reduce((s: number, p: any) => s + (p.cantidad_divisiones || 0), 0)}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono font-bold text-green-700">
+                          {Object.values(unidadesPorProducto).reduce((s, v) => s + (parseInt(v) || 0), 0)}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Unidades terminadas <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={unidadesTerminadas}
+                  onChange={e => setUnidadesTerminadas(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-400"
+                />
               </div>
             )}
-
-            {/* Unidades terminadas — ingresadas por el hornero */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Unidades terminadas <span className="text-red-500">*</span>
-                {(data?.unidades_divididas ?? 0) > 0 && (
-                  <span className="ml-2 text-xs font-normal text-gray-400">
-                    (referencia: {data.unidades_divididas} divididas)
-                  </span>
-                )}
-              </label>
-              <input
-                type="number"
-                min="0"
-                value={unidadesTerminadas}
-                onChange={e => setUnidadesTerminadas(e.target.value)}
-                placeholder={String(data?.unidades_divididas ?? '')}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-400"
-              />
-            </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Observaciones finales</label>
@@ -386,9 +458,144 @@ export const HorneadoMasa: React.FC = () => {
                   </div>
                 )}
                 {data.registro_actual.unidades_terminadas != null && (
-                  <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
-                    <div className="text-xs text-blue-500 mb-0.5">Panes entregados</div>
-                    <div className="font-bold text-blue-800 text-lg">{data.registro_actual.unidades_terminadas}</div>
+                  <div className="bg-blue-50 rounded-lg p-3 border border-blue-100 col-span-2">
+                    <div className="text-xs text-blue-500 mb-1 font-semibold">Panes entregados</div>
+                    {/* Desglose por producto si existe */}
+                    {data?.productos_horneado && data.productos_horneado.length > 0 ? (
+                      <div className="space-y-1">
+                        {data.productos_horneado.map((p: any) => {
+                          const terminProd = data.registro_actual.unidades_terminadas_por_producto?.[String(p.id)];
+                          return (
+                            <div key={p.id} className="flex justify-between items-center text-sm">
+                              <span className="text-gray-600 text-xs truncate max-w-[60%]">{p.producto_nombre}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-blue-500 font-mono">{p.cantidad_divisiones} div.</span>
+                                <span className={`font-bold font-mono ${terminProd != null ? 'text-blue-800' : 'text-gray-400'}`}>
+                                  {terminProd != null ? terminProd : '—'} horn.
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        <div className="border-t border-blue-200 pt-1 flex justify-between">
+                          <span className="text-xs font-semibold text-blue-600">Total</span>
+                          <span className="font-bold text-blue-800 text-lg">{data.registro_actual.unidades_terminadas}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="font-bold text-blue-800 text-lg">{data.registro_actual.unidades_terminadas}</div>
+                    )}
+                  </div>
+                )}
+                {/* Panel edición retroactiva — solo admin/supervisor */}
+                {esAdminOSupervisor && data.registro_actual.unidades_terminadas != null && (
+                  <div className="col-span-2 border border-amber-200 bg-amber-50 rounded-lg p-3">
+                    {!modoEdicionRetro ? (
+                      <button
+                        onClick={() => {
+                          const init: Record<number, string> = {};
+                          for (const p of (data.productos_horneado || [])) {
+                            const v = data.registro_actual.unidades_terminadas_por_producto?.[String(p.id)];
+                            init[p.id] = v != null ? String(v) : '';
+                          }
+                          setUnidadesRetro(init);
+                          setMotivoRetro('');
+                          setModoEdicionRetro(true);
+                        }}
+                        className="text-xs px-3 py-1.5 bg-amber-600 text-white rounded hover:bg-amber-700 font-medium"
+                      >
+                        ✏️ Editar unidades (admin)
+                      </button>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-amber-800">Edición retroactiva</span>
+                          <button onClick={() => setModoEdicionRetro(false)} className="text-xs text-gray-500 hover:text-gray-700">✕ Cancelar</button>
+                        </div>
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-xs text-amber-700">
+                              <th className="text-left pb-1">Producto</th>
+                              <th className="text-right pb-1">Divididas</th>
+                              <th className="text-right pb-1">Terminadas</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(data.productos_horneado || []).map((p: any) => (
+                              <tr key={p.id}>
+                                <td className="text-xs text-gray-700 py-1">{p.producto_nombre}</td>
+                                <td className="text-right text-xs text-blue-600 font-mono pr-2">{p.cantidad_divisiones}</td>
+                                <td className="text-right py-1">
+                                  <input
+                                    type="number" min="0"
+                                    value={unidadesRetro[p.id] ?? ''}
+                                    onChange={e => setUnidadesRetro(prev => ({ ...prev, [p.id]: e.target.value }))}
+                                    className="w-20 border border-amber-300 rounded px-2 py-0.5 text-right text-sm focus:ring-1 focus:ring-amber-400"
+                                  />
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot className="border-t border-amber-200">
+                            <tr>
+                              <td colSpan={2} className="text-xs font-semibold text-amber-700 pt-1">Nuevo total</td>
+                              <td className="text-right font-bold text-amber-800 pt-1">
+                                {Object.values(unidadesRetro).reduce((s, v) => s + (parseInt(v) || 0), 0)}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                        <div>
+                          <label className="block text-xs font-medium text-amber-800 mb-1">
+                            Motivo de modificación <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={motivoRetro}
+                            onChange={e => setMotivoRetro(e.target.value)}
+                            placeholder="Ej: Corrección de conteo manual post-horneado"
+                            className="w-full border border-amber-300 rounded px-2 py-1 text-sm focus:ring-1 focus:ring-amber-400"
+                          />
+                        </div>
+                        {msgRetro && (
+                          <div className={`text-xs px-2 py-1 rounded ${msgRetro.tipo === 'ok' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                            {msgRetro.texto}
+                          </div>
+                        )}
+                        <button
+                          disabled={guardandoRetro || motivoRetro.trim().length < 5}
+                          onClick={async () => {
+                            if (motivoRetro.trim().length < 5) return;
+                            setGuardandoRetro(true);
+                            try {
+                              const payload = Object.fromEntries(
+                                Object.entries(unidadesRetro).map(([k, v]) => [k, parseInt(v) || 0])
+                              );
+                              const res = await fetch(`/api/horneado/${masaId}/unidades-por-producto`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+                                body: JSON.stringify({ unidades_por_producto: payload, motivo: motivoRetro }),
+                              });
+                              const d = await res.json();
+                              if (!d.success) throw new Error(d.message);
+                              setMsgRetro({ tipo: 'ok', texto: 'Actualizado correctamente. Recargando...' });
+                              setTimeout(() => {
+                                queryClient.invalidateQueries({ queryKey: ['horneado', masaId] });
+                                setModoEdicionRetro(false);
+                                setMsgRetro(null);
+                              }, 1500);
+                            } catch (e: any) {
+                              setMsgRetro({ tipo: 'err', texto: e.message });
+                            } finally {
+                              setGuardandoRetro(false);
+                            }
+                          }}
+                          className="w-full py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-semibold rounded"
+                        >
+                          {guardandoRetro ? 'Guardando...' : '💾 Guardar corrección'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
                 {data.registro_actual.hora_entrada && (

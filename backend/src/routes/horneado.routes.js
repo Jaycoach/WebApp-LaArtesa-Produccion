@@ -60,4 +60,11 @@ router.patch('/:masaId/damper', horneadoController.actualizarDamper);
  */
 router.post('/:masaId/completar', horneadoController.completarHorneado);
 
+/**
+ * @route   PATCH /api/horneado/:masaId/unidades-por-producto
+ * @desc    Edición retroactiva de unidades terminadas por producto (admin/supervisor)
+ * @access  Private
+ */
+router.patch('/:masaId/unidades-por-producto', horneadoController.editarUnidadesPorProducto);
+
 module.exports = router;
