@@ -131,9 +131,19 @@ exports.getHorneadoInfo = async (req, res) => {
 
     const registroResult = await db.query(registroQuery, [masaId]);
 
+    // Sumar unidades cortadas reales de la fase de división
+    const unidadesDivisionQuery = `
+      SELECT COALESCE(SUM(unidades_producidas), 0)::integer AS total
+      FROM productos_por_masa
+      WHERE masa_id = $1
+    `;
+    const unidadesDivisionResult = await db.query(unidadesDivisionQuery, [masaId]);
+    const unidadesDivididas = unidadesDivisionResult.rows[0]?.total || 0;
+
     res.json({
       success: true,
       data: {
+        unidades_divididas: unidadesDivididas,
         masa: {
           id: masa.id,
           uuid: masa.uuid,
@@ -558,7 +568,7 @@ exports.completarHorneado = async (req, res) => {
       calidad_color,
       calidad_coccion,
       observaciones,
-      fecha_vencimiento_sugerida
+      unidades_terminadas
     } = req.body;
 
     const usuario = req.user;
@@ -594,7 +604,7 @@ exports.completarHorneado = async (req, res) => {
         calidad_color = $3,
         calidad_coccion = $4,
         observaciones = COALESCE($5, observaciones),
-        fecha_vencimiento_sugerida = $6,
+        unidades_terminadas = $6,
         fecha_actualizacion = NOW()
       WHERE id = $1
       RETURNING *
@@ -606,8 +616,17 @@ exports.completarHorneado = async (req, res) => {
       calidad_color || null,
       calidad_coccion || null,
       observaciones || null,
-      fecha_vencimiento_sugerida || null
+      unidades_terminadas ? parseInt(unidades_terminadas) : null
     ]);
+
+    // Actualizar unidades_producidas en productos_por_masa si se informaron terminadas
+    if (unidades_terminadas && parseInt(unidades_terminadas) > 0) {
+      await client.query(`
+        UPDATE productos_por_masa
+        SET unidades_producidas = $2
+        WHERE masa_id = $1
+      `, [Number(masaId), parseInt(unidades_terminadas)]);
+    }
 
     // Marcar fase HORNEADO como COMPLETADA
     const updateFaseQuery = `
@@ -623,7 +642,7 @@ exports.completarHorneado = async (req, res) => {
     await client.query(updateFaseQuery, [
       masaId,
       observaciones || null,
-      JSON.stringify({ fecha_vencimiento_sugerida: fecha_vencimiento_sugerida || null })
+      JSON.stringify({ unidades_terminadas: unidades_terminadas ? parseInt(unidades_terminadas) : null })
     ]);
 
     // Avanzar masa a fase EMPAQUE
