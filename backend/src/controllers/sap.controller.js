@@ -766,7 +766,22 @@ const sincronizarDesdeOV = async (req, res, next) => {
     // 5. Crear masas de producción
     const masasCreadas = [];
     const masasOmitidas = [];
-    let ordenCounter = 1;
+    // Inicializar ordenCounter desde el máximo ya existente en BD para esta fecha
+    // Evita colisiones de codigo_masa al sincronizar varias veces el mismo día
+    const maxCorrelativoResult = await client.query(
+      `SELECT COALESCE(MAX(
+        CAST(
+          REGEXP_REPLACE(codigo_masa, '^MASA-OV-\\d{8}-(\\d+).*$', '\\1')
+          AS INTEGER
+        )
+      ), 0) AS max_correlativo
+       FROM masas_produccion
+       WHERE DATE(fecha_produccion) = $1
+         AND codigo_masa ~ '^MASA-OV-\\d{8}-\\d+'
+         AND es_subdivision = false`,
+      [fechaProduccion]
+    );
+    let ordenCounter = (maxCorrelativoResult.rows[0]?.max_correlativo || 0) + 1;
 
     for (const tipoMasa in masasAgrupadas) {
       const grupo = masasAgrupadas[tipoMasa];
