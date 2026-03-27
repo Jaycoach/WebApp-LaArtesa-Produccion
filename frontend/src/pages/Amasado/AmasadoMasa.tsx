@@ -212,28 +212,45 @@ export const AmasadoMasa: React.FC = () => {
         </Card>
 
         {/* Botones */}
-        <div className="flex justify-between">
-          <button
-            onClick={() => navigate(`/planificacion/masas/${masaId}`)}
-            className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg"
-          >
-            ← Volver
-          </button>
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate(`/planificacion/masas/${masaId}`)}
+              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm"
+            >
+              ← Volver al detalle
+            </button>
+            <button
+              onClick={() => navigate(`/pesaje/${masaId}`)}
+              className="flex items-center gap-1 px-4 py-2 bg-white border border-gray-200 hover:border-blue-300 hover:bg-blue-50 text-gray-600 hover:text-blue-700 rounded-lg text-sm font-medium shadow-sm transition-colors"
+            >
+              ← Pesaje
+            </button>
+          </div>
 
-          <div className="flex gap-3">
+          <div className="flex gap-3 items-center">
             <button
               onClick={() => setShowMO(true)}
               className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 text-sm font-medium"
             >
               + Mano de obra
             </button>
-            <button
-              onClick={handleCompletar}
-              disabled={completarMutation.isPending}
-              className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-semibold"
-            >
-              {completarMutation.isPending ? 'Completando...' : 'Completar Amasado'}
-            </button>
+            {masa.fase_actual === 'AMASADO' ? (
+              <button
+                onClick={handleCompletar}
+                disabled={completarMutation.isPending}
+                className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-semibold"
+              >
+                {completarMutation.isPending ? 'Completando...' : 'Completar Amasado'}
+              </button>
+            ) : (
+              <button
+                onClick={() => navigate(`/division/${masaId}`)}
+                className="flex items-center gap-1 px-6 py-3 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg font-semibold shadow-sm transition-colors"
+              >
+                División →
+              </button>
+            )}
           </div>
         </div>
         {showMO && <ModalMO masaId={masaIdNum} fase="AMASADO" onClose={() => setShowMO(false)} />}

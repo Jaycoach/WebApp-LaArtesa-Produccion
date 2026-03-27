@@ -146,12 +146,30 @@ export const FermentacionMasa: React.FC = () => {
               </div>
               <p className="text-gray-500 text-sm">{masa.codigo} — {masa.nombre}</p>
             </div>
-            <button
-              onClick={() => navigate(`/planificacion/masas/${masaId}`)}
-              className="text-sm text-gray-500 hover:text-gray-800"
-            >
-              ← Volver
-            </button>
+            <div className="flex flex-col items-end gap-2">
+              <button
+                onClick={() => navigate(`/planificacion/masas/${masaId}`)}
+                className="text-sm text-gray-500 hover:text-gray-800"
+              >
+                ← Volver al detalle
+              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => navigate(`/formado/${masaId}`)}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-white border border-gray-200 hover:border-orange-300 hover:bg-orange-50 text-gray-600 hover:text-orange-700 rounded-lg text-xs font-medium shadow-sm transition-colors"
+                >
+                  ← Formado
+                </button>
+                {subEtapa === 'completada' && (
+                  <button
+                    onClick={() => navigate(`/horneado/${masaId}`)}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors"
+                  >
+                    🔥 Horneado →
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -323,15 +341,61 @@ export const FermentacionMasa: React.FC = () => {
           )}
 
           {subEtapa === 'completada' && (
-            <div>
-              <div className="flex items-center gap-3 mb-4">
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
                 <span className="text-3xl">✅</span>
                 <div>
                   <h2 className="text-lg font-semibold text-green-800">Fermentación completada</h2>
                   <p className="text-green-600 text-sm">La fase de fermentación ha sido registrada.</p>
                 </div>
               </div>
-              <div className="flex gap-3">
+              {registro && (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                  {registro.hora_entrada_camara && (
+                    <div className="bg-white rounded-lg p-3 border border-green-100">
+                      <div className="text-xs text-gray-500 mb-0.5">Entrada cámara</div>
+                      <div className="font-semibold text-gray-800">{new Date(registro.hora_entrada_camara).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</div>
+                    </div>
+                  )}
+                  {registro.hora_salida_camara_real && (
+                    <div className="bg-white rounded-lg p-3 border border-green-100">
+                      <div className="text-xs text-gray-500 mb-0.5">Salida cámara</div>
+                      <div className="font-semibold text-gray-800">{new Date(registro.hora_salida_camara_real).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</div>
+                    </div>
+                  )}
+                  {registro.temperatura_camara != null && (
+                    <div className="bg-white rounded-lg p-3 border border-green-100">
+                      <div className="text-xs text-gray-500 mb-0.5">Temperatura</div>
+                      <div className="font-semibold text-gray-800">{registro.temperatura_camara}°C</div>
+                    </div>
+                  )}
+                  {registro.humedad_camara != null && (
+                    <div className="bg-white rounded-lg p-3 border border-green-100">
+                      <div className="text-xs text-gray-500 mb-0.5">Humedad</div>
+                      <div className="font-semibold text-gray-800">{registro.humedad_camara}%</div>
+                    </div>
+                  )}
+                  {registro.hora_entrada_frio && (
+                    <div className="bg-white rounded-lg p-3 border border-cyan-100">
+                      <div className="text-xs text-gray-500 mb-0.5">Entrada frío</div>
+                      <div className="font-semibold text-gray-800">{new Date(registro.hora_entrada_frio).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</div>
+                    </div>
+                  )}
+                  {registro.hora_salida_frio && (
+                    <div className="bg-white rounded-lg p-3 border border-cyan-100">
+                      <div className="text-xs text-gray-500 mb-0.5">Salida frío</div>
+                      <div className="font-semibold text-gray-800">{new Date(registro.hora_salida_frio).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {registro?.observaciones && (
+                <div className="bg-white rounded-lg p-3 border border-green-100 text-sm">
+                  <div className="text-xs text-gray-500 mb-0.5">Observaciones</div>
+                  <div className="text-gray-800">{registro.observaciones}</div>
+                </div>
+              )}
+              <div className="flex gap-3 flex-wrap">
                 <button
                   onClick={() => setShowMO(true)}
                   className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 text-sm font-medium"
@@ -343,12 +407,6 @@ export const FermentacionMasa: React.FC = () => {
                   className="bg-orange-600 hover:bg-orange-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
                 >
                   🔥 Ir a Horneado →
-                </button>
-                <button
-                  onClick={() => navigate(`/planificacion/masas/${masaId}`)}
-                  className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-medium"
-                >
-                  ← Volver al detalle
                 </button>
               </div>
             </div>

@@ -557,28 +557,45 @@ export const DivisionMasa: React.FC = () => {
         </Card>
 
         {/* Botones */}
-        <div className="flex justify-between">
-          <button
-            onClick={() => navigate(`/planificacion/masas/${masaId}`)}
-            className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg"
-          >
-            ← Volver
-          </button>
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate(`/planificacion/masas/${masaId}`)}
+              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm"
+            >
+              ← Volver al detalle
+            </button>
+            <button
+              onClick={() => navigate(`/amasado/${masaId}`)}
+              className="flex items-center gap-1 px-4 py-2 bg-white border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 text-gray-600 hover:text-indigo-700 rounded-lg text-sm font-medium shadow-sm transition-colors"
+            >
+              ← Amasado
+            </button>
+          </div>
 
-          <div className="flex gap-3">
+          <div className="flex gap-3 items-center">
             <button
               onClick={() => setShowMO(true)}
               className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 text-sm font-medium"
             >
               + Mano de obra
             </button>
-            <button
-              onClick={handleCompletar}
-              disabled={completarMutation.isPending || hayErroresValidacion() || !todasTienenCantidad()}
-              className="px-6 py-3 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50 font-semibold"
-            >
-              {completarMutation.isPending ? 'Completando...' : 'Completar División ✓'}
-            </button>
+            {masa.fase_actual === 'DIVISION' ? (
+              <button
+                onClick={handleCompletar}
+                disabled={completarMutation.isPending || hayErroresValidacion() || !todasTienenCantidad()}
+                className="px-6 py-3 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50 font-semibold"
+              >
+                {completarMutation.isPending ? 'Completando...' : 'Completar División ✓'}
+              </button>
+            ) : (
+              <button
+                onClick={() => navigate(`/formado/${masaId}`)}
+                className="flex items-center gap-1 px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-semibold shadow-sm transition-colors"
+              >
+                Formado →
+              </button>
+            )}
           </div>
         </div>
         {showMO && <ModalMO masaId={Number(masaId)} fase="DIVISION" onClose={() => setShowMO(false)} />}
