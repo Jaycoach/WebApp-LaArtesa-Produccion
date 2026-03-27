@@ -295,105 +295,141 @@ export const DivisionMasa: React.FC = () => {
           </div>
         </Card>
 
-        {/* Formulario de Control de División */}
+        {/* Formulario de Control de División — solo editable si la fase es DIVISION */}
         <Card title="Control de División">
-          <div className="space-y-6">
-
-            <div className="grid grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Máquina de Corte <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={formData.maquina_corte_id}
-                  onChange={(e) => setFormData({ ...formData, maquina_corte_id: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="1">Conic (Automática, 100 kg)</option>
-                  <option value="2">Divisora Manual (50 kg)</option>
-                </select>
+          {masa.fase_actual !== 'DIVISION' ? (
+            /* ── Vista histórico (read-only) ── */
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div className="bg-gray-50 rounded-lg p-3">
+                <p className="text-xs text-gray-400 uppercase font-medium mb-1">Máquina de corte</p>
+                <p className="font-semibold text-gray-800">
+                  {formData.maquina_corte_id === '1' ? 'Conic (Automática, 100 kg)' : 'Divisora Manual (50 kg)'}
+                </p>
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Temperatura de Entrada (°C) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={formData.temperatura_entrada}
-                  onChange={(e) => setFormData({ ...formData, temperatura_entrada: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="25.0"
-                />
-              </div>
-            </div>
-
-            {/* Reposo pre-división */}
-            <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
-              <div className="flex items-center gap-3 mb-4">
-                <input
-                  type="checkbox"
-                  id="requiere_reposo"
-                  checked={formData.requiere_reposo}
-                  onChange={(e) => setFormData({ ...formData, requiere_reposo: e.target.checked })}
-                  className="w-5 h-5 text-blue-600 rounded"
-                />
-                <label htmlFor="requiere_reposo" className="text-sm font-medium text-gray-700">
-                  Esta masa requiere reposo pre-división
-                </label>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <p className="text-xs text-gray-400 uppercase font-medium mb-1">Temperatura de entrada</p>
+                <p className="font-semibold text-gray-800">
+                  {formData.temperatura_entrada ? `${formData.temperatura_entrada} °C` : '—'}
+                </p>
               </div>
               {formData.requiere_reposo && (
-                <div className="grid grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Hora Inicio Reposo <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="datetime-local"
-                      value={formData.hora_inicio_reposo}
-                      onChange={(e) => setFormData({ ...formData, hora_inicio_reposo: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                    />
+                <>
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <p className="text-xs text-gray-400 uppercase font-medium mb-1">Inicio reposo</p>
+                    <p className="font-semibold text-gray-800">{formData.hora_inicio_reposo || '—'}</p>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Hora Fin Reposo <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="datetime-local"
-                      value={formData.hora_fin_reposo}
-                      onChange={(e) => setFormData({ ...formData, hora_fin_reposo: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                    />
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <p className="text-xs text-gray-400 uppercase font-medium mb-1">Fin reposo</p>
+                    <p className="font-semibold text-gray-800">{formData.hora_fin_reposo || '—'}</p>
                   </div>
-                  {formData.hora_inicio_reposo && formData.hora_fin_reposo && (
-                    <div className="col-span-2">
-                      <p className="text-sm text-gray-700">
-                        Tiempo de reposo:{' '}
-                        <span className="font-semibold text-blue-600">{calcularTiempoReposo()} minutos</span>
-                      </p>
-                    </div>
-                  )}
+                  <div className="col-span-2 bg-blue-50 rounded-lg p-3">
+                    <p className="text-xs text-blue-400 uppercase font-medium mb-1">Tiempo de reposo</p>
+                    <p className="font-semibold text-blue-700">{calcularTiempoReposo()} minutos</p>
+                  </div>
+                </>
+              )}
+              {formData.observaciones && (
+                <div className="col-span-2 bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-400 uppercase font-medium mb-1">Observaciones</p>
+                  <p className="text-gray-700">{formData.observaciones}</p>
                 </div>
               )}
             </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Observaciones</label>
-              <textarea
-                value={formData.observaciones}
-                onChange={(e) => setFormData({ ...formData, observaciones: e.target.value })}
-                rows={3}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                placeholder="Observaciones opcionales..."
-              />
+          ) : (
+            /* ── Formulario editable ── */
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Máquina de Corte <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={formData.maquina_corte_id}
+                    onChange={(e) => setFormData({ ...formData, maquina_corte_id: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="1">Conic (Automática, 100 kg)</option>
+                    <option value="2">Divisora Manual (50 kg)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Temperatura de Entrada (°C) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={formData.temperatura_entrada}
+                    onChange={(e) => setFormData({ ...formData, temperatura_entrada: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="25.0"
+                  />
+                </div>
+              </div>
+              <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                <div className="flex items-center gap-3 mb-4">
+                  <input
+                    type="checkbox"
+                    id="requiere_reposo"
+                    checked={formData.requiere_reposo}
+                    onChange={(e) => setFormData({ ...formData, requiere_reposo: e.target.checked })}
+                    className="w-5 h-5 text-blue-600 rounded"
+                  />
+                  <label htmlFor="requiere_reposo" className="text-sm font-medium text-gray-700">
+                    Esta masa requiere reposo pre-división
+                  </label>
+                </div>
+                {formData.requiere_reposo && (
+                  <div className="grid grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Hora Inicio Reposo <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="datetime-local"
+                        value={formData.hora_inicio_reposo}
+                        onChange={(e) => setFormData({ ...formData, hora_inicio_reposo: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Hora Fin Reposo <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="datetime-local"
+                        value={formData.hora_fin_reposo}
+                        onChange={(e) => setFormData({ ...formData, hora_fin_reposo: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    {formData.hora_inicio_reposo && formData.hora_fin_reposo && (
+                      <div className="col-span-2">
+                        <p className="text-sm text-gray-700">
+                          Tiempo de reposo:{' '}
+                          <span className="font-semibold text-blue-600">{calcularTiempoReposo()} minutos</span>
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Observaciones</label>
+                <textarea
+                  value={formData.observaciones}
+                  onChange={(e) => setFormData({ ...formData, observaciones: e.target.value })}
+                  rows={3}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="Observaciones opcionales..."
+                />
+              </div>
             </div>
-          </div>
+          )}
         </Card>
 
         {/* Cantidades divididas por producto */}
-        <Card title="Cantidades a Cortar por Producto">
+        <Card title={masa.fase_actual !== 'DIVISION' ? 'Cantidades Cortadas (Histórico)' : 'Cantidades a Cortar por Producto'}>
           <div className="space-y-4">
             {productos && (productos as any[]).length > 0 ? (
               <>
@@ -482,38 +518,46 @@ export const DivisionMasa: React.FC = () => {
                               )}
                             </td>
 
-                            {/* Input cantidad cortada */}
+                            {/* Input cantidad cortada — editable solo si fase es DIVISION */}
                             <td className="px-4 py-3 text-sm text-right">
-                              <div className="flex flex-col items-end gap-1">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  value={cantidadesDivididas[producto.id] || ''}
-                                  onChange={(e) => handleCantidadChange(producto.id, e.target.value)}
-                                  className={`w-32 px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500 text-right ${
-                                    error
-                                      ? 'border-red-400 bg-red-50 focus:border-red-500 focus:ring-red-200'
-                                      : esCorrecto
-                                      ? 'border-green-400 bg-green-50'
-                                      : 'border-gray-300'
-                                  }`}
-                                  placeholder={String(ajustadas)}
-                                />
-                                {error && (
-                                  <p className="text-xs text-red-600 text-right max-w-xs">{error}</p>
-                                )}
-                                {esCorrecto && (() => {
-                                  const xSAP = parseFloat(String(producto.unidades_por_paquete || 0));
-                                  const xNombre = producto.producto_nombre?.match(/ X ?(\d+)/i);
-                                  const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
-                                  const panesSugeridos = pedidas * xPaq;
-                                  return cantidad > panesSugeridos ? (
-                                    <p className="text-xs text-amber-600 text-right">
-                                      +{cantidad - panesSugeridos} excedente real
-                                    </p>
-                                  ) : null;
-                                })()}
-                              </div>
+                              {masa.fase_actual !== 'DIVISION' ? (
+                                <span className={`font-mono font-semibold text-sm ${
+                                  cantidad > 0 ? 'text-yellow-700' : 'text-gray-400'
+                                }`}>
+                                  {cantidad > 0 ? cantidad : '—'}
+                                </span>
+                              ) : (
+                                <div className="flex flex-col items-end gap-1">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={cantidadesDivididas[producto.id] || ''}
+                                    onChange={(e) => handleCantidadChange(producto.id, e.target.value)}
+                                    className={`w-32 px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500 text-right ${
+                                      error
+                                        ? 'border-red-400 bg-red-50 focus:border-red-500 focus:ring-red-200'
+                                        : esCorrecto
+                                        ? 'border-green-400 bg-green-50'
+                                        : 'border-gray-300'
+                                    }`}
+                                    placeholder={String(ajustadas)}
+                                  />
+                                  {error && (
+                                    <p className="text-xs text-red-600 text-right max-w-xs">{error}</p>
+                                  )}
+                                  {esCorrecto && (() => {
+                                    const xSAP = parseFloat(String(producto.unidades_por_paquete || 0));
+                                    const xNombre = producto.producto_nombre?.match(/ X ?(\d+)/i);
+                                    const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
+                                    const panesSugeridos = pedidas * xPaq;
+                                    return cantidad > panesSugeridos ? (
+                                      <p className="text-xs text-amber-600 text-right">
+                                        +{cantidad - panesSugeridos} excedente real
+                                      </p>
+                                    ) : null;
+                                  })()}
+                                </div>
+                              )}
                             </td>
                           </tr>
                         );
@@ -577,13 +621,20 @@ export const DivisionMasa: React.FC = () => {
               + Mano de obra
             </button>
             {masa.fase_actual === 'DIVISION' ? (
-              <button
-                onClick={handleCompletar}
-                disabled={completarMutation.isPending || hayErroresValidacion() || !todasTienenCantidad()}
-                className="px-6 py-3 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50 font-semibold"
-              >
-                {completarMutation.isPending ? 'Completando...' : 'Completar División ✓'}
-              </button>
+              <div className="flex flex-col items-end gap-1">
+                {!todasTienenCantidad() && (
+                  <p className="text-xs text-red-500 font-medium">
+                    ⚠ Debes ingresar la cantidad cortada para todos los productos
+                  </p>
+                )}
+                <button
+                  onClick={handleCompletar}
+                  disabled={completarMutation.isPending || hayErroresValidacion() || !todasTienenCantidad()}
+                  className="px-6 py-3 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50 font-semibold"
+                >
+                  {completarMutation.isPending ? 'Completando...' : 'Completar División ✓'}
+                </button>
+              </div>
             ) : (
               <button
                 onClick={() => navigate(`/formado/${masaId}`)}
