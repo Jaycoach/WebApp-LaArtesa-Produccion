@@ -8,6 +8,7 @@
  * Si hay faltantes, se exige observación obligatoria antes de completar.
  */
 import React, { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card } from '@/components/common';
 
@@ -1270,6 +1271,7 @@ const PanelResumenVariedad: React.FC<{ fecha: string }> = ({ fecha }) => {
 // ── Componente principal ─────────────────────────────────────────────────────
 export const EmpaqueMasa: React.FC = () => {
   const qc = useQueryClient();
+  const { masaId: masaIdParam } = useParams<{ masaId?: string }>();
 
   const [modo, setModo] = useState<'lista' | 'masa' | 'ov' | 'resumen'>('lista');
   const [fechaLista, setFechaLista] = useState(new Date().toISOString().slice(0, 10));
@@ -1299,17 +1301,18 @@ export const EmpaqueMasa: React.FC = () => {
     });
   const masasPendientes = pendientesData?.data || [];
 
-  // Pre-seleccionar masa desde sessionStorage (cuando se llega desde /horneado/:id)
+  // Pre-seleccionar masa desde URL param o sessionStorage
   useEffect(() => {
     if (masasPendientes.length === 0) return;
-    const masaActivaId = sessionStorage.getItem('artesa_masa_activa');
-    if (!masaActivaId || masaSeleccionada) return;
-    const masa = masasPendientes.find((m: MasaPendiente) => String(m.id) === masaActivaId);
+    if (masaSeleccionada) return;
+    const targetId = masaIdParam || sessionStorage.getItem('artesa_masa_activa');
+    if (!targetId) return;
+    const masa = masasPendientes.find((m: MasaPendiente) => String(m.id) === targetId);
     if (masa) {
       setMasaSeleccionada(masa);
       setModo('masa');
     }
-  }, [masasPendientes]);
+  }, [masasPendientes, masaIdParam]);
 
   const { data: ovData, isLoading: loadingOV, error: ovError } = useQuery<{ data: OVData[] }>({
     queryKey: ['empaque-ov', docNumBuscar],
