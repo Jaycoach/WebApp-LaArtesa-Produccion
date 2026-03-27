@@ -1329,15 +1329,24 @@ export const EmpaqueMasa: React.FC = () => {
     for (const p of productos) {
       const ov = p.sap_doc_num || 'SIN_OV';
       if (!ovsMap[ov]) ovsMap[ov] = [];
+      const xSAP = parseFloat(String(p.unidades_por_paquete || 0));
+      const xNombre = p.producto_nombre?.match(/ X ?(\d+)/i);
+      const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
+      // Panes sugeridos = paquetes pedidos × unidades por paquete
+      const panesSugeridos = (p.unidades_pedidas || 0) * xPaq;
+      // Panes de referencia: terminados horneado > divididos > sugeridos
+      const panesReferencia = directMasaData?.data?.unidades_terminadas
+        || (p.division_completada && p.cantidad_divisiones > 0 ? p.cantidad_divisiones : 0)
+        || panesSugeridos;
       ovsMap[ov].push({
         id: p.id,
         sap_item_code: p.sap_item_code,
         producto_nombre: p.producto_nombre,
         presentacion: p.presentacion,
         gramaje_unitario: p.gramaje_unitario,
-        unidades_programadas: p.unidades_ajustadas || p.unidades_pedidas || 0,
-        unidades_referencia: p.unidades_ajustadas || p.unidades_pedidas || 0,
-        division_completada: true,
+        unidades_programadas: panesSugeridos,
+        unidades_referencia: panesReferencia,
+        division_completada: p.division_completada || false,
         unidades_producidas: p.unidades_producidas || 0,
         unidades_por_paquete: p.unidades_por_paquete || null,
         sap_doc_num: p.sap_doc_num || null,
