@@ -854,14 +854,13 @@ const completarFase = async (req, res, next) => {
           const cantidad = Number(cantidades_divididas[prod.id] || 0);
           if (cantidad > 0) {
             const requeridoFinal = parseInt(prod.unidades_ajustadas || prod.unidades_programadas);
-            const excedenteReal  = Math.max(0, cantidad - parseInt(prod.unidades_pedidas));
-            const faltante       = Math.max(0, requeridoFinal - cantidad);
-            const esParcial      = faltante > 0;
-
             const upqDiv = (prod.unidades_por_paquete && parseFloat(prod.unidades_por_paquete) > 1)
               ? parseFloat(prod.unidades_por_paquete)
               : (() => { const m = (prod.producto_nombre || '').match(/ X ?(\d+)/i); return m ? parseInt(m[1]) : 1; })();
-            const panesRealesCortados = cantidad * upqDiv;
+            const panesSugeridos  = parseInt(prod.unidades_pedidas) * upqDiv;
+            const excedenteReal   = Math.max(0, cantidad - panesSugeridos);
+            const faltante        = Math.max(0, requeridoFinal - cantidad);
+            const esParcial       = faltante > 0;
 
             await db.query(
               `UPDATE productos_por_masa
@@ -873,7 +872,7 @@ const completarFase = async (req, res, next) => {
                    unidades_producidas  = $5,
                    updated_at           = NOW()
                WHERE id = $6`,
-              [cantidad, excedenteReal, faltante, esParcial, panesRealesCortados, prod.id]
+              [cantidad, excedenteReal, faltante, esParcial, cantidad, prod.id]
             );
           }
         }
