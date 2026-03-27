@@ -1348,21 +1348,29 @@ export const EmpaqueMasa: React.FC = () => {
       ([doc_num, prods]) => ({ doc_num, productos: prods })
     );
 
+    // Horneado completado + empaque BLOQUEADA/PENDIENTE → forzar EN_PROGRESO para que puedeOperar=true
+    const estadoEmpaqueEfectivo = m.estado_empaque === 'COMPLETADA'
+      ? 'COMPLETADA'
+      : 'EN_PROGRESO';
+
     const masaCompatible: MasaPendiente = {
       id: m.id,
       codigo_masa: m.codigo_masa,
       nombre_masa: m.nombre_masa,
       tipo_masa: m.tipo_masa,
-      total_kilos_con_merma: parseFloat(m.total_kilos_con_merma) || 0,
+      total_kilos_con_merma: parseFloat(String(m.total_kilos_con_merma)) || 0,
       fecha_produccion: m.fecha_produccion?.slice(0, 10) || '',
       es_subdivision: false,
-      estado_empaque: m.estado_empaque || 'PENDIENTE',
+      estado_empaque: estadoEmpaqueEfectivo,
       estado_horneado: 'COMPLETADA',
       horneado_completo: true,
       lote_produccion: m.lote_produccion || null,
       empaque_iniciado: registro != null,
       empaque_id: registro?.id || null,
-      fecha_vencimiento: registro?.fecha_vencimiento || m.empaque_datos_fase?.fecha_vencimiento_sugerida || null,
+      fecha_vencimiento: registro?.fecha_vencimiento
+        || (m.empaque_datos_fase as any)?.fecha_vencimiento_sugerida
+        || m.fecha_vencimiento_sugerida
+        || null,
       materiales_alistamiento: [],
       ovs,
     };
