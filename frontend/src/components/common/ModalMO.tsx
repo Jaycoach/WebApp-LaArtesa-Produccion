@@ -50,7 +50,7 @@ export const ModalMO: React.FC<Props> = ({ masaId, fase, onClose }) => {
           api(`/config/mano-obra/masa/${masaId}`),
         ]);
         setTiposMO(tipos.data || []);
-        setRegistros((regs.data || []).filter((r: RegistroMO) => r.fase === fase));
+        setRegistros((regs.data?.registros || []).filter((r: RegistroMO) => r.fase === fase));
         setLoaded(true);
       } catch (e: any) { setErr(e.message); setLoaded(true); }
     };
@@ -70,7 +70,7 @@ export const ModalMO: React.FC<Props> = ({ masaId, fase, onClose }) => {
         body: JSON.stringify({ fase, tipo_mo_id: Number(tipoId), horas: parseFloat(horas), observaciones: obs }),
       });
       const regs = await api(`/config/mano-obra/masa/${masaId}`);
-      setRegistros((regs.data || []).filter((r: RegistroMO) => r.fase === fase));
+      setRegistros((regs.data?.registros || []).filter((r: RegistroMO) => r.fase === fase));
       setTipoId(''); setHoras(''); setObs('');
     } catch (e: any) { setErr(e.message); }
     finally { setSaving(false); }
@@ -117,7 +117,7 @@ export const ModalMO: React.FC<Props> = ({ masaId, fase, onClose }) => {
                 <option value="">Seleccionar...</option>
                 {tiposMO.map(t => (
                   <option key={t.id} value={t.id}>
-                    {t.nombre} — ${COP(parseFloat(t.costo_hora as any))}/h
+                    {t.nombre}
                   </option>
                 ))}
               </select>
