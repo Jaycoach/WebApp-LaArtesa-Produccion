@@ -88,7 +88,7 @@ function generarLetrasTanda(n) {
  * Inicializa las fases de una masa recién creada.
  * PLANIFICACION → COMPLETADA, PESAJE → EN_PROGRESO, resto → BLOQUEADA.
  */
-async function inicializarFasesMasa(masaId, userId) {
+async function inicializarFasesMasa(masaId, userId, qr = db) {
   const fases = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO', 'EMPAQUE'];
 
   for (const fase of fases) {
@@ -99,7 +99,7 @@ async function inicializarFasesMasa(masaId, userId) {
     const fechaInicio = (estado === 'EN_PROGRESO' || estado === 'COMPLETADA') ? new Date() : null;
     const fechaFin    = estado === 'COMPLETADA' ? new Date() : null;
 
-    await db.query(`
+    await qr.query(`
       INSERT INTO progreso_fases
         (masa_id, fase, estado, porcentaje_completado, usuario_responsable,
          fecha_inicio, fecha_completado)
@@ -113,7 +113,7 @@ async function inicializarFasesMasa(masaId, userId) {
  * Inicializa las fases de una sub-masa que ya tiene el pesaje completo.
  * PLANIFICACION → COMPLETADA, PESAJE → COMPLETADA, AMASADO → EN_PROGRESO, resto → BLOQUEADA.
  */
-async function inicializarFasesMasaConPesaje(masaId, userId) {
+async function inicializarFasesMasaConPesaje(masaId, userId, qr = db) {
   const fases = ['PLANIFICACION', 'PESAJE', 'AMASADO', 'DIVISION', 'FORMADO', 'FERMENTACION', 'HORNEADO', 'EMPAQUE'];
 
   for (const fase of fases) {
@@ -125,7 +125,7 @@ async function inicializarFasesMasaConPesaje(masaId, userId) {
     const fechaInicio = (estado === 'EN_PROGRESO' || estado === 'COMPLETADA') ? new Date() : null;
     const fechaFin    = estado === 'COMPLETADA' ? new Date() : null;
 
-    await db.query(`
+    await qr.query(`
       INSERT INTO progreso_fases
         (masa_id, fase, estado, porcentaje_completado, usuario_responsable,
          fecha_inicio, fecha_completado)
@@ -144,7 +144,7 @@ async function inicializarFasesMasaConPesaje(masaId, userId) {
  * @param {number[]} subMasaIds       - IDs de las sub-masas [A, B, C, ...]
  * @param {boolean}  copiarPesaje     - Si true copia los campos de pesaje real proporcionalmente
  */
-async function distribuirIngredientes(ingredientes, subMasaIds, copiarPesaje = false) {
+async function distribuirIngredientes(ingredientes, subMasaIds, copiarPesaje = false, qr = db) {
   const n = subMasaIds.length;
 
   for (const ing of ingredientes) {
@@ -192,7 +192,7 @@ async function distribuirIngredientes(ingredientes, subMasaIds, copiarPesaje = f
       const lote       = copiarPesaje ? (ing.lote       || null) : null;
       const fechaVenc  = copiarPesaje ? (ing.fecha_vencimiento || null) : null;
 
-      await db.query(`
+      await qr.query(`
         INSERT INTO ingredientes_masa
           (masa_id, ingrediente_sap_code, ingrediente_nombre, orden_visualizacion,
            porcentaje_panadero, es_harina, es_agua, es_prefermento,
@@ -228,7 +228,7 @@ async function distribuirIngredientes(ingredientes, subMasaIds, copiarPesaje = f
 /**
  * Distribuye materiales de empaque en N copias iguales (una por sub-masa).
  */
-async function distribuirEmpaque(empaques, subMasaIds) {
+async function distribuirEmpaque(empaques, subMasaIds, qr = db) {
   const n = subMasaIds.length;
 
   const insertSQL = `
@@ -254,7 +254,7 @@ async function distribuirEmpaque(empaques, subMasaIds) {
       }
       acum = parseFloat((acum + cantTanda).toFixed(4));
 
-      await db.query(insertSQL, [
+      await qr.query(insertSQL, [
         subMasaIds[i],
         emp.ingrediente_sap_code,
         emp.ingrediente_nombre,
@@ -271,7 +271,7 @@ async function distribuirEmpaque(empaques, subMasaIds) {
  * Cada sub-masa recibe 1/N de cada producto (distribución uniforme por tanda).
  * La última tanda absorbe los residuos de redondeo.
  */
-async function distribuirProductos(productos, limiteKg, subMasaIds) {
+async function distribuirProductos(productos, limiteKg, subMasaIds, qr = db) {
   const n = subMasaIds.length;
   for (const prod of productos) {
     const totalUnidadesProg = parseInt(prod.unidades_programadas);
@@ -308,7 +308,8 @@ async function distribuirProductos(productos, limiteKg, subMasaIds) {
         await insertarProductoEnMasa(
           subMasaIds[i], prod,
           unidadesProg, unidadesPed,
-          kgPed, kgProg
+          kgPed, kgProg,
+          qr
         );
       }
 
@@ -323,13 +324,13 @@ async function distribuirProductos(productos, limiteKg, subMasaIds) {
 /**
  * Inserta un producto en una sub-masa con las cantidades indicadas.
  */
-async function insertarProductoEnMasa(masaId, prod, unidadesProg, unidadesPedidas, kgPedidos, kgProgramados) {
+async function insertarProductoEnMasa(masaId, prod, unidadesProg, unidadesPedidas, kgPedidos, kgProgramados, qr = db) {
   const upq = (prod.unidades_por_paquete && parseFloat(prod.unidades_por_paquete) > 1)
     ? parseFloat(prod.unidades_por_paquete)
     : (() => { const m = (prod.producto_nombre || '').match(/ X ?(\d+)/i); return m ? parseInt(m[1]) : 1; })();
   const cantPaquetes = unidadesPedidas * upq;
 
-  await db.query(`
+  await qr.query(`
     INSERT INTO productos_por_masa
       (masa_id, producto_codigo, producto_nombre, presentacion, gramaje_unitario,
        unidades_pedidas, unidades_programadas, unidades_producidas,
@@ -362,7 +363,21 @@ async function insertarProductoEnMasa(masaId, prod, unidadesProg, unidadesPedida
  * @returns {object|null}     - Información de la subdivisión, o null si no aplica
  */
 async function ejecutarSubdivision(masaId, userId, conPesaje = false) {
-  const masaResult = await db.query(
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+    return await _ejecutarSubdivisionTx(client, masaId, userId, conPesaje);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    logger.error(`ejecutarSubdivision ROLLBACK masa ${masaId}: ${err.message}`);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false) {
+  const masaResult = await client.query(
     `SELECT id, codigo_masa, tipo_masa, nombre_masa, fecha_produccion,
             total_kilos_base, total_kilos_con_merma, porcentaje_merma,
             factor_absorcion_usado, created_by,
@@ -383,7 +398,7 @@ async function ejecutarSubdivision(masaId, userId, conPesaje = false) {
   }
 
   // Calcular total kg de ingredientes
-  const ingResult = await db.query(
+  const ingResult = await client.query(
     `SELECT SUM(cantidad_kilos) AS total_kg FROM ingredientes_masa WHERE masa_id = $1`,
     [masaId]
   );
@@ -401,7 +416,7 @@ async function ejecutarSubdivision(masaId, userId, conPesaje = false) {
   logger.info(`Masa ${masaId} supera el límite (${totalKgIngredientes.toFixed(2)} kg > ${limiteKg} kg). Subdividiendo en ${nTandas} tandas.`);
 
   // Marcar masa original como subdividida
-  await db.query(`
+  await client.query(`
     UPDATE masas_produccion
     SET fue_subdividida = TRUE, estado = 'SUBDIVIDIDA', updated_at = NOW()
     WHERE id = $1
@@ -426,7 +441,7 @@ async function ejecutarSubdivision(masaId, userId, conPesaje = false) {
 
   for (let i = 0; i < nTandas; i++) {
     const letra  = LETRAS_TANDA[i];
-    const result = await db.query(`
+    const result = await client.query(`
       INSERT INTO masas_produccion
         (codigo_masa, tipo_masa, nombre_masa, fecha_produccion,
          total_kilos_base, total_kilos_con_merma, porcentaje_merma,
@@ -462,41 +477,41 @@ async function ejecutarSubdivision(masaId, userId, conPesaje = false) {
   // Inicializar fases de las sub-masas
   for (const subMasa of subMasas) {
     if (conPesaje) {
-      await inicializarFasesMasaConPesaje(subMasa.id, userId);
+      await inicializarFasesMasaConPesaje(subMasa.id, userId, client);
     } else {
-      await inicializarFasesMasa(subMasa.id, userId);
+      await inicializarFasesMasa(subMasa.id, userId, client);
     }
   }
 
   // Distribuir ingredientes (con o sin datos de pesaje)
-  const ingredientesResult = await db.query(
+  const ingredientesResult = await client.query(
     `SELECT * FROM ingredientes_masa WHERE masa_id = $1 ORDER BY orden_visualizacion`,
     [masaId]
   );
-  await distribuirIngredientes(ingredientesResult.rows, subMasaIds, conPesaje);
+  await distribuirIngredientes(ingredientesResult.rows, subMasaIds, conPesaje, client);
 
   // Distribuir empaque
-  const empaqueResult = await db.query(
+  const empaqueResult = await client.query(
     `SELECT * FROM empaque_por_masa WHERE masa_id = $1 ORDER BY orden_visualizacion`,
     [masaId]
   );
-  await distribuirEmpaque(empaqueResult.rows, subMasaIds);
+  await distribuirEmpaque(empaqueResult.rows, subMasaIds, client);
 
   // Distribuir productos
-  const todosProductos = await db.query(
+  const todosProductos = await client.query(
     `SELECT * FROM productos_por_masa WHERE masa_id = $1`,
     [masaId]
   );
-  await distribuirProductos(todosProductos.rows, limiteKg, subMasaIds);
+  await distribuirProductos(todosProductos.rows, limiteKg, subMasaIds, client);
 
   // Copiar relaciones orden-masa
-  const ordenesResult = await db.query(
+  const ordenesResult = await client.query(
     `SELECT orden_sap_docentry, orden_sap_docnum FROM orden_masa_relacion WHERE masa_id = $1`,
     [masaId]
   );
   for (const orden of ordenesResult.rows) {
     for (const subMasaId of subMasaIds) {
-      await db.query(
+      await client.query(
         `INSERT INTO orden_masa_relacion (masa_id, orden_sap_docentry, orden_sap_docnum)
          VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
         [subMasaId, orden.orden_sap_docentry, orden.orden_sap_docnum]
@@ -505,6 +520,8 @@ async function ejecutarSubdivision(masaId, userId, conPesaje = false) {
   }
 
   logger.info(`Subdivisión completada (conPesaje=${conPesaje}): Masa ${masaId} → ${subMasas.map(s => s.codigo_masa).join(', ')}`);
+
+  await client.query('COMMIT');
 
   return {
     realizada:     true,
