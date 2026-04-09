@@ -399,17 +399,28 @@ export const DetalleMasa: React.FC = () => {
                           {paqPedidos.toLocaleString('es-CO')}
                         </td>
 
-                        {/* Paq. a Producir — incluye ajuste manual */}
+                        {/* Paq. a Producir — preview en tiempo real mientras el usuario escribe */}
                         <td className="px-4 py-3 text-right">
-                          <span className={`text-sm font-bold ${paqAProducir > paqPedidos ? 'text-indigo-700' : 'text-gray-900'}`}>
-                            {paqAProducir.toLocaleString('es-CO')}
-                          </span>
-                          {paqAProducir > paqPedidos && (
-                            <span className="ml-1 text-xs text-indigo-500">(+{paqAProducir - paqPedidos})</span>
+                          {panesPreview !== null ? (
+                            <>
+                              <span className="line-through text-gray-400 text-sm mr-1">
+                                {paqAProducir.toLocaleString('es-CO')}
+                              </span>
+                              <span className={`text-sm font-bold ${panesPreview > panes ? 'text-indigo-700' : 'text-red-600'}`}>
+                                {(paqAProducir + deltaNum).toLocaleString('es-CO')}
+                              </span>
+                            </>
+                          ) : (
+                            <span className={`text-sm font-bold ${paqAProducir > paqPedidos ? 'text-indigo-700' : 'text-gray-900'}`}>
+                              {paqAProducir.toLocaleString('es-CO')}
+                              {paqAProducir > paqPedidos && (
+                                <span className="ml-1 text-xs text-indigo-500">(+{paqAProducir - paqPedidos})</span>
+                              )}
+                            </span>
                           )}
                         </td>
 
-                        {/* Panes totales */}
+                        {/* Panes totales — preview en tiempo real */}
                         <td className="px-4 py-3 text-right">
                           <span className="text-sm font-bold text-emerald-700">
                             {panesPreview !== null
