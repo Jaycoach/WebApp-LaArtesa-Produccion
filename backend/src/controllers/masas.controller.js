@@ -214,32 +214,57 @@ const getComposicionByMasa = async (req, res, next) => {
 const updateUnidadesProgramadas = async (req, res, next) => {
   try {
     const { masaId, productoId } = req.params;
-    const { unidades_programadas } = req.body;
+    const { delta_paquetes, motivo } = req.body;
 
-    if (unidades_programadas === undefined || unidades_programadas < 0) {
+    if (delta_paquetes === undefined || !Number.isInteger(Number(delta_paquetes))) {
       return res.status(400).json({
         success: false,
-        message: 'Las unidades programadas son requeridas y deben ser mayores o iguales a 0',
+        message: 'Se requiere delta_paquetes (entero positivo o negativo)',
       });
     }
 
+    const masaResult = await db.query(
+      'SELECT id, fase_actual FROM masas_produccion WHERE id = $1',
+      [masaId]
+    );
+    if (masaResult.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Masa no encontrada' });
+    }
+    if (masaResult.rows[0].fase_actual !== 'PLANIFICACION') {
+      return res.status(400).json({
+        success: false,
+        message: `Solo se puede ajustar en fase PLANIFICACION (actual: ${masaResult.rows[0].fase_actual})`,
+      });
+    }
+
+    const productoActual = await db.query(
+      'SELECT id, unidades_programadas, unidades_por_paquete FROM productos_por_masa WHERE id = $1 AND masa_id = $2',
+      [productoId, masaId]
+    );
+    if (productoActual.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Producto no encontrado en esta masa' });
+    }
+
+    const prod = productoActual.rows[0];
+    const upq = Math.max(1, Number(prod.unidades_por_paquete) || 1);
+    const deltaPanes = Number(delta_paquetes) * upq;
+    const nuevasUnidades = Math.max(0, Number(prod.unidades_programadas) + deltaPanes);
+
     const producto = await fasesModel.updateUnidadesProgramadas(
       productoId,
-      unidades_programadas,
-      req.user.id
+      nuevasUnidades,
+      req.user.id,
+      motivo || null
     );
 
     if (!producto) {
-      return res.status(404).json({
-        success: false,
-        message: 'Producto no encontrado',
-      });
+      return res.status(404).json({ success: false, message: 'Producto no encontrado' });
     }
 
     res.json({
       success: true,
       data: producto,
-      message: 'Unidades programadas actualizadas correctamente',
+      message: `Ajuste aplicado: ${delta_paquetes > 0 ? '+' : ''}${delta_paquetes} paquetes (${deltaPanes > 0 ? '+' : ''}${deltaPanes} panes)`,
     });
   } catch (error) {
     logger.error('Error al actualizar unidades programadas:', error);

@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card } from '@/components/common';
 import { useMasaDetail, useProductos, useComposicion } from '../../hooks/useMasas';
 import { useFases } from '../../hooks/useFases';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { fasesService } from '../../services/fasesService';
+import { useAuthStore } from '@/store';
+import { masasService } from '../../services/masasService';
 
 // ── Iconos SVG inline para cada fase ────────────────────────
 const FaseIcono: React.FC<{ fase: string; estado: string }> = ({ fase, estado }) => {
@@ -66,7 +68,35 @@ export const DetalleMasa: React.FC = () => {
   const { data: fases } = useFases(id!);
 
   const queryClient = useQueryClient();
+  const { user } = useAuthStore();
+  const esSupervisor = user?.rol === 'admin' || user?.rol === 'supervisor';
   const [iniciandoPesaje, setIniciandoPesaje] = useState(false);
+
+  // Estado para ajuste de unidades por producto
+  const [ajustes, setAjustes] = useState<Record<number, { delta: string; motivo: string; guardando: boolean; error: string | null }>>({});
+
+  const getAjuste = (productoId: number) =>
+    ajustes[productoId] ?? { delta: '', motivo: '', guardando: false, error: null };
+
+  const setAjusteCampo = (productoId: number, campo: 'delta' | 'motivo', valor: string) =>
+    setAjustes(prev => ({ ...prev, [productoId]: { ...getAjuste(productoId), [campo]: valor, error: null } }));
+
+  const handleGuardarAjuste = async (productoId: number, upq: number) => {
+    const ajuste = getAjuste(productoId);
+    const delta = parseInt(ajuste.delta, 10);
+    if (isNaN(delta) || delta === 0) {
+      setAjustes(prev => ({ ...prev, [productoId]: { ...getAjuste(productoId), error: 'Ingresa un número distinto de cero' } }));
+      return;
+    }
+    setAjustes(prev => ({ ...prev, [productoId]: { ...getAjuste(productoId), guardando: true, error: null } }));
+    try {
+      await masasService.updateUnidadesProgramadas(masaId, productoId, delta, ajuste.motivo || undefined);
+      setAjustes(prev => ({ ...prev, [productoId]: { delta: '', motivo: '', guardando: false, error: null } }));
+      queryClient.invalidateQueries({ queryKey: ['productos', masaId] });
+    } catch (e: any) {
+      setAjustes(prev => ({ ...prev, [productoId]: { ...getAjuste(productoId), guardando: false, error: e?.message || 'Error al guardar' } }));
+    }
+  };
 
   const iniciarPesajeMutation = useMutation({
     mutationFn: () => fasesService.completarFase(id!, 'planificacion'),
@@ -339,53 +369,95 @@ export const DetalleMasa: React.FC = () => {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Código</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Gramaje</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Un. Pedidas</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Un. Ajustadas</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Excedente</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">× Paq</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Paq. Pedidos</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Paq. a Producir</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Panes</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Kilos</th>
+                    {esSupervisor && masa?.fase_actual === 'PLANIFICACION' && (
+                      <th className="px-4 py-3 text-center text-xs font-medium text-indigo-600 uppercase">Ajuste (+/− paq.)</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {(productos as any[]).map((producto: any) => {
-                    const excedente = parseInt(producto.unidades_excedente || 0);
-                    const ajustadas = parseInt(producto.unidades_ajustadas || producto.unidades_programadas);
+                    const upq = Math.max(1, Number(producto.unidades_por_paquete) || 1);
+                    const paqPedidos = Number(producto.unidades_pedidas);
+                    const paqAProducir = Number(producto.unidades_programadas);
+                    const panes = paqAProducir * upq;
+                    const ajuste = getAjuste(producto.id);
+                    const deltaNum = parseInt(ajuste.delta, 10);
+                    const panesPreview = !isNaN(deltaNum) && deltaNum !== 0 ? panes + deltaNum * upq : null;
+
                     return (
                       <tr key={producto.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-xs text-gray-400 font-mono">{producto.sap_item_code}</td>
                         <td className="px-4 py-3 text-sm font-medium text-gray-900">{producto.producto_nombre}</td>
                         <td className="px-4 py-3 text-sm text-gray-600 text-right">{producto.gramaje_unitario}g</td>
-                        <td className="px-4 py-3 text-sm text-gray-900 text-right">{producto.unidades_pedidas}</td>
-                        <td className="px-4 py-3 text-right">
-                          <span className={`text-sm font-bold ${excedente > 0 ? 'text-orange-600' : 'text-blue-600'}`}>
-                            {ajustadas}
-                          </span>
+
+                        {/* Paq. Pedidos — fijo, de SAP */}
+                        <td className="px-4 py-3 text-sm text-gray-900 text-right font-medium">
+                          {paqPedidos.toLocaleString('es-CO')}
                         </td>
-                        <td className="px-4 py-3 text-center">
-                          {excedente > 0 ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-orange-100 text-orange-700">
-                              +{excedente} extra
-                            </span>
-                          ) : (
-                            <span className="text-gray-300 text-xs">—</span>
+
+                        {/* Paq. a Producir — incluye ajuste manual */}
+                        <td className="px-4 py-3 text-right">
+                          <span className={`text-sm font-bold ${paqAProducir > paqPedidos ? 'text-indigo-700' : 'text-gray-900'}`}>
+                            {paqAProducir.toLocaleString('es-CO')}
+                          </span>
+                          {paqAProducir > paqPedidos && (
+                            <span className="ml-1 text-xs text-indigo-500">(+{paqAProducir - paqPedidos})</span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-sm text-gray-500 text-right">
-                          {Number(producto.unidades_por_paquete) > 1
-                            ? <span className="font-medium text-indigo-600">×{Number(producto.unidades_por_paquete)}</span>
-                            : <span className="text-gray-300">×1</span>}
-                        </td>
+
+                        {/* Panes totales */}
                         <td className="px-4 py-3 text-right">
                           <span className="text-sm font-bold text-emerald-700">
-                            {Number(producto.cantidad_paquetes) > 0
-                              ? Number(producto.cantidad_paquetes).toLocaleString('es-CO')
-                              : (producto.unidades_pedidas * Math.max(1, Number(producto.unidades_por_paquete))).toLocaleString('es-CO')}
+                            {panesPreview !== null
+                              ? <><span className="line-through text-gray-400 mr-1">{panes.toLocaleString('es-CO')}</span><span className={panesPreview > panes ? 'text-indigo-600' : 'text-red-500'}>{panesPreview.toLocaleString('es-CO')}</span></>
+                              : panes.toLocaleString('es-CO')
+                            }
                           </span>
                         </td>
+
+                        {/* Kilos */}
                         <td className="px-4 py-3 text-sm text-gray-900 text-right">
                           {Number(producto.kilos_programados).toFixed(2)} kg
                         </td>
+
+                        {/* Columna de ajuste — solo supervisor en PLANIFICACION */}
+                        {esSupervisor && masa?.fase_actual === 'PLANIFICACION' && (
+                          <td className="px-4 py-3">
+                            <div className="flex flex-col gap-1 min-w-[200px]">
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  placeholder="+2 / −1"
+                                  value={ajuste.delta}
+                                  onChange={e => setAjusteCampo(producto.id, 'delta', e.target.value)}
+                                  className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:border-indigo-400 text-center"
+                                />
+                                <span className="text-xs text-gray-400">paq</span>
+                                <button
+                                  onClick={() => handleGuardarAjuste(producto.id, upq)}
+                                  disabled={ajuste.guardando || !ajuste.delta}
+                                  className="px-2 py-1 text-xs font-medium bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                                >
+                                  {ajuste.guardando ? '…' : 'OK'}
+                                </button>
+                              </div>
+                              <input
+                                type="text"
+                                placeholder="Motivo (opcional)"
+                                value={ajuste.motivo}
+                                onChange={e => setAjusteCampo(producto.id, 'motivo', e.target.value)}
+                                className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:border-indigo-300 text-gray-600"
+                              />
+                              {ajuste.error && (
+                                <span className="text-xs text-red-500">{ajuste.error}</span>
+                              )}
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}

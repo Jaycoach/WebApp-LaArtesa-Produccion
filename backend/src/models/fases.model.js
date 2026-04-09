@@ -111,10 +111,17 @@ const getProductosByMasa = async (masaId) => {
   return result.rows;
 };
 
-const updateUnidadesProgramadas = async (productoId, unidades, userId) => {
+const updateUnidadesProgramadas = async (productoId, unidades, userId, motivo = null) => {
+  // Leer estado anterior para auditoría
+  const anterior = await db.query(
+    'SELECT id, masa_id, unidades_programadas, kilos_programados FROM productos_por_masa WHERE id = $1',
+    [productoId]
+  );
+  if (!anterior.rows[0]) return null;
+
   const result = await db.query(`
     UPDATE productos_por_masa
-    SET 
+    SET
       unidades_programadas = $1,
       kilos_programados = gramaje_unitario * $1 / 1000,
       updated_at = NOW()
@@ -122,7 +129,29 @@ const updateUnidadesProgramadas = async (productoId, unidades, userId) => {
     RETURNING *
   `, [unidades, productoId]);
 
-  return result.rows[0];
+  const actualizado = result.rows[0];
+  if (!actualizado) return null;
+
+  try {
+    await db.query(`
+      INSERT INTO auditoria_cambios
+        (tabla, registro_id, masa_id, operacion, datos_anteriores, datos_nuevos, campos_modificados, usuario_id, motivo)
+      VALUES
+        ('productos_por_masa', $1, $2, 'UPDATE', $3::jsonb, $4::jsonb,
+         ARRAY['unidades_programadas','kilos_programados'], $5, $6)
+    `, [
+      productoId,
+      anterior.rows[0].masa_id,
+      JSON.stringify({ unidades_programadas: anterior.rows[0].unidades_programadas, kilos_programados: anterior.rows[0].kilos_programados }),
+      JSON.stringify({ unidades_programadas: actualizado.unidades_programadas, kilos_programados: actualizado.kilos_programados }),
+      userId || null,
+      motivo || null,
+    ]);
+  } catch (auditErr) {
+    console.error('Error registrando auditoría de ajuste:', auditErr.message);
+  }
+
+  return actualizado;
 };
 
 /**

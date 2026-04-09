@@ -83,15 +83,12 @@ export const masasService = {
   updateUnidadesProgramadas: async (
     masaId: number,
     productoId: number,
-    unidades: number
+    delta_paquetes: number,
+    motivo?: string
   ): Promise<ProductoMasa> => {
-    const data: UpdateUnidadesProgramadasRequest = {
-      unidades_programadas: unidades,
-    };
-
     const response = await apiService.patch<ProductoMasa>(
       API_CONFIG.ENDPOINTS.MASAS.UPDATE_PRODUCTO(masaId, productoId),
-      data
+      { delta_paquetes, motivo }
     );
     return response.data!;
   },

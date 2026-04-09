@@ -46,7 +46,7 @@ router.get('/:id/composicion', masasController.getComposicionByMasa);
  * @desc    Actualizar unidades programadas de un producto
  * @access  Private
  */
-router.patch('/:masaId/productos/:productoId', masasController.updateUnidadesProgramadas);
+router.patch('/:masaId/productos/:productoId', checkRole(['admin', 'supervisor']), masasController.updateUnidadesProgramadas);
 
 /**
  * @route   PATCH /api/masas/:id/aprobar
