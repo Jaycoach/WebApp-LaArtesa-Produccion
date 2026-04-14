@@ -102,7 +102,7 @@ const generalLimiter = rateLimit({
  */
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 5,
+  max: 20,
   skipSuccessfulRequests: true, // Reset counter en login exitoso
   standardHeaders: true,
   legacyHeaders: false,
