@@ -183,12 +183,18 @@ export const PesajeMasa: React.FC = () => {
     }
   };
 
+  const [confirmando, setConfirmando] = useState(false);
+
   const handleConfirmar = async () => {
-    if (confirm('¿Confirmar pesaje completo? Esto desbloqueará la siguiente fase.')) {
-      try {
-        await confirmarMutation.mutateAsync(masaIdNum);
-        navigate(`/planificacion/masas/${masaId}`);
-      } catch (err: any) {
+    if (confirmando || confirmarMutation.isPending) return;
+    if (!confirm('¿Confirmar pesaje completo? Esto enviará el consumo a SAP y desbloqueará el amasado.')) return;
+    setConfirmando(true);
+    try {
+      const resultado = await confirmarMutation.mutateAsync(masaIdNum);
+      const docNum = resultado?.sap_doc_num ?? resultado?.sap_docentry ?? '—';
+      alert(`✅ Pesaje confirmado exitosamente.\nSalida SAP Nº ${docNum} creada.`);
+      navigate(`/planificacion/masas/${masaId}`);
+    } catch (err: any) {
         const data = err?.data || {};
         const mensaje = err?.message || 'Error al transmitir consumos a SAP';
         const loteFallido = data?.lote_fallido || null;
@@ -210,8 +216,9 @@ export const PesajeMasa: React.FC = () => {
           textoError += `\n\nNo hay lotes alternativos con stock. Sincroniza el inventario SAP o contacta al supervisor.`;
         }
         alert(textoError);
+      } finally {
+        setConfirmando(false);
       }
-    }
   };
 
   if (isLoading) {
@@ -778,14 +785,26 @@ export const PesajeMasa: React.FC = () => {
             >
               + Mano de obra
             </button>
-            {checklist.todosPesados && (
+            {checklist.todosPesados && !checklist.pesaje_transmitido && (
               <button
                 onClick={handleConfirmar}
-                disabled={confirmarMutation.isPending}
+                disabled={confirmarMutation.isPending || confirmando}
                 className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-semibold"
               >
-                {confirmarMutation.isPending ? 'Confirmando...' : 'Confirmar Pesaje Completo'}
+                {(confirmarMutation.isPending || confirmando) ? '⏳ Enviando a SAP...' : '✅ Confirmar Pesaje Completo'}
               </button>
+            )}
+            {checklist.pesaje_transmitido && (
+              <div className="flex items-center gap-2 px-5 py-3 bg-green-50 border border-green-300 rounded-lg">
+                <span className="text-green-700 font-semibold text-sm">
+                  ✅ Transmitido a SAP
+                </span>
+                {checklist.sap_doc_num_pesaje && (
+                  <span className="text-xs text-green-600 font-mono bg-green-100 px-2 py-1 rounded">
+                    Salida Nº {checklist.sap_doc_num_pesaje}
+                  </span>
+                )}
+              </div>
             )}
           </div>
         </div>

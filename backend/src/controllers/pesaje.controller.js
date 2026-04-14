@@ -217,6 +217,9 @@ const getChecklist = async (req, res, next) => {
       masa_id:              masa.id,
       tipo_masa:            masa.tipo_masa,
       es_repeticion:        masa.es_repeticion ?? false,
+      sap_doc_entry_pesaje: masa.sap_doc_entry_pesaje ?? null,
+      sap_doc_num_pesaje:   masa.sap_doc_num_pesaje   ?? null,
+      pesaje_transmitido:   !!(masa.sap_doc_entry_pesaje),
       fecha_inicio:         fasePesaje?.fecha_inicio,
       usuario_responsable:  fasePesaje?.usuario_responsable,
       ingredientes:         ingredientesConStock,
@@ -457,8 +460,10 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
       ]
     );
 
-    logger.info(`InventoryGenExits enviado para masa ${masaId}: DocEntry ${response.data?.DocEntry}`);
-    return { success: true, docEntry: response.data?.DocEntry, rows: result.rows };
+    const docEntry = response.data?.DocEntry ?? null;
+    const docNum   = response.data?.DocNum   ? String(response.data.DocNum) : null;
+    logger.info(`InventoryGenExits enviado para masa ${masaId}: DocEntry ${docEntry}, DocNum ${docNum}`);
+    return { success: true, docEntry, docNum, rows: result.rows };
 
   } catch (err) {
     const tiempoRespuesta = Date.now() - inicio;
@@ -536,18 +541,43 @@ const confirmarPesaje = async (req, res, next) => {
     const fecha_local = req.body?.fecha_local || null;
     logger.info(`Confirmando pesaje para masa ${masaId}`);
 
-    // Validar que la masa esté APROBADA
+    // Validar que la masa esté APROBADA + control de idempotencia SAP
     const masaCheck = await db.query(
-      `SELECT estado FROM masas_produccion WHERE id = $1`, [masaId]
+      `SELECT estado, sap_doc_entry_pesaje, sap_doc_num_pesaje FROM masas_produccion WHERE id = $1`, [masaId]
     );
     if (!masaCheck.rows.length) {
       return res.status(404).json({ success: false, message: 'Masa no encontrada' });
     }
-    if (masaCheck.rows[0].estado !== 'APROBADA') {
+    const masaRow = masaCheck.rows[0];
+    if (masaRow.estado !== 'APROBADA') {
       return res.status(403).json({
         success: false,
-        message: `La masa debe estar en estado APROBADA para confirmar el pesaje. Estado actual: ${masaCheck.rows[0].estado}`,
-        estado: masaCheck.rows[0].estado,
+        message: `La masa debe estar en estado APROBADA para confirmar el pesaje. Estado actual: ${masaRow.estado}`,
+        estado: masaRow.estado,
+      });
+    }
+    // Idempotencia: si ya se transmitió a SAP, solo completar fases sin re-enviar
+    if (masaRow.sap_doc_entry_pesaje) {
+      logger.info(`Masa ${masaId}: pesaje ya transmitido (DocNum ${masaRow.sap_doc_num_pesaje}). Completando fases sin re-envío SAP.`);
+      await fasesModel.updateEstadoFase(masaId, 'PLANIFICACION', 'COMPLETADA', 100, req.user.id, {});
+      await fasesModel.updateEstadoFase(masaId, 'PESAJE', 'COMPLETADA', 100, req.user.id, { confirmado_en: new Date() });
+      await db.query(
+        `UPDATE progreso_fases SET estado = 'EN_PROGRESO', updated_at = NOW()
+         WHERE masa_id = $1 AND fase = 'AMASADO' AND estado = 'BLOQUEADA'`, [masaId]
+      );
+      await db.query(
+        `UPDATE masas_produccion SET fase_actual = 'AMASADO', updated_at = NOW() WHERE id = $1`, [masaId]
+      );
+      return res.json({
+        success: true,
+        message: `Pesaje ya transmitido a SAP. Salida Nº ${masaRow.sap_doc_num_pesaje}. Fases corregidas.`,
+        data: {
+          fase_completada:    'PESAJE',
+          fase_desbloqueada:  'AMASADO',
+          sap_doc_entry:      masaRow.sap_doc_entry_pesaje,
+          sap_doc_num:        masaRow.sap_doc_num_pesaje,
+          ya_transmitido:     true,
+        },
       });
     }
 
@@ -863,6 +893,17 @@ const confirmarPesaje = async (req, res, next) => {
       });
     }
 
+    // SAP OK → guardar DocEntry y DocNum para idempotencia futura
+    await db.query(
+      `UPDATE masas_produccion
+       SET sap_doc_entry_pesaje = $1, sap_doc_num_pesaje = $2, updated_at = NOW()
+       WHERE id = $3`,
+      [sapResult.docEntry, sapResult.docNum, masaId]
+    );
+
+    // Completar PLANIFICACION (bug: quedaba EN_PROGRESO)
+    await fasesModel.updateEstadoFase(masaId, 'PLANIFICACION', 'COMPLETADA', 100, req.user.id, {});
+
     // SAP OK → descontar inventario local
     if (sapResult.rows.length > 0) {
       try {
@@ -875,11 +916,12 @@ const confirmarPesaje = async (req, res, next) => {
     notificarPesajeCompletado(masaId); // fire-and-forget
     res.json({
       success: true,
-      message: 'Pesaje confirmado exitosamente',
+      message: `Pesaje confirmado. Salida SAP Nº ${sapResult.docNum || sapResult.docEntry} creada exitosamente.`,
       data: {
         fase_completada:   'PESAJE',
         fase_desbloqueada: siguienteFase?.fase || 'AMASADO',
-        sap_docentry:      sapResult.docEntry,
+        sap_doc_entry:     sapResult.docEntry,
+        sap_doc_num:       sapResult.docNum,
         subdivision:       null,
       },
     });
