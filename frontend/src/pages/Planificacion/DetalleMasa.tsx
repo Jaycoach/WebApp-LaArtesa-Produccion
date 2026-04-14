@@ -75,11 +75,15 @@ export const DetalleMasa: React.FC = () => {
   // Estado para ajuste de unidades por producto
   const [ajustes, setAjustes] = useState<Record<number, { delta: string; motivo: string; guardando: boolean; error: string | null }>>({});
 
-  const getAjuste = (productoId: number) =>
-    ajustes[productoId] ?? { delta: '', motivo: '', guardando: false, error: null };
+  const getAjuste = (productoId: number, unidadesProgramadas?: number) => {
+    if (ajustes[productoId] !== undefined) return ajustes[productoId];
+    // Si el producto tiene 0 unidades programadas, sugerir +2 como punto de partida
+    const deltaDefault = (unidadesProgramadas === 0) ? '2' : '';
+    return { delta: deltaDefault, motivo: '', guardando: false, error: null };
+  };
 
   const setAjusteCampo = (productoId: number, campo: 'delta' | 'motivo', valor: string) =>
-    setAjustes(prev => ({ ...prev, [productoId]: { ...getAjuste(productoId), [campo]: valor, error: null } }));
+    setAjustes(prev => ({ ...prev, [productoId]: { ...getAjuste(productoId, undefined), [campo]: valor, error: null } }));
 
   const handleGuardarAjuste = async (productoId: number, upq: number) => {
     const ajuste = getAjuste(productoId);
@@ -384,7 +388,7 @@ export const DetalleMasa: React.FC = () => {
                     const paqPedidos = Number(producto.unidades_pedidas);
                     const paqAProducir = Number(producto.unidades_programadas);
                     const panes = paqAProducir * upq;
-                    const ajuste = getAjuste(producto.id);
+                    const ajuste = getAjuste(producto.id, Number(producto.unidades_programadas));
                     const deltaNum = parseInt(ajuste.delta, 10);
                     const panesPreview = !isNaN(deltaNum) && deltaNum !== 0 ? panes + deltaNum * upq : null;
 
