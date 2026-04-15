@@ -794,8 +794,8 @@ const confirmarPesaje = async (req, res, next) => {
     }
 
     // ── Flujo estándar sin subdivisión ─────────────────────────────
-    const siguienteFase = await fasesModel.desbloquearSiguienteFase(masaId, 'PESAJE');
-    logger.info(`Fase desbloqueada después de PESAJE: ${siguienteFase?.fase || 'AMASADO'}`);
+    // NOTA: desbloquearSiguienteFase se ejecuta DESPUÉS de guardar sap_doc_entry_pesaje
+    // para evitar que el rollback de SAP pise un desbloqueo ya exitoso.
 
     // Calcular y guardar costos de MP
     try {
@@ -867,14 +867,9 @@ const confirmarPesaje = async (req, res, next) => {
     // Enviar a SAP — bloqueante
     const sapResult = await enviarInventoryGenExits(masaId, req.user.id);
     if (!sapResult.success) {
-      // Rollback: revertir PESAJE a EN_PROGRESO y AMASADO a BLOQUEADA
+      // Rollback: revertir PESAJE a EN_PROGRESO (AMASADO no se tocó aún)
       try {
         await fasesModel.updateEstadoFase(masaId, 'PESAJE', 'EN_PROGRESO', 90, req.user.id, {});
-        await db.query(
-          `UPDATE progreso_fases SET estado = 'BLOQUEADA', porcentaje_completado = 0
-           WHERE masa_id = $1 AND fase = 'AMASADO'`,
-          [masaId]
-        );
         await db.query(
           `UPDATE masas_produccion SET fase_actual = 'PESAJE', estado = 'APROBADA' WHERE id = $1`,
           [masaId]
@@ -901,8 +896,11 @@ const confirmarPesaje = async (req, res, next) => {
       [sapResult.docEntry, sapResult.docNum, masaId]
     );
 
-    // Completar PLANIFICACION (bug: quedaba EN_PROGRESO)
+    // Completar PLANIFICACION y desbloquear AMASADO DESPUÉS de guardar SAP DocEntry
+    // Orden crítico: primero persistir idempotencia, luego avanzar fases
     await fasesModel.updateEstadoFase(masaId, 'PLANIFICACION', 'COMPLETADA', 100, req.user.id, {});
+    const siguienteFase = await fasesModel.desbloquearSiguienteFase(masaId, 'PESAJE');
+    logger.info(`Fase desbloqueada después de PESAJE: ${siguienteFase?.fase || 'AMASADO'}`);
 
     // SAP OK → descontar inventario local
     if (sapResult.rows.length > 0) {
