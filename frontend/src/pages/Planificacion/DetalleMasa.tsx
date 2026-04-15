@@ -77,8 +77,7 @@ export const DetalleMasa: React.FC = () => {
 
   const getAjuste = (productoId: number, unidadesProgramadas?: number) => {
     if (ajustes[productoId] !== undefined) return ajustes[productoId];
-    // Si el producto tiene 0 unidades programadas, sugerir +2 como punto de partida
-    const deltaDefault = (unidadesProgramadas === 0) ? '2' : '';
+    const deltaDefault = '2';
     return { delta: deltaDefault, motivo: '', guardando: false, error: null };
   };
 
