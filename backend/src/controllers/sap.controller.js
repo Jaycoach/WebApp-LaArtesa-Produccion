@@ -888,9 +888,9 @@ const sincronizarDesdeOV = async (req, res, next) => {
                      kilos_programados = kilos_programados + $2,
                      updated_at = NOW()
                  WHERE masa_id = $3 AND sap_item_code = $4`,
-                [prod.cantidadPaquetes, prod.kilosPedidos || 0, masaIdExistente, prod.itemCode]
+                [prod.unidadesPedidas, prod.kilosPedidos || 0, masaIdExistente, prod.itemCode]
               );
-              logger.info(`Producto ${prod.itemCode} OV ${prod.docEntry} nueva — sumado a masa ${masaIdExistente} (+${prod.cantidadPaquetes} und)`);
+              logger.info(`Producto ${prod.itemCode} OV ${prod.docEntry} nueva — sumado a masa ${masaIdExistente} (+${prod.unidadesPedidas} und)`);
             } else {
               // Producto completamente nuevo en esta masa — insertar
               await client.query(
@@ -906,11 +906,11 @@ const sincronizarDesdeOV = async (req, res, next) => {
                   prod.itemCode,
                   prod.descripcion,
                   prod.descripcion,
-                  prod.gramaje * 1000,
-                  prod.cantidadPaquetes,
-                  prod.cantidadPaquetes,
-                  prod.kilosPedidos || 0,
-                  prod.kilosPedidos || 0,
+                  (kiloPorItemCode[prod.itemCode] || 0) * (prod.unidadesPorPaquete || 1) * 1000,
+                  prod.unidadesPedidas,
+                  prod.unidadesPedidas,
+                  (kiloPorItemCode[prod.itemCode] || 0) * (prod.unidadesPorPaquete || 1) * prod.unidadesPedidas,
+                  (kiloPorItemCode[prod.itemCode] || 0) * (prod.unidadesPorPaquete || 1) * prod.unidadesPedidas,
                   prod.itemCode,
                   (() => {
                     if (prod.unidadesPorPaquete && prod.unidadesPorPaquete > 1) return prod.unidadesPorPaquete;
@@ -1076,9 +1076,9 @@ const sincronizarDesdeOV = async (req, res, next) => {
             masaId,
             prod.itemCode,                                          // $2 producto_codigo
             prod.descripcion,                                       // $3 producto_nombre
-            kiloPorItemCode[prod.itemCode] * 1000,                  // $4 gramaje_unitario (en gramos)
-            prod.unidadesPedidas,                                   // $5 unidades_pedidas / unidades_programadas
-            kiloPorItemCode[prod.itemCode] * prod.cantidadPaquetes, // $6 kilos_pedidos / kilos_programados
+            kiloPorItemCode[prod.itemCode] * (prod.unidadesPorPaquete || 1) * 1000, // $4 gramaje_unitario por paquete (g)
+            prod.unidadesPedidas,                                   // $5 unidades_pedidas = paquetes
+            kiloPorItemCode[prod.itemCode] * (prod.unidadesPorPaquete || 1) * prod.unidadesPedidas, // $6 kilos
             prod.itemCode,                                          // $7 sap_item_code
             (() => {
               // Usar dato de SAP si viene > 1, si no extraer del nombre (ej: "X 4", "X6", "X 20")
@@ -1097,9 +1097,11 @@ const sincronizarDesdeOV = async (req, res, next) => {
       }
 
       // Calcular total_kilos_base sumando kilos de todos los productos
+      // kg/pan (BOM) × panes/paquete × paquetes pedidos = kg totales correctos
       const totalKilosBase = grupo.productos.reduce((sum, prod) => {
-        const unidades = prod.cantidadPaquetes || prod.unidadesPedidas || 0;
-        return sum + (kiloPorItemCode[prod.itemCode] || 0) * unidades;
+        const paquetes = prod.unidadesPedidas || 0;
+        const panesXPaquete = prod.unidadesPorPaquete || 1;
+        return sum + (kiloPorItemCode[prod.itemCode] || 0) * panesXPaquete * paquetes;
       }, 0);
       const totalKilosConMerma = totalKilosBase * (1 + porcentajeMerma / 100);
 
@@ -1113,28 +1115,28 @@ const sincronizarDesdeOV = async (req, res, next) => {
 
       logger.info(`Masa ${masaId} (${tipoMasa}): ${totalKilosBase.toFixed(2)} kg base calculados desde BOM`);
 
-      // ── Poblar ingredientes_masa desde BOM (solo materias primas, sin empaques) ──
-      const todosItemCodes = [...new Set(grupo.productos.map(p => p.itemCode))];
+      // ── Poblar ingredientes_masa desde BOM (MP grupo 181 + empaque grupo 182) ──
 
       // Acumular ingredientes sumando cantidades × unidades de cada producto
       const ingredientesMap = {}; // key: item_code_comp
-      for (const itemCode of todosItemCodes) {
-        const unidadesProducto = grupo.productos
-          .filter(p => p.itemCode === itemCode)
-          .reduce((sum, p) => sum + (p.cantidadPaquetes || p.unidadesPedidas || 0), 0);
+      for (const prod of grupo.productos) {
+        const unidadesProducto = prod.unidadesPedidas || prod.cantidadPaquetes || 0;
 
         const bomIngResult = await client.query(
           `SELECT item_code_comp, item_name_comp, cantidad, uom, es_empaque,
-                  grupo_sap, es_empaque
-           FROM sap_bom_componentes
-           WHERE item_code_padre = $1
-             AND es_empaque = false
-             AND grupo_sap = 181`,
-          [itemCode]
+                  grupo_sap
+             FROM sap_bom_componentes
+             WHERE item_code_padre = $1
+             AND (grupo_sap = 181 OR grupo_sap = 182)`,
+          [prod.itemCode]
         );
 
         for (const ing of bomIngResult.rows) {
-          const cantidadTotal = parseFloat(ing.cantidad) * unidadesProducto;
+          // Empaque: cantidad fija por paquete (no multiplica por panes)
+          // MP: cantidad por pan × total panes
+          const cantidadTotal = ing.es_empaque
+            ? parseFloat(ing.cantidad) * (prod.unidadesPedidas || 0)
+            : parseFloat(ing.cantidad) * unidadesProducto;
           if (ingredientesMap[ing.item_code_comp]) {
             ingredientesMap[ing.item_code_comp].cantidad_kilos += cantidadTotal;
           } else {
@@ -1143,6 +1145,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
               item_name_comp: ing.item_name_comp,
               cantidad_kilos: cantidadTotal,
               uom:            ing.uom,
+              es_empaque:     ing.es_empaque,
             };
           }
         }
@@ -1158,7 +1161,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
              orden_visualizacion, porcentaje_panadero,
              cantidad_gramos, cantidad_kilos, uom,
              es_harina, es_agua, es_prefermento, es_empaque
-           ) VALUES ($1, $2, $3, $4, 0, $5, $6, $7, false, false, false, false)`,
+           ) VALUES ($1, $2, $3, $4, 0, $5, $6, $7, false, false, false, $8)`,
           [
             masaId,
             ing.item_code_comp,
@@ -1167,6 +1170,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
             cantidadGramos,
             ing.cantidad_kilos,
             ing.uom || 'Kg',
+            ing.es_empaque || false,
           ]
         );
       }
