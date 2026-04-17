@@ -166,7 +166,7 @@ const getIngredientesByMasa = async (masaId) => {
 
   const result = await db.query(`
     SELECT * FROM ingredientes_masa
-    WHERE masa_id = $1
+    WHERE masa_id = $1 AND es_empaque = false
     ORDER BY orden_visualizacion
   `, [masaIdNum]);
 
