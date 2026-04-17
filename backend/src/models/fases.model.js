@@ -122,8 +122,8 @@ const updateUnidadesProgramadas = async (productoId, unidades, userId, motivo = 
   const result = await db.query(`
     UPDATE productos_por_masa
     SET
-      unidades_programadas = $1,
-      kilos_programados = gramaje_unitario * $1 / 1000,
+      unidades_programadas = $1::integer,
+      kilos_programados = gramaje_unitario * $1::integer / 1000.0,
       updated_at = NOW()
     WHERE id = $2
     RETURNING *
