@@ -508,9 +508,9 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false)
      ORDER BY orden_visualizacion`,
     [masaId]
   );
-  // Obtener unidades_programadas totales de la masa madre para calcular proporción
+  // Usar unidades_pedidas como base BOM (el BOM SAP se calculó sobre pedidos, no sobre programados)
   const prodMadreResult = await client.query(
-    `SELECT COALESCE(SUM(unidades_programadas), 0) AS total_paq FROM productos_por_masa WHERE masa_id = $1`,
+    `SELECT COALESCE(SUM(unidades_pedidas), 0) AS total_paq FROM productos_por_masa WHERE masa_id = $1`,
     [masaId]
   );
   const totalPaqMadre = parseFloat(prodMadreResult.rows[0].total_paq) || 1;
