@@ -242,7 +242,7 @@ const updateUnidadesProgramadas = async (req, res, next) => {
     }
 
     const productoActual = await db.query(
-      'SELECT id, unidades_programadas, unidades_por_paquete FROM productos_por_masa WHERE id = $1 AND masa_id = $2',
+      'SELECT id, unidades_programadas, unidades_pedidas, unidades_por_paquete FROM productos_por_masa WHERE id = $1 AND masa_id = $2',
       [productoId, masaId]
     );
     if (productoActual.rows.length === 0) {
