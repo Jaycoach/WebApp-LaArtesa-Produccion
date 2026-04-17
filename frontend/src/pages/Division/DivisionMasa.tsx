@@ -478,7 +478,9 @@ export const DivisionMasa: React.FC = () => {
 
                             {/* Paquetes */}
                             <td className="px-4 py-3 text-right">
-                              <span className="text-sm text-gray-600">{pedidas}</span>
+                              <span className="text-sm text-gray-600">
+                                {parseInt(producto.unidades_programadas || producto.unidades_pedidas || 0)}
+                              </span>
                             </td>
 
                             {/* Panes sugeridos */}
@@ -487,9 +489,10 @@ export const DivisionMasa: React.FC = () => {
                                 const xSAP = parseFloat(String(producto.unidades_por_paquete || 0));
                                 const xNombre = producto.producto_nombre?.match(/ X ?(\d+)/i);
                                 const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
+                                const programadas = parseInt(producto.unidades_programadas || producto.unidades_pedidas || 0);
                                 return (
                                   <span className="text-base font-bold text-indigo-700">
-                                    {pedidas * xPaq}
+                                    {programadas * xPaq}
                                     <span className="text-xs font-normal text-indigo-400 ml-1">×{xPaq}</span>
                                   </span>
                                 );
@@ -549,7 +552,8 @@ export const DivisionMasa: React.FC = () => {
                                     const xSAP = parseFloat(String(producto.unidades_por_paquete || 0));
                                     const xNombre = producto.producto_nombre?.match(/ X ?(\d+)/i);
                                     const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
-                                    const panesSugeridos = pedidas * xPaq;
+                                    const programadas = parseInt(producto.unidades_programadas || producto.unidades_pedidas || 0);
+                                    const panesSugeridos = programadas * xPaq;
                                     return cantidad > panesSugeridos ? (
                                       <p className="text-xs text-amber-600 text-right">
                                         +{cantidad - panesSugeridos} excedente real
