@@ -267,7 +267,7 @@ const updateUnidadesProgramadas = async (req, res, next) => {
     res.json({
       success: true,
       data: producto,
-      message: `Ajuste aplicado: ${delta_paquetes > 0 ? '+' : ''}${delta_paquetes} paquetes (${deltaPanes > 0 ? '+' : ''}${deltaPanes} panes)`,
+      message: `Ajuste aplicado: ${delta_paquetes > 0 ? '+' : ''}${delta_paquetes} paquetes`,
     });
   } catch (error) {
     logger.error('Error al actualizar unidades programadas:', error);
