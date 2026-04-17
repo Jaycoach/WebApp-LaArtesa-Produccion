@@ -397,9 +397,9 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false)
     return null;
   }
 
-  // Calcular total kg de ingredientes
+  // Calcular total kg de ingredientes — excluir empaque (Und/R no tienen peso real)
   const ingResult = await client.query(
-    `SELECT SUM(cantidad_kilos) AS total_kg FROM ingredientes_masa WHERE masa_id = $1`,
+    `SELECT SUM(cantidad_kilos) AS total_kg FROM ingredientes_masa WHERE masa_id = $1 AND es_empaque = false`,
     [masaId]
   );
   const totalKgIngredientes = parseFloat(ingResult.rows[0].total_kg || 0);
