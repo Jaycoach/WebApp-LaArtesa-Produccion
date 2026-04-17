@@ -125,6 +125,7 @@ const updateUnidadesProgramadas = async (productoId, unidades, userId, motivo = 
     SET
       unidades_programadas = $1::integer,
       kilos_programados = gramaje_unitario * $1::integer / 1000.0,
+      cantidad_paquetes = $1::integer * unidades_por_paquete,
       delta_ajuste = $3::integer,
       updated_at = NOW()
     WHERE id = $2

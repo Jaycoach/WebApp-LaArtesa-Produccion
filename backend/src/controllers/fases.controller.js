@@ -507,22 +507,22 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false)
     [masaId]
   );
   const totalPaqMadre = parseFloat(prodMadreResult.rows[0].total_paq) || 1;
-
+  // Calcular cantidad BOM por paquete (cantidad_kilos de la madre / total paquetes madre)
+  // Esto nos da la cantidad de cada material de empaque por paquete producido
   for (const subMasaId of subMasaIds) {
-    // Unidades programadas de esta sub-masa
     const prodSubResult = await client.query(
       `SELECT COALESCE(SUM(unidades_programadas), 0) AS paq FROM productos_por_masa WHERE masa_id = $1`,
       [subMasaId]
     );
     const paqSubMasa = parseFloat(prodSubResult.rows[0].paq) || 0;
-    // Proporción de paquetes que le corresponden a esta sub-masa
-    const fraccion = totalPaqMadre > 0 ? paqSubMasa / totalPaqMadre : 1 / subMasaIds.length;
 
     for (const emp of empaqueBase.rows) {
-      // cantidad_kilos del empaque en la madre = cantidad_BOM_por_paquete × total_paquetes_madre
-      // cantidad por sub-masa = cantidad_BOM_por_paquete × paquetes_sub = cantidad_madre × fraccion
-      const cantSubMasa = parseFloat((emp.cantidad_kilos * fraccion).toFixed(3));
-      const gramSubMasa = parseFloat((emp.cantidad_gramos * fraccion).toFixed(2));
+      // cantidad_BOM_por_paquete = cantidad total madre / total paquetes madre
+      const cantPorPaquete = emp.cantidad_kilos / totalPaqMadre;
+      const gramPorPaquete = emp.cantidad_gramos / totalPaqMadre;
+      // cantidad sub-masa = cantidad por paquete × paquetes de esta sub-masa
+      const cantSubMasa = parseFloat((cantPorPaquete * paqSubMasa).toFixed(3));
+      const gramSubMasa = parseFloat((gramPorPaquete * paqSubMasa).toFixed(2));
       await client.query(`
         INSERT INTO ingredientes_masa
           (masa_id, ingrediente_sap_code, ingrediente_nombre, orden_visualizacion,

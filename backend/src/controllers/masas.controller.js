@@ -334,6 +334,7 @@ const aprobarMasa = async (req, res, next) => {
         `UPDATE productos_por_masa
          SET unidades_programadas = $1::integer,
              kilos_programados = gramaje_unitario * $1::integer / 1000.0,
+             cantidad_paquetes = $1::integer * unidades_por_paquete,
              delta_ajuste = NULL,
              updated_at = NOW()
          WHERE id = $2`,
