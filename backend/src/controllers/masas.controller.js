@@ -332,8 +332,9 @@ const aprobarMasa = async (req, res, next) => {
       const nuevasUnidades = Number(prod.unidades_programadas) + DELTA_DEFAULT_PAQ;
       await db.query(
         `UPDATE productos_por_masa
-         SET unidades_programadas = $1,
-             kilos_programados = gramaje_unitario * $1 / 1000,
+         SET unidades_programadas = $1::integer,
+             kilos_programados = gramaje_unitario * $1::integer / 1000.0,
+             delta_ajuste = NULL,
              updated_at = NOW()
          WHERE id = $2`,
         [nuevasUnidades, prod.id]
