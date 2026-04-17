@@ -415,7 +415,7 @@ export const DetalleMasa: React.FC = () => {
                               <span className="line-through text-gray-400 text-sm mr-1">
                                 {paqAProducir.toLocaleString('es-CO')}
                               </span>
-                              <span className={`text-sm font-bold ${(paqAProducir + deltaNum) > paqAProducir ? 'text-indigo-700' : 'text-red-600'}`}>
+                              <span className={`text-sm font-bold ${(paqAProducir + deltaNum) >= paqPedidos ? 'text-indigo-700' : 'text-red-600'}`}>
                                 {(paqAProducir + deltaNum).toLocaleString('es-CO')}
                               </span>
                             </>
@@ -433,7 +433,7 @@ export const DetalleMasa: React.FC = () => {
                         <td className="px-4 py-3 text-right">
                           <span className="text-sm font-bold text-emerald-700">
                             {panesPreview !== null
-                              ? <><span className="line-through text-gray-400 mr-1">{panes.toLocaleString('es-CO')}</span><span className={panesPreview > panes ? 'text-indigo-600' : 'text-red-500'}>{panesPreview.toLocaleString('es-CO')}</span></>
+                              ? <><span className="line-through text-gray-400 mr-1">{panes.toLocaleString('es-CO')}</span><span className={panesPreview >= paqPedidos * upq ? 'text-indigo-600' : 'text-red-500'}>{panesPreview.toLocaleString('es-CO')}</span></>
                               : panes.toLocaleString('es-CO')
                             }
                           </span>

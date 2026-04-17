@@ -119,7 +119,7 @@ const updateUnidadesProgramadas = async (productoId, unidades, userId, motivo = 
   );
   if (!anterior.rows[0]) return null;
 
-  const deltaAjuste = unidades - anterior.rows[0].unidades_pedidas;
+  const deltaAjuste = Number(unidades) - Number(anterior.rows[0].unidades_pedidas);
   const result = await db.query(`
     UPDATE productos_por_masa
     SET
