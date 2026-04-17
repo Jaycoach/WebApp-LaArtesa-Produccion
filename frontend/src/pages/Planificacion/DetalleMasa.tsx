@@ -379,7 +379,7 @@ export const DetalleMasa: React.FC = () => {
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Paq. a Producir</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Panes</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Kilos</th>
-                    {esSupervisor && masa?.fase_actual === 'PLANIFICACION' && (
+                    {esSupervisor && masa?.fase_actual === 'PLANIFICACION' && !masa?.es_subdivision && (
                       <th className="px-4 py-3 text-center text-xs font-medium text-indigo-600 uppercase">Ajuste (+/− paq.)</th>
                     )}
                   </tr>
@@ -441,8 +441,8 @@ export const DetalleMasa: React.FC = () => {
                           {Number(producto.kilos_programados).toFixed(2)} kg
                         </td>
 
-                        {/* Columna de ajuste — solo supervisor en PLANIFICACION */}
-                        {esSupervisor && masa?.fase_actual === 'PLANIFICACION' && (
+                        {/* Columna de ajuste — solo supervisor en PLANIFICACION y no sub-masa */}
+                        {esSupervisor && masa?.fase_actual === 'PLANIFICACION' && !masa?.es_subdivision && (
                           <td className="px-4 py-3">
                             <div className="flex flex-col gap-1 min-w-[200px]">
                               <div className="flex items-center gap-1">
