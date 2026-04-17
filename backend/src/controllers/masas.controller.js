@@ -329,8 +329,7 @@ const aprobarMasa = async (req, res, next) => {
     );
     const DELTA_DEFAULT_PAQ = 2;
     for (const prod of prodsSinAjuste.rows) {
-      const upq = Math.max(1, Number(prod.unidades_por_paquete) || 1);
-      const nuevasUnidades = Number(prod.unidades_programadas) + DELTA_DEFAULT_PAQ * upq;
+      const nuevasUnidades = Number(prod.unidades_programadas) + DELTA_DEFAULT_PAQ;
       await db.query(
         `UPDATE productos_por_masa
          SET unidades_programadas = $1,

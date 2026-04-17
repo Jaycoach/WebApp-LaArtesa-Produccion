@@ -75,9 +75,13 @@ export const DetalleMasa: React.FC = () => {
   // Estado para ajuste de unidades por producto
   const [ajustes, setAjustes] = useState<Record<number, { delta: string; motivo: string; guardando: boolean; error: string | null }>>({});
 
-  const getAjuste = (productoId: number, unidadesProgramadas?: number) => {
+  const getAjuste = (productoId: number, unidadesProgramadas?: number, unidadesPedidas?: number, upq?: number) => {
     if (ajustes[productoId] !== undefined) return ajustes[productoId];
-    const deltaDefault = '2';
+    // Si ya hay un ajuste persistido en DB, mostrarlo; si no, mostrar default +2
+    const deltaGuardado = (unidadesProgramadas !== undefined && unidadesPedidas !== undefined && upq)
+      ? Math.round((unidadesProgramadas - unidadesPedidas) / upq)
+      : null;
+    const deltaDefault = deltaGuardado !== null ? String(deltaGuardado) : '2';
     return { delta: deltaDefault, motivo: '', guardando: false, error: null };
   };
 
@@ -388,7 +392,7 @@ export const DetalleMasa: React.FC = () => {
                     const paqPedidos = Number(producto.unidades_pedidas);
                     const paqAProducir = Number(producto.unidades_programadas);
                     const panes = paqAProducir * upq;
-                    const ajuste = getAjuste(producto.id, Number(producto.unidades_programadas));
+                    const ajuste = getAjuste(producto.id, Number(producto.unidades_programadas), Number(producto.unidades_pedidas), upq);
                     const deltaNum = parseInt(ajuste.delta, 10);
                     const panesPreview = !isNaN(deltaNum) && deltaNum !== 0 ? panes + deltaNum * upq : null;
 
@@ -485,7 +489,8 @@ export const DetalleMasa: React.FC = () => {
                   {(productos as any[]).reduce((sum: number, p: any) => {
                     const upq = Math.max(1, Number(p.unidades_por_paquete) || 1);
                     const paqProgramados = Number(p.unidades_programadas) || 0;
-                    const ajuste = getAjuste(p.id, paqProgramados);
+                    const upqP = Math.max(1, Number(p.unidades_por_paquete) || 1);
+                    const ajuste = getAjuste(p.id, Number(p.unidades_programadas), Number(p.unidades_pedidas), upqP);
                     const deltaNum = parseInt(ajuste.delta, 10);
                     const paqEfectivos = paqProgramados + (!isNaN(deltaNum) && deltaNum !== 0 ? deltaNum : 0);
                     return sum + paqEfectivos * upq;
