@@ -439,7 +439,7 @@ class SAPService {
       const unidadesPorPaquete = (art.salesQtyPerPackUnit && art.salesQtyPerPackUnit > 1)
         ? art.salesQtyPerPackUnit
         : (() => { const m = descripcion.match(/ X ?(\d+)/i); return m ? parseInt(m[1]) : 1; })();
-      const cantidadPaquetes = unidadesPedidas * unidadesPorPaquete;
+      const cantidadPaquetes = unidadesPedidas;
 
       const gramaje = art.gramaje || 0;
       const kilosPedidos = gramaje * unidadesPedidas;
