@@ -509,33 +509,59 @@ export const DetalleMasa: React.FC = () => {
           {loadingComposicion ? (
             <p className="text-gray-500">Cargando ingredientes...</p>
           ) : composicion && composicion.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ingrediente</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">% Panadero</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Cantidad</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {(composicion as any[]).map((ing: any) => (
-                    <tr key={ing.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                        {ing.ingrediente_nombre}
-                        {ing.es_harina && <span className="ml-2 text-xs text-blue-600">(Harina)</span>}
-                        {ing.es_agua && <span className="ml-2 text-xs text-blue-600">(Agua)</span>}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-600 text-right">{ing.porcentaje_panadero}%</td>
-                      <td className="px-4 py-3 text-sm font-semibold text-gray-900 text-right">
-                        {ing.es_empaque
-                          ? `${Number(ing.cantidad_kilos).toFixed(0)} ${ing.uom || 'Und'}`
-                          : `${Number(ing.cantidad_kilos).toFixed(2)} kg`}
-                      </td>
+            <div className="space-y-4">
+              {/* ── Materias Primas ── */}
+              <div className="overflow-x-auto">
+                <p className="text-xs font-semibold text-gray-500 uppercase mb-1 px-1">Materias Primas</p>
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ingrediente</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">% Panadero</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Cantidad</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {(composicion as any[]).filter((ing: any) => !ing.es_empaque).map((ing: any) => (
+                      <tr key={ing.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                          {ing.ingrediente_nombre}
+                          {ing.es_harina && <span className="ml-2 text-xs text-blue-600">(Harina)</span>}
+                          {ing.es_agua && <span className="ml-2 text-xs text-blue-600">(Agua)</span>}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600 text-right">{ing.porcentaje_panadero}%</td>
+                        <td className="px-4 py-3 text-sm font-semibold text-gray-900 text-right">
+                          {Number(ing.cantidad_kilos).toFixed(2)} kg
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {/* ── Materiales de Empaque ── */}
+              {(composicion as any[]).some((ing: any) => ing.es_empaque) && (
+                <div className="overflow-x-auto">
+                  <p className="text-xs font-semibold text-gray-500 uppercase mb-1 px-1">Materiales de Empaque</p>
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-amber-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Material</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Cantidad</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {(composicion as any[]).filter((ing: any) => ing.es_empaque).map((ing: any) => (
+                        <tr key={ing.id} className="hover:bg-amber-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">{ing.ingrediente_nombre}</td>
+                          <td className="px-4 py-3 text-sm font-semibold text-amber-700 text-right">
+                            {Number(ing.cantidad_kilos).toFixed(0)} {ing.uom || 'Und'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           ) : (
             <p className="text-gray-500">No hay ingredientes</p>
