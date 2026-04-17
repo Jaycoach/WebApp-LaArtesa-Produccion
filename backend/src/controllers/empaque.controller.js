@@ -555,6 +555,12 @@ exports.completarEmpaque = async (req, res) => {
         });
         sapEntradaResult = { doc_entry: sapRespEntrada.data.DocEntry, lineas: entradaLines.length };
         logger.info(`InventoryGenEntries masa ${masaId}: DocEntry ${sapRespEntrada.data.DocEntry}`);
+        await client.query(
+          `UPDATE registros_empaque
+             SET sap_doc_entry_entrada = $1, sap_doc_num_entrada = $2, sap_error_entrada = NULL
+           WHERE masa_id = $3`,
+          [sapRespEntrada.data.DocEntry, String(sapRespEntrada.data.DocNum || ''), masaId]
+        );
 
         await client.query(`
           UPDATE costos_masa SET
@@ -574,9 +580,15 @@ exports.completarEmpaque = async (req, res) => {
         ]);
       }
     } catch (sapErr) {
-      const sapErrDetail = sapErr.response?.data?.error?.message || sapErr.message;
+      const sapErrDetail = sapErr.response?.data?.error?.message?.value
+        || sapErr.response?.data?.error?.message
+        || sapErr.message;
       logger.error(`Error InventoryGenEntries masa ${masaId}: ${sapErrDetail}`);
       sapEntradaResult = { error: sapErrDetail };
+      await client.query(
+        `UPDATE registros_empaque SET sap_error_entrada = $1 WHERE masa_id = $2`,
+        [sapErrDetail, masaId]
+      );
     }
 
     // 11. GoodsIssues SAP para materiales de empaque
@@ -617,19 +629,42 @@ exports.completarEmpaque = async (req, res) => {
         });
         sapResult = { doc_entry: sapResp.data.DocEntry, lineas: docLines.length };
         logger.info(`GoodsIssues empaque masa ${masaId}: DocEntry ${sapResp.data.DocEntry}`);
+        await client.query(
+          `UPDATE registros_empaque
+             SET sap_doc_entry_salida = $1, sap_doc_num_salida = $2, sap_error_salida = NULL
+           WHERE masa_id = $3`,
+          [sapResp.data.DocEntry, String(sapResp.data.DocNum || ''), masaId]
+        );
       }
     } catch (sapErr) {
-      // SAP falla → loguear pero no revertir (el empaque ya está guardado)
-      const sapErrDetail = sapErr.response?.data?.error?.message || sapErr.message;
+      const sapErrDetail = sapErr.response?.data?.error?.message?.value
+        || sapErr.response?.data?.error?.message
+        || sapErr.message;
       logger.error(`Error GoodsIssues empaque masa ${masaId}: ${sapErrDetail}`);
       sapResult = { error: sapErrDetail };
+      await client.query(
+        `UPDATE registros_empaque SET sap_error_salida = $1 WHERE masa_id = $2`,
+        [sapErrDetail, masaId]
+      );
     }
 
     await client.query('COMMIT');
 
+    // Construir advertencias SAP para informar al usuario sin revertir la fase
+    const sapAdvertencias = [];
+    if (sapEntradaResult?.error) {
+      sapAdvertencias.push(`Entrada de mercancía SAP falló: ${sapEntradaResult.error}`);
+    }
+    if (sapResult?.error) {
+      sapAdvertencias.push(`Salida de materiales de empaque SAP falló: ${sapResult.error}`);
+    }
+
     res.json({
       success: true,
-      message: 'Empaque completado. Producción finalizada.',
+      sap_advertencias: sapAdvertencias,
+      message: sapAdvertencias.length > 0
+        ? `Empaque completado con advertencias SAP. Revisar: ${sapAdvertencias.join(' | ')}`
+        : 'Empaque completado. Producción finalizada.',
       data: {
         costos: {
           mp: costoMPTotal,
@@ -667,7 +702,17 @@ exports.getMasasPendientesEmpaque = async (req, res) => {
       FROM masas_produccion mp
       JOIN progreso_fases pf_e ON pf_e.masa_id = mp.id AND pf_e.fase = 'EMPAQUE'
       LEFT JOIN progreso_fases pf_h ON pf_h.masa_id = mp.id AND pf_h.fase = 'HORNEADO'
-      WHERE pf_e.estado IN ('PENDIENTE', 'EN_PROGRESO')
+      WHERE (
+        pf_e.estado IN ('PENDIENTE', 'EN_PROGRESO')
+        OR (
+          pf_e.estado = 'COMPLETADA'
+          AND EXISTS (
+            SELECT 1 FROM registros_empaque re
+            WHERE re.masa_id = mp.id
+              AND (re.sap_error_entrada IS NOT NULL OR re.sap_error_salida IS NOT NULL)
+          )
+        )
+      )
         AND mp.estado NOT IN ('SUBDIVIDIDA', 'CANCELADA', 'PLANIFICACION')
         AND mp.fecha_produccion = $1
       ORDER BY mp.id DESC
@@ -732,7 +777,9 @@ exports.getMasasPendientesEmpaque = async (req, res) => {
       }
 
       const empR = await db.query(`
-        SELECT id, estado, fecha_vencimiento
+        SELECT id, estado, fecha_vencimiento,
+               sap_error_entrada, sap_error_salida,
+               sap_doc_entry_entrada, sap_doc_entry_salida
         FROM registros_empaque WHERE masa_id = $1 LIMIT 1
       `, [masa.id]);
 
@@ -786,6 +833,10 @@ exports.getMasasPendientesEmpaque = async (req, res) => {
         empaque_iniciado:        empR.rows.length > 0,
         empaque_id:              empR.rows[0]?.id || null,
         fecha_vencimiento:       empR.rows[0]?.fecha_vencimiento || null,
+        sap_error_entrada:       empR.rows[0]?.sap_error_entrada || null,
+        sap_error_salida:        empR.rows[0]?.sap_error_salida || null,
+        sap_doc_entry_entrada:   empR.rows[0]?.sap_doc_entry_entrada || null,
+        sap_doc_entry_salida:    empR.rows[0]?.sap_doc_entry_salida || null,
         materiales_alistamiento: materialesAlistamiento,
         ovs: Object.entries(porOV).map(([doc_num, prods]) => ({
           doc_num,
