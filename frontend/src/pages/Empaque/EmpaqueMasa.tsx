@@ -409,6 +409,11 @@ const PanelPendientes: React.FC<{
                     ? <span className="text-xs px-2 py-0.5 rounded-full bg-green-200 text-green-800 font-medium">✅ Listo para empacar</span>
                     : <span className="text-xs px-2 py-0.5 rounded-full bg-amber-200 text-amber-800 font-medium">🕐 En producción — alistamiento</span>
                   }
+                  {(masa.sap_error_entrada || masa.sap_error_salida) && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 font-medium">
+                      ⚠ Error SAP pendiente
+                    </span>
+                  )}
                   {masa.empaque_iniciado && (
                     <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium">En progreso</span>
                   )}
@@ -605,13 +610,18 @@ const PanelEmpaqueMasa: React.FC<{
     try {
       const ahora = new Date();
       const fecha_local = `${ahora.getFullYear()}-${String(ahora.getMonth()+1).padStart(2,'0')}-${String(ahora.getDate()).padStart(2,'0')}`;
-      await api(`/empaque/${masa.id}/completar`, {
+      const resultado = await api(`/empaque/${masa.id}/completar`, {
         method: 'POST',
         body: JSON.stringify({ observaciones: obsOverride || null, fecha_local }),
       });
       qc.invalidateQueries({ queryKey: ['empaque-pendientes'] });
-      mostrar('ok', 'Empaque completado');
-      setTimeout(() => onCompletado(), 1500);
+      if (resultado?.sap_advertencias?.length > 0) {
+        mostrar('err', `⚠ Empaque guardado, pero hubo errores en SAP:\n${resultado.sap_advertencias.join('\n')}\n\nContacta al supervisor para corregir el movimiento en SAP.`);
+        // No navegar — dejar al usuario ver el error
+      } else {
+        mostrar('ok', 'Empaque completado');
+        setTimeout(() => onCompletado(), 1500);
+      }
     } catch (e: any) { mostrar('err', e.message); }
     finally { setSaving(false); }
   };
