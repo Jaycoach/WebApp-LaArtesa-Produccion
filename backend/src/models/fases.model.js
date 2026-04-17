@@ -345,7 +345,7 @@ const checkTodosPesados = async (masaId) => {
         END
       ) FILTER (WHERE NOT (disponible AND verificado AND pesado)) as faltantes
     FROM ingredientes_masa
-    WHERE masa_id = $1
+    WHERE masa_id = $1 AND es_empaque = false
   `, [masaIdNum]);
 
   const { total, completados, faltantes } = result.rows[0];
