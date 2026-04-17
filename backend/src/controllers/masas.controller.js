@@ -251,8 +251,7 @@ const updateUnidadesProgramadas = async (req, res, next) => {
 
     const prod = productoActual.rows[0];
     const upq = Math.max(1, Number(prod.unidades_por_paquete) || 1);
-    const deltaPanes = Number(delta_paquetes) * upq;
-    const nuevasUnidades = Math.max(0, Number(prod.unidades_programadas) + deltaPanes);
+    const nuevasUnidades = Math.max(0, Number(prod.unidades_programadas) + Number(delta_paquetes));
 
     const producto = await fasesModel.updateUnidadesProgramadas(
       productoId,
