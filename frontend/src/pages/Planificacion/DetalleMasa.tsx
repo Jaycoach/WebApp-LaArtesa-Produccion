@@ -392,7 +392,10 @@ export const DetalleMasa: React.FC = () => {
                     const panes = paqAProducir * upq;
                     const ajuste = getAjuste(producto.id, producto.delta_ajuste ?? null);
                     const deltaNum = parseInt(ajuste.delta, 10);
-                    const panesPreview = !isNaN(deltaNum) ? panes + deltaNum * upq : null;
+                    const usuarioCambio = ajustes[producto.id] !== undefined;
+                    const panesPreview = usuarioCambio && !isNaN(deltaNum)
+                      ? (paqAProducir + deltaNum) * upq
+                      : null;
 
                     return (
                       <tr key={producto.id} className="hover:bg-gray-50">
@@ -412,7 +415,7 @@ export const DetalleMasa: React.FC = () => {
                               <span className="line-through text-gray-400 text-sm mr-1">
                                 {paqAProducir.toLocaleString('es-CO')}
                               </span>
-                              <span className={`text-sm font-bold ${panesPreview > panes ? 'text-indigo-700' : 'text-red-600'}`}>
+                              <span className={`text-sm font-bold ${(paqAProducir + deltaNum) > paqAProducir ? 'text-indigo-700' : 'text-red-600'}`}>
                                 {(paqAProducir + deltaNum).toLocaleString('es-CO')}
                               </span>
                             </>
