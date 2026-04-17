@@ -512,7 +512,7 @@ export const DetalleMasa: React.FC = () => {
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ingrediente</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">% Panadero</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Cantidad (kg)</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Cantidad</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -525,7 +525,9 @@ export const DetalleMasa: React.FC = () => {
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600 text-right">{ing.porcentaje_panadero}%</td>
                       <td className="px-4 py-3 text-sm font-semibold text-gray-900 text-right">
-                        {Number(ing.cantidad_kilos).toFixed(2)} kg
+                        {ing.es_empaque
+                          ? `${Number(ing.cantidad_kilos).toFixed(0)} ${ing.uom || 'Und'}`
+                          : `${Number(ing.cantidad_kilos).toFixed(2)} kg`}
                       </td>
                     </tr>
                   ))}

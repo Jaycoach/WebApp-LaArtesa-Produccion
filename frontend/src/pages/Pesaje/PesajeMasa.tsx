@@ -405,9 +405,9 @@ export const PesajeMasa: React.FC = () => {
                       )}
                     </div>
                     <p className="text-sm text-gray-600">
-                      {typeof ing.cantidad_kilos === 'number'
-                        ? ing.cantidad_kilos.toFixed(2)
-                        : Number(ing.cantidad_kilos).toFixed(2)} kg ({ing.cantidad_gramos}g) - {ing.porcentaje_panadero}% panadero
+                      {ing.es_empaque
+                        ? `${Number(ing.cantidad_kilos).toFixed(0)} ${ing.uom || 'Und'}`
+                        : `${Number(ing.cantidad_kilos).toFixed(2)} kg (${ing.cantidad_gramos}g)`} - {ing.porcentaje_panadero}% panadero
                     </p>
                     {/* Stock e inventario SAP */}
                     <div className="flex flex-wrap gap-3 mt-1 text-xs text-gray-500">
