@@ -392,7 +392,7 @@ export const PesajeMasa: React.FC = () => {
                 </p>
               </div>
             )}
-            {checklist.ingredientes.map((ing: any) => (
+            {checklist.ingredientes.filter((ing: any) => !ing.es_empaque).map((ing: any) => (
               <div key={ing.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
