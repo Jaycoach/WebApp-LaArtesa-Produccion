@@ -382,10 +382,8 @@ export const ListaMasas: React.FC = () => {
                           </span>
                           <span className="text-xs font-bold text-emerald-700 shrink-0">
                             {Number(p.cantidad_paquetes) > 0
-                              ? Number(p.cantidad_paquetes).toLocaleString('es-CO')
-                              : '—'} paq · {Number(p.cantidad_paquetes) > 0
-                              ? (Number(p.cantidad_paquetes) * Number(p.unidades_por_paquete || 1)).toLocaleString('es-CO')
-                              : '—'} panes
+                              ? `${Number(p.cantidad_paquetes).toLocaleString('es-CO')} paq · ${(Number(p.cantidad_paquetes) * Number(p.unidades_por_paquete || 1)).toLocaleString('es-CO')} panes`
+                              : '—'}
                           </span>
                         </div>
                       ))}
