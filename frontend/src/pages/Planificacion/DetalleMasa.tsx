@@ -89,8 +89,8 @@ export const DetalleMasa: React.FC = () => {
   const handleGuardarAjuste = async (productoId: number, upq: number) => {
     const ajuste = getAjuste(productoId);
     const delta = parseInt(ajuste.delta, 10);
-    if (isNaN(delta) || delta === 0) {
-      setAjustes(prev => ({ ...prev, [productoId]: { ...getAjuste(productoId), error: 'Ingresa un número distinto de cero' } }));
+    if (isNaN(delta)) {
+      setAjustes(prev => ({ ...prev, [productoId]: { ...getAjuste(productoId), error: 'Ingresa un número entero (puede ser 0 para quitar ajuste)' } }));
       return;
     }
     setAjustes(prev => ({ ...prev, [productoId]: { ...getAjuste(productoId), guardando: true, error: null } }));
@@ -392,7 +392,7 @@ export const DetalleMasa: React.FC = () => {
                     const panes = paqAProducir * upq;
                     const ajuste = getAjuste(producto.id, producto.delta_ajuste ?? null);
                     const deltaNum = parseInt(ajuste.delta, 10);
-                    const panesPreview = !isNaN(deltaNum) && deltaNum !== 0 ? panes + deltaNum * upq : null;
+                    const panesPreview = !isNaN(deltaNum) ? panes + deltaNum * upq : null;
 
                     return (
                       <tr key={producto.id} className="hover:bg-gray-50">
