@@ -131,7 +131,9 @@ const getComposicionByMasa = async (req, res, next) => {
          im.verificado,
          im.pesado,
          im.peso_real,
-         im.diferencia_gramos
+         im.diferencia_gramos,
+         im.es_empaque,
+         im.uom
        FROM ingredientes_masa im
        WHERE im.masa_id = $1
        ORDER BY im.orden_visualizacion`,
@@ -158,7 +160,7 @@ const getComposicionByMasa = async (req, res, next) => {
     const acumulado = {};
     for (const prod of productosResult.rows) {
       const bomResult = await db.query(
-        `SELECT item_code_comp, item_name_comp, cantidad, warehouse, visual_order
+        `SELECT item_code_comp, item_name_comp, cantidad, warehouse, visual_order, uom, es_empaque
          FROM sap_bom_componentes
          WHERE item_code_padre = $1
          ORDER BY visual_order`,
@@ -179,9 +181,11 @@ const getComposicionByMasa = async (req, res, next) => {
             es_harina: nombreLower.includes('harina'),
             es_agua: nombreLower.includes('agua'),
             es_prefermento: comp.warehouse === 'PRODPROC',
+            es_empaque: comp.es_empaque || false,
+            uom: comp.uom || 'Kg',
             porcentaje_panadero: 0,
             cantidad_kilos: cantidadTotal,
-            cantidad_gramos: cantidadTotal * 1000,
+            cantidad_gramos: comp.es_empaque ? cantidadTotal : cantidadTotal * 1000,
             disponible: false,
             verificado: false,
             pesado: false,
@@ -194,7 +198,7 @@ const getComposicionByMasa = async (req, res, next) => {
     }
 
     const composicionBOM = Object.values(acumulado)
-      .map(ing => ({ ...ing, cantidad_gramos: ing.cantidad_kilos * 1000 }))
+      .map(ing => ({ ...ing, cantidad_gramos: ing.es_empaque ? ing.cantidad_kilos : ing.cantidad_kilos * 1000 }))
       .sort((a, b) => a.orden_visualizacion - b.orden_visualizacion);
 
     logger.info(`Masa ${id}: composición desde BOM SAP con ${composicionBOM.length} ingredientes`);
