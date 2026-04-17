@@ -220,6 +220,7 @@ const getChecklist = async (req, res, next) => {
       sap_doc_entry_pesaje: masa.sap_doc_entry_pesaje ?? null,
       sap_doc_num_pesaje:   masa.sap_doc_num_pesaje   ?? null,
       pesaje_transmitido:   !!(masa.sap_doc_entry_pesaje),
+      pesaje_completado:    !!(masa.sap_doc_entry_pesaje) || fasePesaje?.estado === 'COMPLETADA',
       fecha_inicio:         fasePesaje?.fecha_inicio,
       usuario_responsable:  fasePesaje?.usuario_responsable,
       ingredientes:         ingredientesConStock,
@@ -445,24 +446,30 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
     const response = await sapService.client.post('/InventoryGenExits', requestPayload);
 
     const tiempoRespuesta = Date.now() - inicio;
-    await db.query(
-      `INSERT INTO sap_sync_log
-         (tipo_operacion, estado, sap_docentry, sap_docnum,
-          request_payload, response_payload, tiempo_respuesta, usuario_id)
-       VALUES ('GOODS_ISSUE_PESAJE', 'SUCCESS', $1, $2, $3, $4, $5, $6)`,
-      [
-        response.data?.DocEntry || null,
-        response.data?.DocNum   ? String(response.data.DocNum) : null,
-        JSON.stringify(requestPayload),
-        JSON.stringify({ DocEntry: response.data?.DocEntry, DocNum: response.data?.DocNum, masa_id: masaId }),
-        tiempoRespuesta,
-        usuarioId,
-      ]
-    );
-
     const docEntry = response.data?.DocEntry ?? null;
     const docNum   = response.data?.DocNum   ? String(response.data.DocNum) : null;
     logger.info(`InventoryGenExits enviado para masa ${masaId}: DocEntry ${docEntry}, DocNum ${docNum}`);
+
+    // INSERT de log aislado: un fallo aquí NO debe contaminar el resultado exitoso de SAP
+    try {
+      await db.query(
+        `INSERT INTO sap_sync_log
+           (tipo_operacion, estado, sap_docentry, sap_docnum,
+            request_payload, response_payload, tiempo_respuesta, usuario_id)
+         VALUES ('GOODS_ISSUE_PESAJE', 'SUCCESS', $1, $2, $3, $4, $5, $6)`,
+        [
+          docEntry,
+          docNum,
+          JSON.stringify(requestPayload),
+          JSON.stringify({ DocEntry: docEntry, DocNum: docNum, masa_id: masaId }),
+          tiempoRespuesta,
+          usuarioId,
+        ]
+      );
+    } catch (logErr) {
+      logger.warn(`Error logueando SUCCESS InventoryGenExits masa ${masaId} (no bloquea):`, logErr.message);
+    }
+
     return { success: true, docEntry, docNum, rows: result.rows };
 
   } catch (err) {
@@ -682,12 +689,9 @@ const confirmarPesaje = async (req, res, next) => {
       });
     }
 
-    // Completar fase PESAJE de la masa actual
-    await fasesModel.updateEstadoFase(
-      masaId, 'PESAJE', 'COMPLETADA', 100, req.user.id,
-      { confirmado_en: new Date() }
-    );
-    logger.info(`Fase PESAJE completada para masa ${masaId}`);
+    // NOTA: fase PESAJE se marca COMPLETADA solo tras SAP OK (más abajo)
+    // No se hacen cambios de fase aquí para evitar estados inconsistentes
+    logger.info(`Fase PESAJE validada para masa ${masaId}, esperando confirmación SAP`);
 
     // ── Asignar lote_produccion si aún no tiene ────────────────
     try {
@@ -864,19 +868,9 @@ const confirmarPesaje = async (req, res, next) => {
       logger.warn(`Error calculando costos MP para masa ${masaId} (no bloquea):`, costoError.message);
     }
 
-    // Enviar a SAP — bloqueante
+    // Enviar a SAP — bloqueante. PESAJE aún no se marcó COMPLETADA, no hay nada que revertir.
     const sapResult = await enviarInventoryGenExits(masaId, req.user.id);
     if (!sapResult.success) {
-      // Rollback: revertir PESAJE a EN_PROGRESO (AMASADO no se tocó aún)
-      try {
-        await fasesModel.updateEstadoFase(masaId, 'PESAJE', 'EN_PROGRESO', 90, req.user.id, {});
-        await db.query(
-          `UPDATE masas_produccion SET fase_actual = 'PESAJE', estado = 'APROBADA' WHERE id = $1`,
-          [masaId]
-        );
-      } catch (rollbackErr) {
-        logger.error(`Error en rollback de masa ${masaId}:`, rollbackErr.message);
-      }
       return res.status(502).json({
         success: false,
         message: `No se pudo registrar el consumo en SAP: ${sapResult.error}`,
@@ -888,7 +882,7 @@ const confirmarPesaje = async (req, res, next) => {
       });
     }
 
-    // SAP OK → guardar DocEntry y DocNum para idempotencia futura
+    // SAP OK → primero persistir idempotencia, luego avanzar fases (orden crítico)
     await db.query(
       `UPDATE masas_produccion
        SET sap_doc_entry_pesaje = $1, sap_doc_num_pesaje = $2, updated_at = NOW()
@@ -896,8 +890,12 @@ const confirmarPesaje = async (req, res, next) => {
       [sapResult.docEntry, sapResult.docNum, masaId]
     );
 
-    // Completar PLANIFICACION y desbloquear AMASADO DESPUÉS de guardar SAP DocEntry
-    // Orden crítico: primero persistir idempotencia, luego avanzar fases
+    // Ahora sí: marcar PESAJE=COMPLETADA y desbloquear AMASADO
+    await fasesModel.updateEstadoFase(
+      masaId, 'PESAJE', 'COMPLETADA', 100, req.user.id,
+      { confirmado_en: new Date() }
+    );
+    logger.info(`Fase PESAJE completada para masa ${masaId}`);
     await fasesModel.updateEstadoFase(masaId, 'PLANIFICACION', 'COMPLETADA', 100, req.user.id, {});
     const siguienteFase = await fasesModel.desbloquearSiguienteFase(masaId, 'PESAJE');
     logger.info(`Fase desbloqueada después de PESAJE: ${siguienteFase?.fase || 'AMASADO'}`);

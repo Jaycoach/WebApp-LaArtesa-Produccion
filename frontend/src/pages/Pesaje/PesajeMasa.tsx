@@ -785,7 +785,7 @@ export const PesajeMasa: React.FC = () => {
             >
               + Mano de obra
             </button>
-            {checklist.todosPesados && !checklist.pesaje_transmitido && (
+            {checklist.todosPesados && !checklist.pesaje_completado && (
               <button
                 onClick={handleConfirmar}
                 disabled={confirmarMutation.isPending || confirmando}
@@ -794,7 +794,7 @@ export const PesajeMasa: React.FC = () => {
                 {(confirmarMutation.isPending || confirmando) ? '⏳ Enviando a SAP...' : '✅ Confirmar Pesaje Completo'}
               </button>
             )}
-            {checklist.pesaje_transmitido && (
+            {checklist.pesaje_completado && (
               <div className="flex items-center gap-2 px-5 py-3 bg-green-50 border border-green-300 rounded-lg">
                 <span className="text-green-700 font-semibold text-sm">
                   ✅ Transmitido a SAP
