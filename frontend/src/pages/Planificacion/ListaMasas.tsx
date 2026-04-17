@@ -366,11 +366,11 @@ export const ListaMasas: React.FC = () => {
                     </div>
                     <div className="text-center">
                       <p className="text-2xl font-bold text-emerald-700">
-                        {Number(masa.total_panes) > 0
-                          ? Number(masa.total_panes).toLocaleString('es-CO')
-                          : masa.total_unidades_programadas}
+                        {Number(masa.total_unidades_programadas) > 0
+                          ? Number(masa.total_unidades_programadas).toLocaleString('es-CO')
+                          : '—'}
                       </p>
-                      <p className="text-xs text-gray-500">Total panes</p>
+                      <p className="text-xs text-gray-500">Total paquetes</p>
                     </div>
                   </div>
                   {masa.productos_resumen && masa.productos_resumen.length > 0 && (
@@ -383,6 +383,8 @@ export const ListaMasas: React.FC = () => {
                           <span className="text-xs font-bold text-emerald-700 shrink-0">
                             {Number(p.cantidad_paquetes) > 0
                               ? Number(p.cantidad_paquetes).toLocaleString('es-CO')
+                              : '—'} paq · {Number(p.cantidad_paquetes) > 0
+                              ? (Number(p.cantidad_paquetes) * Number(p.unidades_por_paquete || 1)).toLocaleString('es-CO')
                               : '—'} panes
                           </span>
                         </div>
