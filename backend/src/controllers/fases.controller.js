@@ -491,6 +491,13 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false)
   );
   await distribuirIngredientes(ingredientesResult.rows, subMasaIds, conPesaje, client);
 
+  // Distribuir productos primero — necesario para que productos_por_masa de sub-masas exista
+  const todosProductos = await client.query(
+    `SELECT * FROM productos_por_masa WHERE masa_id = $1`,
+    [masaId]
+  );
+  await distribuirProductos(todosProductos.rows, limiteKg, subMasaIds, client);
+
   // Distribuir empaque proporcional a unidades_programadas de cada sub-masa
   // Cada sub-masa puede tener distinto número de paquetes (ej: 151/151/150/150)
   // El empaque BOM está en cantidad/paquete → multiplicar por unidades_programadas de la sub-masa
@@ -548,13 +555,6 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false)
     [masaId]
   );
   await distribuirEmpaque(empaqueResult.rows, subMasaIds, client);
-
-  // Distribuir productos
-  const todosProductos = await client.query(
-    `SELECT * FROM productos_por_masa WHERE masa_id = $1`,
-    [masaId]
-  );
-  await distribuirProductos(todosProductos.rows, limiteKg, subMasaIds, client);
 
   // Copiar relaciones orden-masa
   const ordenesResult = await client.query(
