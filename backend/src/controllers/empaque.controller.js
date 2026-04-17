@@ -500,24 +500,8 @@ exports.completarEmpaque = async (req, res) => {
        costoTotalFinal, costoUnitarioFinal, costoPanUnitario]
     );
 
-    // 9. Marcar empaque y fase completados
-    await client.query(
-      `UPDATE registros_empaque SET estado = 'COMPLETADO', fecha_completado = NOW(),
-         observaciones = COALESCE($2, observaciones)
-       WHERE id = $1`,
-      [empaqueId, observaciones || null]
-    );
-    await client.query(
-      `UPDATE progreso_fases SET estado = 'COMPLETADA', porcentaje_completado = 100,
-         updated_at = NOW()
-       WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
-      [masaId]
-    );
-    await client.query(
-      `UPDATE masas_produccion SET estado = 'COMPLETADA', fase_actual = 'EMPAQUE'
-       WHERE id = $1`,
-      [masaId]
-    );
+    // 9. Marcar empaque y fase completados — SE EJECUTA DESPUÉS de SAP (ver paso 9b más abajo)
+    // No se marca COMPLETADA aquí para evitar estado inconsistente si SAP falla
 
     // 10. Entrada de mercancía SAP (InventoryGenEntries) — producto terminado con costo real
     let sapEntradaResult = null;
@@ -648,9 +632,7 @@ exports.completarEmpaque = async (req, res) => {
       );
     }
 
-    await client.query('COMMIT');
-
-    // Construir advertencias SAP para informar al usuario sin revertir la fase
+    // 9b. Marcar COMPLETADA solo si ambos SAP respondieron OK
     const sapAdvertencias = [];
     if (sapEntradaResult?.error) {
       sapAdvertencias.push(`Entrada de mercancía SAP falló: ${sapEntradaResult.error}`);
@@ -658,6 +640,30 @@ exports.completarEmpaque = async (req, res) => {
     if (sapResult?.error) {
       sapAdvertencias.push(`Salida de materiales de empaque SAP falló: ${sapResult.error}`);
     }
+
+    if (sapAdvertencias.length === 0) {
+      // SAP OK → marcar empaque y fase completados
+      await client.query(
+        `UPDATE registros_empaque SET estado = 'COMPLETADO', fecha_completado = NOW(),
+           observaciones = COALESCE($2, observaciones)
+         WHERE id = $1`,
+        [empaqueId, observaciones || null]
+      );
+      await client.query(
+        `UPDATE progreso_fases SET estado = 'COMPLETADA', porcentaje_completado = 100,
+           updated_at = NOW()
+         WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
+        [masaId]
+      );
+      await client.query(
+        `UPDATE masas_produccion SET estado = 'COMPLETADA', fase_actual = 'EMPAQUE'
+         WHERE id = $1`,
+        [masaId]
+      );
+    }
+    // Si SAP falló: la fase queda EN_PROGRESO, el usuario debe reintentar tras corregir SAP
+
+    await client.query('COMMIT');
 
     res.json({
       success: true,
