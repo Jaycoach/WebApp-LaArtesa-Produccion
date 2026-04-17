@@ -114,7 +114,7 @@ const getProductosByMasa = async (masaId) => {
 const updateUnidadesProgramadas = async (productoId, unidades, userId, motivo = null) => {
   // Leer estado anterior para auditoría
   const anterior = await db.query(
-    'SELECT id, masa_id, unidades_programadas, kilos_programados FROM productos_por_masa WHERE id = $1',
+    'SELECT id, masa_id, unidades_programadas, unidades_pedidas, kilos_programados FROM productos_por_masa WHERE id = $1',
     [productoId]
   );
   if (!anterior.rows[0]) return null;
