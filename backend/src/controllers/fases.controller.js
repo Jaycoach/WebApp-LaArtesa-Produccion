@@ -328,7 +328,7 @@ async function insertarProductoEnMasa(masaId, prod, unidadesProg, unidadesPedida
   const upq = (prod.unidades_por_paquete && parseFloat(prod.unidades_por_paquete) > 1)
     ? parseFloat(prod.unidades_por_paquete)
     : (() => { const m = (prod.producto_nombre || '').match(/ X ?(\d+)/i); return m ? parseInt(m[1]) : 1; })();
-  const cantPaquetes = unidadesPedidas * upq;
+  const cantPaquetes = unidadesProg;
 
   await qr.query(`
     INSERT INTO productos_por_masa
