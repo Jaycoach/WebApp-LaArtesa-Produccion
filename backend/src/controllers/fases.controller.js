@@ -483,14 +483,65 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false)
     }
   }
 
-  // Distribuir ingredientes (con o sin datos de pesaje)
+  // Distribuir ingredientes MP (excluir empaque — no se divide en fracciones)
   const ingredientesResult = await client.query(
-    `SELECT * FROM ingredientes_masa WHERE masa_id = $1 ORDER BY orden_visualizacion`,
+    `SELECT * FROM ingredientes_masa WHERE masa_id = $1 AND es_empaque = false ORDER BY orden_visualizacion`,
     [masaId]
   );
   await distribuirIngredientes(ingredientesResult.rows, subMasaIds, conPesaje, client);
 
-  // Distribuir empaque
+  // Distribuir empaque proporcional a unidades_programadas de cada sub-masa
+  // Cada sub-masa puede tener distinto número de paquetes (ej: 151/151/150/150)
+  // El empaque BOM está en cantidad/paquete → multiplicar por unidades_programadas de la sub-masa
+  const empaqueBase = await client.query(
+    `SELECT ingrediente_sap_code, ingrediente_nombre, cantidad_kilos, cantidad_gramos, uom, orden_visualizacion
+     FROM ingredientes_masa
+     WHERE masa_id = $1 AND es_empaque = true
+     ORDER BY orden_visualizacion`,
+    [masaId]
+  );
+  // Obtener unidades_programadas totales de la masa madre para calcular proporción
+  const prodMadreResult = await client.query(
+    `SELECT COALESCE(SUM(unidades_programadas), 0) AS total_paq FROM productos_por_masa WHERE masa_id = $1`,
+    [masaId]
+  );
+  const totalPaqMadre = parseFloat(prodMadreResult.rows[0].total_paq) || 1;
+
+  for (const subMasaId of subMasaIds) {
+    // Unidades programadas de esta sub-masa
+    const prodSubResult = await client.query(
+      `SELECT COALESCE(SUM(unidades_programadas), 0) AS paq FROM productos_por_masa WHERE masa_id = $1`,
+      [subMasaId]
+    );
+    const paqSubMasa = parseFloat(prodSubResult.rows[0].paq) || 0;
+    // Proporción de paquetes que le corresponden a esta sub-masa
+    const fraccion = totalPaqMadre > 0 ? paqSubMasa / totalPaqMadre : 1 / subMasaIds.length;
+
+    for (const emp of empaqueBase.rows) {
+      // cantidad_kilos del empaque en la madre = cantidad_BOM_por_paquete × total_paquetes_madre
+      // cantidad por sub-masa = cantidad_BOM_por_paquete × paquetes_sub = cantidad_madre × fraccion
+      const cantSubMasa = parseFloat((emp.cantidad_kilos * fraccion).toFixed(3));
+      const gramSubMasa = parseFloat((emp.cantidad_gramos * fraccion).toFixed(2));
+      await client.query(`
+        INSERT INTO ingredientes_masa
+          (masa_id, ingrediente_sap_code, ingrediente_nombre, orden_visualizacion,
+           porcentaje_panadero, es_harina, es_agua, es_prefermento,
+           uom, es_empaque, cantidad_gramos, cantidad_kilos,
+           disponible, verificado, pesado)
+        VALUES ($1,$2,$3,$4,0,false,false,false,$5,true,$6,$7,false,false,false)
+      `, [
+        subMasaId,
+        emp.ingrediente_sap_code,
+        emp.ingrediente_nombre,
+        emp.orden_visualizacion,
+        emp.uom,
+        gramSubMasa,
+        cantSubMasa,
+      ]);
+    }
+  }
+
+  // empaque_por_masa: mantener compatibilidad con flujo alternativo
   const empaqueResult = await client.query(
     `SELECT * FROM empaque_por_masa WHERE masa_id = $1 ORDER BY orden_visualizacion`,
     [masaId]
