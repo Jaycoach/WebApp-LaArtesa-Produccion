@@ -482,8 +482,11 @@ export const DetalleMasa: React.FC = () => {
                 <span className="text-xl font-bold text-emerald-700">
                   {(productos as any[]).reduce((sum: number, p: any) => {
                     const upq = Math.max(1, Number(p.unidades_por_paquete) || 1);
-                    const unidades = Number(p.unidades_pedidas) || 0;
-                    return sum + (Number(p.cantidad_paquetes) > 0 ? Number(p.cantidad_paquetes) : unidades * upq);
+                    const paqProgramados = Number(p.unidades_programadas) || 0;
+                    const ajuste = getAjuste(p.id, paqProgramados);
+                    const deltaNum = parseInt(ajuste.delta, 10);
+                    const paqEfectivos = paqProgramados + (!isNaN(deltaNum) && deltaNum !== 0 ? deltaNum : 0);
+                    return sum + paqEfectivos * upq;
                   }, 0).toLocaleString('es-CO')} panes
                 </span>
               </div>
