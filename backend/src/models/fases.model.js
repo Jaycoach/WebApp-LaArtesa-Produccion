@@ -119,15 +119,17 @@ const updateUnidadesProgramadas = async (productoId, unidades, userId, motivo = 
   );
   if (!anterior.rows[0]) return null;
 
+  const deltaAjuste = unidades - anterior.rows[0].unidades_pedidas;
   const result = await db.query(`
     UPDATE productos_por_masa
     SET
       unidades_programadas = $1::integer,
       kilos_programados = gramaje_unitario * $1::integer / 1000.0,
+      delta_ajuste = $3::integer,
       updated_at = NOW()
     WHERE id = $2
     RETURNING *
-  `, [unidades, productoId]);
+  `, [unidades, productoId, deltaAjuste]);
 
   const actualizado = result.rows[0];
   if (!actualizado) return null;

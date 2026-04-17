@@ -324,7 +324,7 @@ const aprobarMasa = async (req, res, next) => {
     const prodsSinAjuste = await db.query(
       `SELECT id, unidades_programadas, unidades_pedidas, unidades_por_paquete
        FROM productos_por_masa
-       WHERE masa_id = $1 AND unidades_programadas = unidades_pedidas`,
+       WHERE masa_id = $1 AND delta_ajuste IS NULL`,
       [id]
     );
     const DELTA_DEFAULT_PAQ = 2;
