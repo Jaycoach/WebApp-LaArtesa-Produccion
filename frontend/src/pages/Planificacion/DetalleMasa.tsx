@@ -101,13 +101,6 @@ export const DetalleMasa: React.FC = () => {
     }
   };
 
-  const handleBlurDelta = async (productoId: number, upq: number) => {
-    const ajuste = getAjuste(productoId);
-    const delta = parseInt(ajuste.delta, 10);
-    if (!isNaN(delta) && delta !== 0) {
-      await handleGuardarAjuste(productoId, upq);
-    }
-  };
 
   const iniciarPesajeMutation = useMutation({
     mutationFn: () => fasesService.completarFase(id!, 'planificacion'),
@@ -456,15 +449,17 @@ export const DetalleMasa: React.FC = () => {
                                   placeholder="+2 / −1"
                                   value={ajuste.delta}
                                   onChange={e => setAjusteCampo(producto.id, 'delta', e.target.value)}
-                                  onBlur={() => handleBlurDelta(producto.id, upq)}
                                   className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:border-indigo-400 text-center"
-                                  title="Ajuste en paquetes. Se aplica automáticamente al aprobar (por defecto +2)."
+                                  title="Ajuste en paquetes. Si no modificas, se aplicarán +2 paq al aprobar."
                                 />
                                 <span className="text-xs text-gray-400">paq</span>
-                                {ajuste.guardando
-                                  ? <span className="text-xs text-indigo-500 animate-pulse">✓</span>
-                                  : <span className="text-xs text-gray-300" title="Se guarda al salir del campo o al aprobar">auto</span>
-                                }
+                                <button
+                                  onClick={() => handleGuardarAjuste(producto.id, upq)}
+                                  disabled={ajuste.guardando || !ajuste.delta}
+                                  className="px-2 py-1 text-xs font-medium bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                                >
+                                  {ajuste.guardando ? '…' : 'Guardar'}
+                                </button>
                               </div>
                               <input
                                 type="text"
