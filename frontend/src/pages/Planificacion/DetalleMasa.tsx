@@ -94,10 +94,18 @@ export const DetalleMasa: React.FC = () => {
     setAjustes(prev => ({ ...prev, [productoId]: { ...getAjuste(productoId), guardando: true, error: null } }));
     try {
       await masasService.updateUnidadesProgramadas(masaId, productoId, delta, ajuste.motivo || undefined);
-      setAjustes(prev => ({ ...prev, [productoId]: { delta: '', motivo: '', guardando: false, error: null } }));
+      setAjustes(prev => ({ ...prev, [productoId]: { ...prev[productoId], guardando: false, error: null } }));
       queryClient.invalidateQueries({ queryKey: ['productos', masaId] });
     } catch (e: any) {
       setAjustes(prev => ({ ...prev, [productoId]: { ...getAjuste(productoId), guardando: false, error: e?.message || 'Error al guardar' } }));
+    }
+  };
+
+  const handleBlurDelta = async (productoId: number, upq: number) => {
+    const ajuste = getAjuste(productoId);
+    const delta = parseInt(ajuste.delta, 10);
+    if (!isNaN(delta) && delta !== 0) {
+      await handleGuardarAjuste(productoId, upq);
     }
   };
 
@@ -448,16 +456,15 @@ export const DetalleMasa: React.FC = () => {
                                   placeholder="+2 / −1"
                                   value={ajuste.delta}
                                   onChange={e => setAjusteCampo(producto.id, 'delta', e.target.value)}
+                                  onBlur={() => handleBlurDelta(producto.id, upq)}
                                   className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:border-indigo-400 text-center"
+                                  title="Ajuste en paquetes. Se aplica automáticamente al aprobar (por defecto +2)."
                                 />
                                 <span className="text-xs text-gray-400">paq</span>
-                                <button
-                                  onClick={() => handleGuardarAjuste(producto.id, upq)}
-                                  disabled={ajuste.guardando || !ajuste.delta}
-                                  className="px-2 py-1 text-xs font-medium bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                                >
-                                  {ajuste.guardando ? '…' : 'OK'}
-                                </button>
+                                {ajuste.guardando
+                                  ? <span className="text-xs text-indigo-500 animate-pulse">✓</span>
+                                  : <span className="text-xs text-gray-300" title="Se guarda al salir del campo o al aprobar">auto</span>
+                                }
                               </div>
                               <input
                                 type="text"

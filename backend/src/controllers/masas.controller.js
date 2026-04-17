@@ -319,6 +319,29 @@ const aprobarMasa = async (req, res, next) => {
       );
     }
 
+    // Aplicar delta por defecto (+2 paq) a productos que no fueron ajustados manualmente
+    // "no ajustado" = unidades_programadas == unidades_pedidas (nunca tocado por el usuario)
+    const prodsSinAjuste = await db.query(
+      `SELECT id, unidades_programadas, unidades_pedidas, unidades_por_paquete
+       FROM productos_por_masa
+       WHERE masa_id = $1 AND unidades_programadas = unidades_pedidas`,
+      [id]
+    );
+    const DELTA_DEFAULT_PAQ = 2;
+    for (const prod of prodsSinAjuste.rows) {
+      const upq = Math.max(1, Number(prod.unidades_por_paquete) || 1);
+      const nuevasUnidades = Number(prod.unidades_programadas) + DELTA_DEFAULT_PAQ * upq;
+      await db.query(
+        `UPDATE productos_por_masa
+         SET unidades_programadas = $1,
+             kilos_programados = gramaje_unitario * $1 / 1000,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [nuevasUnidades, prod.id]
+      );
+    }
+    logger.info(`Masa ${id}: delta +${DELTA_DEFAULT_PAQ} paq aplicado a ${prodsSinAjuste.rows.length} productos sin ajuste manual.`);
+
     // Intentar subdivisión (conPesaje=false → sub-masas arrancan en PLANIFICACION)
     const resultadoSubdivision = await ejecutarSubdivision(id, req.user.id, false);
 
