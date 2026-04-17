@@ -1151,7 +1151,9 @@ const sincronizarDesdeOV = async (req, res, next) => {
       // Insertar ingredientes en ingredientes_masa
       let ordenIng = 1;
       for (const ing of Object.values(ingredientesMap)) {
-        const cantidadGramos = ing.cantidad_kilos * 1000;
+        // Empaque: cantidad en su UOM original (Und, R, etc.) — no convertir a gramos
+        // MP: cantidad en kg → convertir a gramos para visualización
+        const cantidadGramos = ing.es_empaque ? ing.cantidad_kilos : ing.cantidad_kilos * 1000;
         await client.query(
           `INSERT INTO ingredientes_masa (
              masa_id, ingrediente_sap_code, ingrediente_nombre,
