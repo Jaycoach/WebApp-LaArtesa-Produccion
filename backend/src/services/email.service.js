@@ -298,9 +298,110 @@ const sendPesajeCompletadoEmail = async ({ to, masa }) => {
   });
 };
 
+/**
+ * Email de notificación al APROBAR masa — solo materiales de empaque
+ * Se envía a correos_empaque inmediatamente al aprobar la masa
+ */
+const sendAprobacionMasaEmail = async ({ to, masa, productosEmpaque }) => {
+  const fecha = new Date(masa.fecha_produccion).toLocaleDateString('es-CO', {
+    timeZone: 'America/Bogota',
+    day: '2-digit', month: 'long', year: 'numeric',
+  });
+
+  const filasEmpaque = productosEmpaque.map(p => `
+    <tr>
+      <td style="padding:8px 12px;color:#1e293b;font-size:13px;border-bottom:1px solid #f1f5f9;">${p.item_code}</td>
+      <td style="padding:8px 12px;color:#1e293b;font-size:13px;border-bottom:1px solid #f1f5f9;">${p.item_name}</td>
+      <td style="padding:8px 12px;color:#1e293b;font-size:13px;border-bottom:1px solid #f1f5f9;text-align:right;">${parseFloat(p.cantidad_total).toFixed(0)}</td>
+      <td style="padding:8px 12px;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;text-align:center;">${p.uom || 'UN'}</td>
+    </tr>`).join('');
+
+  const html = `
+    <!DOCTYPE html>
+    <html lang="es">
+    <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+    <body style="margin:0;padding:0;background:#F5F0E4;font-family:Inter,Arial,sans-serif;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:#F5F0E4;padding:40px 0;">
+        <tr><td align="center">
+          <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+            <tr>
+              <td style="background:#dc2626;padding:32px 40px;text-align:center;">
+                <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;letter-spacing:-0.5px;">🍞 La Artesa Panadería</h1>
+                <p style="margin:8px 0 0;color:#fecaca;font-size:14px;">Sistema de Control de Producción</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:40px;">
+                <h2 style="margin:0 0 8px;color:#1e293b;font-size:20px;">📦 Alistamiento de empaque requerido</h2>
+                <p style="margin:0 0 24px;color:#475569;font-size:15px;line-height:1.6;">
+                  Se ha aprobado una masa de producción. Por favor aliste los siguientes materiales de empaque.
+                </p>
+                <table width="100%" cellpadding="0" cellspacing="0"
+                       style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:24px;">
+                  <tr><td style="padding:20px;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="padding:6px 0;color:#64748b;font-size:13px;width:140px;">Código masa</td>
+                        <td style="padding:6px 0;color:#1e293b;font-size:13px;font-weight:600;">${masa.codigo_masa}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;color:#64748b;font-size:13px;">Tipo</td>
+                        <td style="padding:6px 0;color:#1e293b;font-size:13px;font-weight:600;">${masa.tipo_masa}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;color:#64748b;font-size:13px;">Fecha producción</td>
+                        <td style="padding:6px 0;color:#1e293b;font-size:13px;font-weight:600;">${fecha}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;color:#64748b;font-size:13px;">Total paquetes</td>
+                        <td style="padding:6px 0;color:#1e293b;font-size:13px;font-weight:600;">${masa.total_paquetes} paq</td>
+                      </tr>
+                    </table>
+                  </td></tr>
+                </table>
+                <p style="margin:0 0 12px;color:#1e293b;font-size:14px;font-weight:600;">Materiales de empaque a alistar:</p>
+                <table width="100%" cellpadding="0" cellspacing="0"
+                       style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;margin-bottom:24px;">
+                  <thead>
+                    <tr style="background:#f1f5f9;">
+                      <th style="padding:10px 12px;text-align:left;color:#64748b;font-size:12px;font-weight:600;text-transform:uppercase;">Código</th>
+                      <th style="padding:10px 12px;text-align:left;color:#64748b;font-size:12px;font-weight:600;text-transform:uppercase;">Material</th>
+                      <th style="padding:10px 12px;text-align:right;color:#64748b;font-size:12px;font-weight:600;text-transform:uppercase;">Cantidad</th>
+                      <th style="padding:10px 12px;text-align:center;color:#64748b;font-size:12px;font-weight:600;text-transform:uppercase;">UOM</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${filasEmpaque || '<tr><td colspan="4" style="padding:16px;text-align:center;color:#94a3b8;font-size:13px;">Sin materiales de empaque registrados</td></tr>'}
+                  </tbody>
+                </table>
+                <p style="margin:0;color:#94a3b8;font-size:13px;line-height:1.5;">
+                  Este aviso se generó automáticamente al aprobar la masa en el sistema de producción.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="background:#f8fafc;padding:20px 40px;text-align:center;">
+                <p style="margin:0;color:#94a3b8;font-size:12px;">© ${new Date().getFullYear()} La Artesa SAS — Bogotá, Colombia</p>
+              </td>
+            </tr>
+          </table>
+        </td></tr>
+      </table>
+    </body>
+    </html>
+  `;
+
+  return sendEmail({
+    to,
+    subject: `📦 Alistamiento empaque — ${masa.tipo_masa} (${masa.codigo_masa}) · ${fecha}`,
+    html,
+  });
+};
+
 module.exports = {
   sendEmail,
   sendVerificationEmail,
   sendPasswordResetEmail,
   sendPesajeCompletadoEmail,
+  sendAprobacionMasaEmail,
 };
