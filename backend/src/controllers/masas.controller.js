@@ -345,7 +345,7 @@ const aprobarMasa = async (req, res, next) => {
 
     // --- NOTIFICACIÓN EMPAQUE: después del delta, nombres desde BOM ---
     // Se ejecuta en background (sin await) para no bloquear ni fallar la aprobación
-    (async () => {
+    setImmediate(async () => {
       try {
         const correosCfg = await db.query(
           `SELECT valor FROM configuracion_sistema WHERE clave = 'correos_empaque'`
@@ -387,7 +387,7 @@ const aprobarMasa = async (req, res, next) => {
       } catch (emailErr) {
         logger.warn(`Notificación empaque masa ${id} falló (no crítico): ${emailErr.message}`);
       }
-    })();
+    });
     // --- FIN NOTIFICACIÓN EMPAQUE ---
 
     // Intentar subdivisión (conPesaje=false → sub-masas arrancan en PLANIFICACION)
