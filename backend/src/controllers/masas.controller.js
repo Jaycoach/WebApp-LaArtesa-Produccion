@@ -346,15 +346,16 @@ const aprobarMasa = async (req, res, next) => {
     // --- NOTIFICACIÓN EMPAQUE: después del delta, nombres desde BOM ---
     // Se ejecuta en background (sin await) para no bloquear ni fallar la aprobación
     setImmediate(async () => {
+      const clienteEmail = await db.getClient();
       try {
-        const correosCfg = await db.query(
+        const correosCfg = await clienteEmail.query(
           `SELECT valor FROM configuracion_sistema WHERE clave = 'correos_empaque'`
         );
         const correosStr = correosCfg.rows[0]?.valor || '';
         const destinatarios = correosStr.split(',').map(e => e.trim()).filter(Boolean);
         if (!destinatarios.length) return;
 
-        const empaqueConNombre = await db.query(
+        const empaqueConNombre = await clienteEmail.query(
           `SELECT bc.item_code_comp AS item_code,
                   bc.item_name_comp AS item_name,
                   SUM(bc.cantidad * pm.unidades_programadas) AS cantidad_total,
@@ -367,7 +368,7 @@ const aprobarMasa = async (req, res, next) => {
           [id]
         );
 
-        const totalPaquetes = await db.query(
+        const totalPaquetes = await clienteEmail.query(
           `SELECT COALESCE(SUM(unidades_programadas), 0) AS total
            FROM productos_por_masa WHERE masa_id = $1`,
           [id]
@@ -386,6 +387,8 @@ const aprobarMasa = async (req, res, next) => {
         logger.info(`Notificación empaque enviada para masa ${id} a: ${destinatarios.join(', ')}`);
       } catch (emailErr) {
         logger.warn(`Notificación empaque masa ${id} falló (no crítico): ${emailErr.message}`);
+      } finally {
+        clienteEmail.release();
       }
     });
     // --- FIN NOTIFICACIÓN EMPAQUE ---
