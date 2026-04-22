@@ -59,7 +59,7 @@ export const useUpdateCorreos = () => {
   return useMutation({
     mutationFn: (emails: string[]) => configService.updateCorreos(emails),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: configKeys.detail() });
+      queryClient.invalidateQueries({ queryKey: ['config', 'correos-empaque'] });
     },
   });
 };

@@ -55,7 +55,7 @@ export const configService = {
   updateCorreos: async (emails: string[]): Promise<ConfiguracionSistema> => {
     const response = await apiClient.put<ApiResponse<ConfiguracionSistema>>(
       API_CONFIG.ENDPOINTS.CONFIG.CORREOS,
-      { emailNotificaciones: emails }
+      { correos: emails.join(',') }
     );
     return handleApiResponse(response);
   },
