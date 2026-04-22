@@ -54,7 +54,7 @@ exports.updateCorreos = async (req, res, next) => {
   try {
     const { correos } = req.body;
     await setConfig('correos_empaque', correos, req.user.id);
-    res.json({ success: true, message: 'Correos actualizados' });
+    res.json({ success: true, message: 'Correos actualizados', data: { correos } });
   } catch (e) { next(e); }
 };
 
