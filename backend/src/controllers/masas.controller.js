@@ -297,55 +297,6 @@ const aprobarMasa = async (req, res, next) => {
       });
     }
 
-    // --- NOTIFICACIÓN EMPAQUE: disparar antes de cualquier otra lógica ---
-    // Se ejecuta en background (sin await) para no bloquear ni fallar la aprobación
-    (async () => {
-      try {
-        const correosCfg = await db.query(
-          `SELECT valor FROM configuracion_sistema WHERE clave = 'correos_empaque'`
-        );
-        const correosStr = correosCfg.rows[0]?.valor || '';
-        const destinatarios = correosStr.split(',').map(e => e.trim()).filter(Boolean);
-        if (!destinatarios.length) return;
-
-        const empaqueConNombre = await db.query(
-          `SELECT DISTINCT bc.item_code_comp AS item_code,
-                  COALESCE(si.item_name, bc.item_code_comp) AS item_name,
-                  SUM(bc.cantidad * pm.unidades_programadas) AS cantidad_total,
-                  bc.uom
-           FROM sap_bom_componentes bc
-           JOIN productos_por_masa pm ON pm.sap_item_code = bc.item_code_padre
-           LEFT JOIN sap_inventario_mp si ON si.item_code = bc.item_code_comp
-           WHERE pm.masa_id = $1
-             AND bc.es_empaque = true
-           GROUP BY bc.item_code_comp, si.item_name, bc.uom`,
-          [id]
-        );
-
-        const totalPaquetes = await db.query(
-          `SELECT COALESCE(SUM(unidades_programadas), 0) AS total
-           FROM productos_por_masa WHERE masa_id = $1`,
-          [id]
-        );
-
-        await sendAprobacionMasaEmail({
-          to: destinatarios.join(','),
-          masa: {
-            ...masa.rows[0],
-            fecha_produccion: masa.rows[0].fecha_produccion || new Date(),
-            total_paquetes: totalPaquetes.rows[0]?.total || 0,
-          },
-          productosEmpaque: empaqueConNombre.rows,
-        });
-
-        logger.info(`Notificación empaque enviada para masa ${id} a: ${destinatarios.join(', ')}`);
-      } catch (emailErr) {
-        // El error de email NO debe afectar la aprobación
-        logger.warn(`Notificación empaque masa ${id} falló (no crítico): ${emailErr.message}`);
-      }
-    })();
-    // --- FIN NOTIFICACIÓN EMPAQUE ---
-
     // Marcar masa como APROBADA
     const { fecha_vencimiento_sugerida } = req.body;
 
@@ -391,6 +342,53 @@ const aprobarMasa = async (req, res, next) => {
       );
     }
     logger.info(`Masa ${id}: delta +${DELTA_DEFAULT_PAQ} paq aplicado a ${prodsSinAjuste.rows.length} productos sin ajuste manual.`);
+
+    // --- NOTIFICACIÓN EMPAQUE: después del delta, nombres desde BOM ---
+    // Se ejecuta en background (sin await) para no bloquear ni fallar la aprobación
+    (async () => {
+      try {
+        const correosCfg = await db.query(
+          `SELECT valor FROM configuracion_sistema WHERE clave = 'correos_empaque'`
+        );
+        const correosStr = correosCfg.rows[0]?.valor || '';
+        const destinatarios = correosStr.split(',').map(e => e.trim()).filter(Boolean);
+        if (!destinatarios.length) return;
+
+        const empaqueConNombre = await db.query(
+          `SELECT bc.item_code_comp AS item_code,
+                  bc.item_name_comp AS item_name,
+                  SUM(bc.cantidad * pm.unidades_programadas) AS cantidad_total,
+                  bc.uom
+           FROM sap_bom_componentes bc
+           JOIN productos_por_masa pm ON pm.sap_item_code = bc.item_code_padre
+           WHERE pm.masa_id = $1
+             AND bc.es_empaque = true
+           GROUP BY bc.item_code_comp, bc.item_name_comp, bc.uom`,
+          [id]
+        );
+
+        const totalPaquetes = await db.query(
+          `SELECT COALESCE(SUM(unidades_programadas), 0) AS total
+           FROM productos_por_masa WHERE masa_id = $1`,
+          [id]
+        );
+
+        await sendAprobacionMasaEmail({
+          to: destinatarios.join(','),
+          masa: {
+            ...masa.rows[0],
+            fecha_produccion: masa.rows[0].fecha_produccion || new Date(),
+            total_paquetes: totalPaquetes.rows[0]?.total || 0,
+          },
+          productosEmpaque: empaqueConNombre.rows,
+        });
+
+        logger.info(`Notificación empaque enviada para masa ${id} a: ${destinatarios.join(', ')}`);
+      } catch (emailErr) {
+        logger.warn(`Notificación empaque masa ${id} falló (no crítico): ${emailErr.message}`);
+      }
+    })();
+    // --- FIN NOTIFICACIÓN EMPAQUE ---
 
     // Intentar subdivisión (conPesaje=false → sub-masas arrancan en PLANIFICACION)
     const resultadoSubdivision = await ejecutarSubdivision(id, req.user.id, false);
