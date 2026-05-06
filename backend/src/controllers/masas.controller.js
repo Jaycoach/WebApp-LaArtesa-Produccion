@@ -447,25 +447,24 @@ const aprobarMasa = async (req, res, next) => {
     }
 
     // Sin subdivisión: flujo normal
-    // Completar PLANIFICACION (consistencia con flujo de subdivisión)
-    await db.query(
-      `UPDATE progreso_fases
-       SET estado = 'COMPLETADA'
-       WHERE masa_id = $1 AND fase = 'PLANIFICACION'`,
-      [id]
+    const r1 = await db.query(
+      `UPDATE progreso_fases SET estado = 'COMPLETADA'
+       WHERE masa_id = $1 AND fase = 'PLANIFICACION'`, [id]
     );
-    await db.query(
-      `UPDATE progreso_fases
-       SET estado = 'EN_PROGRESO'
-       WHERE masa_id = $1 AND fase = 'PESAJE'`,
-      [id]
+    logger.info(`[APROBACION DEBUG] masa=${id} PLANIFICACION→COMPLETADA rows=${r1.rowCount}`);
+
+    const r2 = await db.query(
+      `UPDATE progreso_fases SET estado = 'EN_PROGRESO'
+       WHERE masa_id = $1 AND fase = 'PESAJE'`, [id]
     );
-    await db.query(
-      `UPDATE progreso_fases
-       SET estado = 'PENDIENTE', updated_at = NOW()
-       WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
-      [id]
+    logger.info(`[APROBACION DEBUG] masa=${id} PESAJE→EN_PROGRESO rows=${r2.rowCount}`);
+
+    const r3 = await db.query(
+      `UPDATE progreso_fases SET estado = 'PENDIENTE', updated_at = NOW()
+       WHERE masa_id = $1 AND fase = 'EMPAQUE'`, [id]
     );
+    logger.info(`[APROBACION DEBUG] masa=${id} EMPAQUE→PENDIENTE rows=${r3.rowCount}`);
+
     if (fecha_vencimiento_sugerida) {
       await db.query(
         `UPDATE progreso_fases
