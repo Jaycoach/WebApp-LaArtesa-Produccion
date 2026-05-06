@@ -367,7 +367,14 @@ async function ejecutarSubdivision(masaId, userId, conPesaje = false) {
   const client = await db.getClient();
   try {
     await client.query('BEGIN');
-    return await _ejecutarSubdivisionTx(client, masaId, userId, conPesaje);
+    const resultado = await _ejecutarSubdivisionTx(client, masaId, userId, conPesaje);
+    // Siempre cerrar la transacción — COMMIT si hubo subdivisión, ROLLBACK si no aplica
+    if (resultado) {
+      await client.query('COMMIT');
+    } else {
+      await client.query('ROLLBACK');
+    }
+    return resultado;
   } catch (err) {
     await client.query('ROLLBACK');
     logger.error(`ejecutarSubdivision ROLLBACK masa ${masaId}: ${err.message}`);
