@@ -681,17 +681,74 @@ const PanelEmpaqueMasa: React.FC<{
         </div>
       )}
 
-      {/* Banner PENDIENTE — horneado no terminado aún */}
+      {/* Banner PENDIENTE + materiales de alistamiento */}
       {!puedeOperar && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex items-start gap-3">
-          <span className="text-amber-500 text-xl">⏳</span>
-          <div>
-            <p className="text-amber-800 font-semibold text-sm">Empaque en alistamiento</p>
-            <p className="text-amber-700 text-xs mt-0.5">
-              El horneado aún no ha finalizado. Puedes consultar los productos y materiales,
-              pero el empaque se habilitará cuando se complete el horneado.
-            </p>
+        <div className="space-y-3">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex items-start gap-3">
+            <span className="text-amber-500 text-xl">⏳</span>
+            <div>
+              <p className="text-amber-800 font-semibold text-sm">Empaque en alistamiento</p>
+              <p className="text-amber-700 text-xs mt-0.5">
+                El horneado aún no ha finalizado. Puedes consultar los productos y materiales
+                a alistar mientras avanza la producción.
+              </p>
+            </div>
           </div>
+
+          {/* Productos a empacar */}
+          {masa.ovs.map(ov => (
+            <Card key={ov.doc_num} className="p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <span className={`text-sm font-bold px-3 py-1 rounded-full ${
+                  ov.doc_num === 'SIN_OV' ? 'bg-gray-100 text-gray-600' : 'bg-blue-100 text-blue-800'
+                }`}>
+                  {ov.doc_num === 'SIN_OV' ? 'Sin OV asignada' : `OV ${ov.doc_num}`}
+                </span>
+                <span className="text-xs text-gray-400">{ov.productos.length} producto{ov.productos.length !== 1 ? 's' : ''}</span>
+              </div>
+              <div className="space-y-2">
+                {ov.productos.map(p => (
+                  <div key={p.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+                    <div>
+                      <div className="text-sm font-medium text-gray-800">{p.producto_nombre}</div>
+                      <div className="text-xs text-gray-400 font-mono">{p.sap_item_code} · {p.presentacion}</div>
+                    </div>
+                    <div className="text-right shrink-0 ml-3">
+                      <div className="text-lg font-bold text-gray-800">{p.unidades_programadas}</div>
+                      <div className="text-xs text-gray-500">uds programadas</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          ))}
+
+          {/* Materiales de empaque a alistar */}
+          {masa.materiales_alistamiento && masa.materiales_alistamiento.length > 0 && (
+            <Card className="p-4">
+              <div className="text-sm font-semibold text-gray-700 mb-3">📦 Materiales de empaque a alistar</div>
+              <div className="space-y-2">
+                {masa.materiales_alistamiento.map(mat => (
+                  <div key={mat.item_code} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+                    <div>
+                      <div className="text-sm font-medium text-gray-700">{mat.nombre}</div>
+                      <div className="text-xs text-gray-400 font-mono">{mat.item_code}</div>
+                    </div>
+                    <div className="text-right shrink-0 ml-3 space-y-0.5">
+                      <div className="text-sm font-bold text-gray-800">
+                        {mat.cantidad_total % 1 === 0 ? mat.cantidad_total : mat.cantidad_total.toFixed(2)} {mat.uom}
+                      </div>
+                      <div className={`text-xs font-semibold ${
+                        mat.stock_disponible >= mat.cantidad_total ? 'text-green-600' : 'text-red-600'
+                      }`}>
+                        Stock: {mat.stock_disponible % 1 === 0 ? mat.stock_disponible : mat.stock_disponible.toFixed(2)} {mat.uom}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
         </div>
       )}
 
