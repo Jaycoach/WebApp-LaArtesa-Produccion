@@ -715,7 +715,14 @@ const PanelEmpaqueMasa: React.FC<{
                     </div>
                     <div className="text-right shrink-0 ml-3">
                       <div className="text-lg font-bold text-gray-800">{p.unidades_programadas}</div>
-                      <div className="text-xs text-gray-500">uds programadas</div>
+                      <div className="text-xs text-gray-500">
+                        paquetes
+                        {p.unidades_por_paquete && p.unidades_por_paquete > 1 && (
+                          <span className="text-gray-400 ml-1">
+                            · {p.unidades_programadas * p.unidades_por_paquete} panes
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -1427,25 +1434,22 @@ export const EmpaqueMasa: React.FC = () => {
       const xSAP = parseFloat(String(p.unidades_por_paquete || 0));
       const xNombre = p.producto_nombre?.match(/ X ?(\d+)/i);
       const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
-      // 1. Panes sugeridos = paquetes pedidos × xPaq
-      const panesSugeridos = (p.unidades_pedidas || 0) * xPaq;
-      // 2. Panes divididos = cantidad_divisiones real por producto
+      // Paquetes programados = unidades_programadas (ya incluye delta)
+      const paquetesProgramados = p.unidades_programadas || 0;
+      // Panes: para referencia interna en fases de división/horneado
       const panesDivididos = p.division_completada && (p.cantidad_divisiones || 0) > 0
         ? parseInt(p.cantidad_divisiones)
         : 0;
-      // 3. Panes horneados = unidades_producidas (ya actualizado por completarHorneado por producto)
-      //    Si es 0 fallback a unidades_terminadas_horneado distribuido
       const panesHorneados = p.unidades_terminadas_horneado
         ?? (p.unidades_producidas > 0 ? p.unidades_producidas : 0);
-      // Referencia para faltante: horneadas > divididas > sugeridas
-      const panesReferencia = panesHorneados || panesDivididos || panesSugeridos;
+      const panesReferencia = panesHorneados || panesDivididos || (paquetesProgramados * xPaq);
       ovsMap[ov].push({
         id: p.id,
         sap_item_code: p.sap_item_code,
         producto_nombre: p.producto_nombre,
         presentacion: p.presentacion,
         gramaje_unitario: p.gramaje_unitario,
-        unidades_programadas: panesSugeridos,
+        unidades_programadas: paquetesProgramados,
         unidades_divididas: panesDivididos,
         unidades_horneadas: panesHorneados,
         unidades_referencia: panesReferencia,
