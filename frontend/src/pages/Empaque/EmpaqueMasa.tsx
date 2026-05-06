@@ -72,6 +72,10 @@ interface MasaPendiente {
   empaque_iniciado: boolean;
   empaque_id: number | null;
   fecha_vencimiento: string | null;
+  sap_doc_entry_entrada: number | null;
+  sap_doc_entry_salida: number | null;
+  sap_error_entrada: string | null;
+  sap_error_salida: string | null;
   materiales_alistamiento: MaterialAlistamiento[];
   ovs: OVPendiente[];
 }
@@ -82,6 +86,7 @@ interface SubMasa {
   estado_horneado: string;
   estado_empaque: string;
   total_kilos_con_merma: number;
+  sap_doc_entry_entrada: number | null;
 }
 interface Producto {
   id: number;
@@ -1484,7 +1489,15 @@ export const EmpaqueMasa: React.FC = () => {
       const c = data.data?.costos;
       if (c) mostrarMsg('ok', `Completado — Costo total: $${COP(c.total)} | $/ud: $${COP(c.unitario)}`);
     },
-    onError: (e: any) => mostrarMsg('err', e.message),
+    onError: (e: any) => {
+      // 409 = entrada ya enviada a SAP — bloquear sin mensaje de error genérico
+      if (e?.status === 409 && e?.data?.already_sent) {
+        mostrarMsg('err', `⚠ Entrada de mercancía ya registrada en SAP (DocNum ${e.data.sap_doc_num_entrada}). No se puede enviar de nuevo.`);
+        qc.invalidateQueries({ queryKey: ['empaque-ov', docNumBuscar] });
+        return;
+      }
+      mostrarMsg('err', e.message);
+    },
   });
 
   const verEtiquetaOV = async (masaId: number, productoId: number) => {
@@ -1714,8 +1727,9 @@ export const EmpaqueMasa: React.FC = () => {
                         {tieneEmpaque && !empaqueCompleto && (
                           <button
                             onClick={() => completarMut.mutate(sm.id)}
-                            disabled={completarMut.isPending}
+                            disabled={completarMut.isPending || !!sm.sap_doc_entry_entrada}
                             className="text-xs px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                            title={sm.sap_doc_entry_entrada ? `Entrada SAP ya registrada (DocEntry ${sm.sap_doc_entry_entrada})` : undefined}
                           >
                             {completarMut.isPending ? 'Completando...' : 'Completar empaque'}
                           </button>

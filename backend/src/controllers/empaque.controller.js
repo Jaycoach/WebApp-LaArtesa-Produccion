@@ -45,10 +45,12 @@ exports.getEmpaqueByOV = async (req, res) => {
         `SELECT mp.id, mp.codigo_masa, mp.tipo_masa, mp.total_kilos_con_merma,
                 mp.costo_mo_total,
                 pf_h.estado AS estado_horneado,
-                pf_e.estado AS estado_empaque
+                pf_e.estado AS estado_empaque,
+                re.sap_doc_entry_entrada
          FROM masas_produccion mp
          LEFT JOIN progreso_fases pf_h ON pf_h.masa_id = mp.id AND pf_h.fase = 'HORNEADO'
          LEFT JOIN progreso_fases pf_e ON pf_e.masa_id = mp.id AND pf_e.fase = 'EMPAQUE'
+         LEFT JOIN registros_empaque re ON re.masa_id = mp.id AND re.estado = 'EN_PROGRESO'
          WHERE (mp.id = $1 OR mp.masa_padre_id = $1)
            AND mp.estado != 'SUBDIVIDIDA'
          ORDER BY mp.codigo_masa`,
@@ -389,13 +391,27 @@ exports.completarEmpaque = async (req, res) => {
     await client.query('BEGIN');
 
     const empR = await client.query(
-      `SELECT id FROM registros_empaque WHERE masa_id = $1 AND estado = 'EN_PROGRESO'`, [masaId]
+      `SELECT id, sap_doc_entry_entrada, sap_doc_num_entrada
+       FROM registros_empaque WHERE masa_id = $1 AND estado = 'EN_PROGRESO'`, [masaId]
     );
     if (!empR.rows.length) {
       await client.query('ROLLBACK');
       return res.status(400).json({ success: false, message: 'No hay empaque en progreso' });
     }
     const empaqueId = empR.rows[0].id;
+
+    // ── GUARDIA IDEMPOTENCIA ──────────────────────────────────────────────────
+    // Si ya existe DocEntry de entrada en SAP → bloquear reenvío
+    if (empR.rows[0].sap_doc_entry_entrada) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        success: false,
+        already_sent: true,
+        sap_doc_entry_entrada: empR.rows[0].sap_doc_entry_entrada,
+        sap_doc_num_entrada: empR.rows[0].sap_doc_num_entrada,
+        message: `Entrada de mercancía ya registrada en SAP (DocNum ${empR.rows[0].sap_doc_num_entrada}). No se puede enviar de nuevo.`,
+      });
+    }
 
     // 1. Productos y unidades empacadas
     const prodsR = await client.query(
@@ -503,7 +519,70 @@ exports.completarEmpaque = async (req, res) => {
     // 9. Marcar empaque y fase completados — SE EJECUTA DESPUÉS de SAP (ver paso 9b más abajo)
     // No se marca COMPLETADA aquí para evitar estado inconsistente si SAP falla
 
-    // 10. Entrada de mercancía SAP (InventoryGenEntries) — producto terminado con costo real
+    // 10. Salida de materiales de empaque SAP (InventoryGenExits) — PRIMERO
+    // Si falla → informar inmediatamente, NO crear entrada de producto terminado
+    let sapResult = null;
+    try {
+      const sapService = require('../services/sap.service');
+      await sapService.ensureSession();
+
+      const docLines = [];
+      for (const prod of prodsR.rows) {
+        if (!prod.sap_item_code || !prod.uds_empacadas) continue;
+        const matsR = await client.query(
+          `SELECT sbc.item_code_comp, sbc.cantidad, sbc.uom
+           FROM sap_bom_componentes sbc
+           WHERE sbc.item_code_padre = $1 AND sbc.es_empaque = true`,
+          [prod.sap_item_code]
+        );
+        for (const mat of matsR.rows) {
+          const qty = parseFloat(mat.cantidad) * parseInt(prod.uds_empacadas);
+          const existing = docLines.find(l => l.ItemCode === mat.item_code_comp);
+          if (existing) { existing.Quantity += qty; }
+          else {
+            docLines.push({
+              ItemCode:      mat.item_code_comp,
+              Quantity:      qty,
+              WarehouseCode: 'ALMP',
+              AccountCode:   '14050501',
+            });
+          }
+        }
+      }
+
+      if (docLines.length) {
+        const sapResp = await sapService.client.post('/InventoryGenExits', {
+          DocDate:       fecha_local || new Date().toISOString().split('T')[0],
+          Comments:      `Consumo empaque masa ${masaId}`,
+          DocumentLines: docLines,
+        });
+        sapResult = { doc_entry: sapResp.data.DocEntry, lineas: docLines.length };
+        logger.info(`GoodsIssues empaque masa ${masaId}: DocEntry ${sapResp.data.DocEntry}`);
+        await client.query(
+          `UPDATE registros_empaque
+             SET sap_doc_entry_salida = $1, sap_doc_num_salida = $2, sap_error_salida = NULL
+           WHERE masa_id = $3`,
+          [sapResp.data.DocEntry, String(sapResp.data.DocNum || ''), masaId]
+        );
+      }
+    } catch (sapErr) {
+      const sapErrDetail = sapErr.response?.data?.error?.message?.value
+        || sapErr.response?.data?.error?.message
+        || sapErr.message;
+      logger.error(`Error GoodsIssues empaque masa ${masaId}: ${sapErrDetail}`);
+      await client.query(
+        `UPDATE registros_empaque SET sap_error_salida = $1 WHERE masa_id = $2`,
+        [sapErrDetail, masaId]
+      );
+      await client.query('COMMIT');
+      return res.status(502).json({
+        success: false,
+        sap_salida_error: sapErrDetail,
+        message: `No se pudo registrar la salida de materiales de empaque en SAP: ${sapErrDetail}. Corrija el inventario en SAP e intente de nuevo. La entrada de producto terminado NO fue creada.`,
+      });
+    }
+
+    // 11. Entrada de mercancía SAP (InventoryGenEntries) — solo si salida fue exitosa
     let sapEntradaResult = null;
     try {
       const sapServiceEntrada = require('../services/sap.service');
@@ -575,62 +654,6 @@ exports.completarEmpaque = async (req, res) => {
       );
     }
 
-    // 11. GoodsIssues SAP para materiales de empaque
-    let sapResult = null;
-    try {
-      const sapService = require('../services/sap.service');
-      await sapService.ensureSession();
-
-      const docLines = [];
-      for (const prod of prodsR.rows) {
-        if (!prod.sap_item_code || !prod.uds_empacadas) continue;
-        const matsR = await client.query(
-          `SELECT sbc.item_code_comp, sbc.cantidad, sbc.uom
-           FROM sap_bom_componentes sbc
-           WHERE sbc.item_code_padre = $1 AND sbc.es_empaque = true`,
-          [prod.sap_item_code]
-        );
-        for (const mat of matsR.rows) {
-          const qty = parseFloat(mat.cantidad) * parseInt(prod.uds_empacadas);
-          const existing = docLines.find(l => l.ItemCode === mat.item_code_comp);
-          if (existing) { existing.Quantity += qty; }
-          else {
-            docLines.push({
-              ItemCode:      mat.item_code_comp,
-              Quantity:      qty,
-              WarehouseCode: 'ALMP',
-              AccountCode:   '14050501',
-            });
-          }
-        }
-      }
-
-      if (docLines.length) {
-        const sapResp = await sapService.client.post('/InventoryGenExits', {
-          DocDate:       fecha_local || new Date().toISOString().split('T')[0],
-          Comments:      `Consumo empaque masa ${masaId}`,
-          DocumentLines: docLines,
-        });
-        sapResult = { doc_entry: sapResp.data.DocEntry, lineas: docLines.length };
-        logger.info(`GoodsIssues empaque masa ${masaId}: DocEntry ${sapResp.data.DocEntry}`);
-        await client.query(
-          `UPDATE registros_empaque
-             SET sap_doc_entry_salida = $1, sap_doc_num_salida = $2, sap_error_salida = NULL
-           WHERE masa_id = $3`,
-          [sapResp.data.DocEntry, String(sapResp.data.DocNum || ''), masaId]
-        );
-      }
-    } catch (sapErr) {
-      const sapErrDetail = sapErr.response?.data?.error?.message?.value
-        || sapErr.response?.data?.error?.message
-        || sapErr.message;
-      logger.error(`Error GoodsIssues empaque masa ${masaId}: ${sapErrDetail}`);
-      sapResult = { error: sapErrDetail };
-      await client.query(
-        `UPDATE registros_empaque SET sap_error_salida = $1 WHERE masa_id = $2`,
-        [sapErrDetail, masaId]
-      );
-    }
 
     // 9b. Marcar COMPLETADA solo si ambos SAP respondieron OK
     const sapAdvertencias = [];
