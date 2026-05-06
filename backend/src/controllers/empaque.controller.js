@@ -264,11 +264,51 @@ exports.getEmpaqueInfo = async (req, res) => {
       [masaId]
     );
 
+    // Materiales de alistamiento (BOM empaque)
+    const itemCodesProd = [...new Set(productos.map(p => p.sap_item_code).filter(Boolean))];
+    let materiales_alistamiento = [];
+    if (itemCodesProd.length) {
+      const matR = await db.query(
+        `SELECT sbc.item_code_comp AS item_code, sbc.item_code_padre,
+                sbc.item_name_comp AS nombre,
+                sbc.uom, sbc.cantidad AS cantidad_por_unidad,
+                COALESCE(sim.costo_unitario, 0) AS precio_unitario,
+                COALESCE(sim.stock_almp, 0) AS stock_disponible
+         FROM sap_bom_componentes sbc
+         LEFT JOIN sap_inventario_mp sim ON sim.item_code = sbc.item_code_comp
+         WHERE sbc.item_code_padre = ANY($1) AND sbc.es_empaque = true
+         ORDER BY sbc.item_name_comp`,
+        [itemCodesProd]
+      );
+      // Consolidar por material y calcular cantidad total
+      const mapa = {};
+      for (const mat of matR.rows) {
+        const prod = productos.find(p => p.sap_item_code === mat.item_code_padre);
+        const unidades = parseInt(
+          String(prod?.unidades_ajustadas || prod?.unidades_programadas || 0)
+        );
+        if (!mapa[mat.item_code]) {
+          mapa[mat.item_code] = {
+            item_code:        mat.item_code,
+            nombre:           mat.nombre,
+            uom:              mat.uom,
+            cantidad_total:   0,
+            precio_unitario:  parseFloat(mat.precio_unitario),
+            stock_disponible: parseFloat(mat.stock_disponible),
+          };
+        }
+        mapa[mat.item_code].cantidad_total +=
+          parseFloat(mat.cantidad_por_unidad) * unidades;
+      }
+      materiales_alistamiento = Object.values(mapa);
+    }
+
     res.json({ success: true, data: {
       masa: masaInfo,
       productos,
       registro_empaque: registroR.rows[0] || null,
       unidades_terminadas_total,
+      materiales_alistamiento,
     }});
   } catch (error) {
     logger.error('Error getEmpaqueInfo:', error);
