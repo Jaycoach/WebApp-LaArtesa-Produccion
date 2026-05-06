@@ -1483,7 +1483,7 @@ export const EmpaqueMasa: React.FC = () => {
         || (m.empaque_datos_fase as any)?.fecha_vencimiento_sugerida
         || m.fecha_vencimiento_sugerida
         || null,
-      materiales_alistamiento: [],
+      materiales_alistamiento: directMasaData?.data?.materiales_alistamiento || [],
       ovs,
     };
 
