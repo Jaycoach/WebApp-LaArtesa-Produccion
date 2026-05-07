@@ -848,18 +848,20 @@ const confirmarPesaje = async (req, res, next) => {
 
       // Prorratear costo por producto
       const productosResult = await db.query(
-        `SELECT id, kilos_programados FROM productos_por_masa WHERE masa_id = $1`,
+        `SELECT id, kilos_programados, unidades_programadas FROM productos_por_masa WHERE masa_id = $1`,
         [masaId]
       );
 
       for (const prod of productosResult.rows) {
         const kilosProd = parseFloat(prod.kilos_programados || 0);
-        const costoMPUnitario = kilosMasaReal > 0 ? (costoMPTotal / kilosMasaReal) * kilosProd : 0;
+        const costoMPTotalProd = kilosMasaReal > 0 ? (costoMPTotal / kilosMasaReal) * kilosProd : 0;
+        const unidadesProg = parseFloat(prod.unidades_programadas || 1);
+        const costoMPUnitarioPorPaquete = unidadesProg > 0 ? costoMPTotalProd / unidadesProg : 0;
         await db.query(
           `UPDATE productos_por_masa
            SET costo_mp_unitario = $1, costo_mp_total_prod = $2
            WHERE id = $3`,
-          [costoPorKilo, costoMPUnitario, prod.id]
+          [costoMPUnitarioPorPaquete, costoMPTotalProd, prod.id]
         );
       }
 

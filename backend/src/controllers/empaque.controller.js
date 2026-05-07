@@ -457,7 +457,8 @@ exports.completarEmpaque = async (req, res) => {
     const prodsR = await client.query(
       `SELECT ppm.id, ppm.sap_item_code, ppm.gramaje_unitario,
               COALESCE(ppm.unidades_pan_por_paquete, 1) AS unidades_pan_por_paquete,
-              COALESCE(ed.unidades_empacadas, 0) AS uds_empacadas
+              COALESCE(ed.unidades_empacadas, 0) AS uds_empacadas,
+              ppm.kilos_programados, ppm.costo_mp_total_prod
        FROM productos_por_masa ppm
        LEFT JOIN empaque_detalles ed ON ed.empaque_id = $2 AND ed.producto_masa_id = ppm.id
        WHERE ppm.masa_id = $1`,
@@ -542,19 +543,38 @@ exports.completarEmpaque = async (req, res) => {
     const costoPanUnitario = totalPanesProducidos > 0
       ? costoTotalFinal / totalPanesProducidos : 0;
 
-    // 8. Actualizar costos finales en productos_por_masa
-    await client.query(
-      `UPDATE productos_por_masa SET
-         costo_mo_total        = $2,
-         costo_empaque_total   = $3,
-         costo_indirecto_total = $4,
-         costo_total_final     = $5,
-         costo_unitario_final  = $6,
-         costo_pan_unitario    = $7
-       WHERE masa_id = $1`,
-      [masaId, costoMOTotal, costoEmpaqueTotal, costoIndirectoTotal,
-       costoTotalFinal, costoUnitarioFinal, costoPanUnitario]
+    // 8. Actualizar costos finales en productos_por_masa — prorrateados por kilos por producto
+    const totalKilosPPM = prodsR.rows.reduce(
+      (s, p) => s + parseFloat(p.kilos_programados || 0), 0
     );
+    for (const prod of prodsR.rows) {
+      const ratio = totalKilosPPM > 0
+        ? parseFloat(prod.kilos_programados || 0) / totalKilosPPM
+        : 1 / prodsR.rows.length;
+      const moProd        = costoMOTotal        * ratio;
+      const empaqueProd   = costoEmpaqueTotal   * ratio;
+      const indirectoProd = costoIndirectoTotal * ratio;
+      const mpProd        = parseFloat(prod.costo_mp_total_prod || 0);
+      const totalProd     = mpProd + moProd + empaqueProd + indirectoProd;
+      const udsEmpacadas  = parseInt(prod.uds_empacadas || 0);
+      const panesUd       = parseInt(prod.unidades_pan_por_paquete || 1);
+      const unitarioProd  = udsEmpacadas > 0 ? totalProd / udsEmpacadas : 0;
+      const panUnitProd   = (udsEmpacadas * panesUd) > 0
+        ? totalProd / (udsEmpacadas * panesUd) : 0;
+
+      await client.query(
+        `UPDATE productos_por_masa SET
+           costo_mo_total        = $2,
+           costo_empaque_total   = $3,
+           costo_indirecto_total = $4,
+           costo_total_final     = $5,
+           costo_unitario_final  = $6,
+           costo_pan_unitario    = $7
+         WHERE id = $8`,
+        [masaId, moProd, empaqueProd, indirectoProd,
+         totalProd, unitarioProd, panUnitProd, prod.id]
+      );
+    }
 
     // 9. Marcar empaque y fase completados — SE EJECUTA DESPUÉS de SAP (ver paso 9b más abajo)
     // No se marca COMPLETADA aquí para evitar estado inconsistente si SAP falla

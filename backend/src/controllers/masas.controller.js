@@ -333,12 +333,12 @@ const aprobarMasa = async (req, res, next) => {
       await db.query(
         `UPDATE productos_por_masa
          SET unidades_programadas = $1::integer,
-             kilos_programados = gramaje_unitario * $1::integer * $4::numeric / 1000.0,
+             kilos_programados = gramaje_unitario * $1::integer / 1000.0,
              cantidad_paquetes = $1::integer,
              delta_ajuste = $3::integer,
              updated_at = NOW()
          WHERE id = $2`,
-        [nuevasPaq, prod.id, DELTA_DEFAULT_PAQ, upq]
+        [nuevasPaq, prod.id, DELTA_DEFAULT_PAQ]
       );
     }
     logger.info(`Masa ${id}: delta +${DELTA_DEFAULT_PAQ} paq aplicado a ${prodsSinAjuste.rows.length} productos sin ajuste manual.`);
