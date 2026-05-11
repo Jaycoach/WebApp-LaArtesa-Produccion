@@ -424,7 +424,7 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
         ItemCode:         itemCode,
         Quantity:         data.total_kg,
         WarehouseCode:    'ALMP',
-        AccountCode:      '71050501',
+        AccountCode:      '14100502',
         DistributionRule: 'Operac',
       };
       if (data.manage_batch_numbers && data.batches.length > 0) {
