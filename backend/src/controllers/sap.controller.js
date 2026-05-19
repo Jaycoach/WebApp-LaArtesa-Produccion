@@ -736,6 +736,13 @@ const sincronizarDesdeOV = async (req, res, next) => {
       // Si existen, la lógica por tipo de masa se maneja más abajo en el loop
     }
 
+    // ── ADVISORY LOCK: serializar sincronizaciones concurrentes para la misma fecha ──
+    // Convierte la fecha a un entero estable para usar como lock key
+    // Previene race conditions cuando el usuario dispara varias veces el botón
+    const lockKey = parseInt(fechaProduccion.replace(/-/g, ''), 10);
+    await client.query(`SELECT pg_advisory_xact_lock($1)`, [lockKey]);
+    logger.info(`Advisory lock adquirido para fecha ${fechaProduccion} (key=${lockKey})`);
+
     // 2. Obtener datos combinados OV + artículos desde SAP
     const productos = await sapService.getDatosParaSincronizacion(fechaProduccion);
 
@@ -970,30 +977,52 @@ const sincronizarDesdeOV = async (req, res, next) => {
         ? `${codigoMasa}-ADICIONAL`
         : codigoMasa;
 
-      const masaResult = await client.query(
-        `INSERT INTO masas_produccion (
-           codigo_masa, tipo_masa, nombre_masa, fecha_produccion,
-           total_kilos_base, total_kilos_con_merma, porcentaje_merma, factor_absorcion_usado,
-           estado, fase_actual,
-           fecha_sap_referencia, total_ordenes, total_productos, es_repeticion,
-           es_adicional, masa_adicional_referencia_id
-         ) VALUES ($1, $2, $3, $4, 0, 0, $5, $6, 'PLANIFICACION', 'PLANIFICACION', $7, $8, $9, $10, $11, $12)
-         RETURNING id, uuid`,
-        [
-          codigoMasaFinal,
-          tipoMasa,
-          tipoMasa,
-          fechaProduccion,
-          porcentajeMerma,
-          factorAbsorcion,
-          fechaProduccion,
-          docEntriesUnicos.length,
-          grupo.productos.length,
-          esRepeticion,
-          esAdicional,
-          esAdicional ? masaExistente.id : null
-        ]
-      );
+      let masaResult;
+      try {
+        masaResult = await client.query(
+          `INSERT INTO masas_produccion (
+             codigo_masa, tipo_masa, nombre_masa, fecha_produccion,
+             total_kilos_base, total_kilos_con_merma, porcentaje_merma, factor_absorcion_usado,
+             estado, fase_actual,
+             fecha_sap_referencia, total_ordenes, total_productos, es_repeticion,
+             es_adicional, masa_adicional_referencia_id
+           ) VALUES ($1, $2, $3, $4, 0, 0, $5, $6, 'PLANIFICACION', 'PLANIFICACION', $7, $8, $9, $10, $11, $12)
+           RETURNING id, uuid, codigo_masa`,
+          [
+            codigoMasaFinal,
+            tipoMasa,
+            tipoMasa,
+            fechaProduccion,
+            porcentajeMerma,
+            factorAbsorcion,
+            fechaProduccion,
+            docEntriesUnicos.length,
+            grupo.productos.length,
+            esRepeticion,
+            esAdicional,
+            esAdicional ? masaExistente.id : null
+          ]
+        );
+      } catch (insertErr) {
+        if (insertErr.code === '23505' && insertErr.constraint === 'uq_masa_tipo_fecha') {
+          // Otra transacción concurrente ya creó esta masa — recuperarla y agregar productos
+          logger.warn(`Race condition detectada para tipo ${tipoMasa} — masa ya creada por transacción concurrente, recuperando`);
+          const masaRecuperadaResult = await client.query(
+            `SELECT id, uuid, codigo_masa FROM masas_produccion
+             WHERE DATE(fecha_produccion) = $1
+               AND tipo_masa = $2
+               AND es_subdivision = false
+               AND es_adicional = false
+               AND masa_padre_id IS NULL
+             ORDER BY id DESC LIMIT 1`,
+            [fechaProduccion, tipoMasa]
+          );
+          if (masaRecuperadaResult.rows.length === 0) throw insertErr;
+          masaResult = masaRecuperadaResult;
+        } else {
+          throw insertErr;
+        }
+      }
 
       const masaId = masaResult.rows[0].id;
 

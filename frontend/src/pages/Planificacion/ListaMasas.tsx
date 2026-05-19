@@ -1,6 +1,6 @@
 // frontend/src/pages/Planificacion/ListaMasas.tsx
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   useMasasByFecha,
@@ -29,15 +29,20 @@ export const ListaMasas: React.FC = () => {
   const { data: masas, isLoading, error, refetch } = useMasasByFecha(fecha);
   const sincronizarMutation = useSincronizarSAP();
   const sincronizarBOMMutation = useSincronizarBOM();
+  const sincronizandoRef = useRef(false);
   const aprobarMutation = useAprobarMasa();
   const pendienteMutation = useMarcarPendiente();
 
   const handleSincronizar = async () => {
+    if (sincronizandoRef.current || sincronizarMutation.isPending) return;
+    sincronizandoRef.current = true;
     try {
       await sincronizarMutation.mutateAsync({ fecha });
       refetch();
     } catch (error) {
       console.error('Error sincronizando:', error);
+    } finally {
+      sincronizandoRef.current = false;
     }
   };
 
