@@ -973,10 +973,10 @@ const sincronizarDesdeOV = async (req, res, next) => {
       const porcentajeMerma = 5.0;
 
       const docEntriesUnicos = [...new Set(grupo.productos.map(p => p.docEntry))];
-      const esRepeticion = grupo.productos.some(p => p.series === 89);
+      const esRepeticion = Boolean(grupo.productos.some(p => p.series === 89));
 
       // Determinar si es masa adicional (tipo ya en producción o completada, forzar=false)
-      const esAdicional = (estaEnProduccion || estaCompletada) && !forzar;
+      const esAdicional = Boolean((estaEnProduccion || estaCompletada) && !forzar);
       const codigoMasaFinal = esAdicional
         ? `${codigoMasa}-ADICIONAL`
         : codigoMasa;
