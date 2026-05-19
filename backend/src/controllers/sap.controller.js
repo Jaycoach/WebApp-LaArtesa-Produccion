@@ -139,8 +139,10 @@ const sincronizarSAP = async (req, res, next) => {
           porcentaje_merma,
           factor_absorcion_usado,
           estado,
-          fase_actual
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'PLANIFICACION', 'PLANIFICACION')
+          fase_actual,
+          es_subdivision,
+          es_adicional
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'PLANIFICACION', 'PLANIFICACION', false, false)
         RETURNING id, uuid
       `;
 
@@ -530,8 +532,10 @@ const sincronizarDemo = async (req, res, next) => {
           factor_absorcion_usado,
           estado,
           fase_actual,
-          created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'EN_PROCESO', 'PESAJE', $9)
+          created_by,
+          es_subdivision,
+          es_adicional
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'EN_PROCESO', 'PESAJE', $9, false, false)
         RETURNING id, uuid
       `;
 
