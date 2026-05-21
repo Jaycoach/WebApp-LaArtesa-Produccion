@@ -303,7 +303,10 @@ export const PesajeMasa: React.FC = () => {
                       <div key={p.sap_item_code} className="flex items-center justify-between text-sm">
                         <span className="text-gray-700">{p.producto_nombre}</span>
                         <div className="flex items-center gap-3 ml-4">
-                          <span className="text-gray-400 text-xs">{p.unidades_pedidas} paq</span>
+                          <span className="text-gray-400 text-xs">{p.unidades_pedidas} paq pedidos</span>
+                          {p.multiplo_divisor > 0 && p.unidades_ajustadas !== p.unidades_programadas && (
+                            <span className="text-xs text-amber-600 font-semibold">→ {p.unidades_ajustadas} paq</span>
+                          )}
                           <span className="font-bold text-indigo-700">
                             {p.panes_totales} panes
                             <span className="text-xs font-normal text-indigo-400 ml-1">×{p.unidades_por_paquete}</span>
