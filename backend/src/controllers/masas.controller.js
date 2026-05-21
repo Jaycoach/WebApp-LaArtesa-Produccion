@@ -321,24 +321,30 @@ const aprobarMasa = async (req, res, next) => {
     // Aplicar delta por defecto (+2 paq) a productos que no fueron ajustados manualmente
     // "no ajustado" = unidades_programadas == unidades_pedidas (nunca tocado por el usuario)
     const prodsSinAjuste = await db.query(
-      `SELECT id, unidades_programadas, unidades_pedidas, unidades_por_paquete
+      `SELECT id, unidades_programadas, unidades_pedidas, unidades_por_paquete, multiplo_divisor
        FROM productos_por_masa
        WHERE masa_id = $1 AND delta_ajuste IS NULL`,
       [id]
     );
     const DELTA_DEFAULT_PAQ = 2;
     for (const prod of prodsSinAjuste.rows) {
-      const upq = Math.max(1, Number(prod.unidades_por_paquete) || 1);
-      const nuevasPaq = Number(prod.unidades_programadas) + DELTA_DEFAULT_PAQ;
+      const divisor        = Math.max(0, Number(prod.multiplo_divisor) || 0);
+      const nuevasPaq      = Number(prod.unidades_programadas) + DELTA_DEFAULT_PAQ;
+      const nuevasAjustadas = (divisor > 0 && nuevasPaq % divisor !== 0)
+        ? (Math.floor(nuevasPaq / divisor) + 1) * divisor
+        : nuevasPaq;
+      const nuevasExcedente = nuevasAjustadas - nuevasPaq;
       await db.query(
         `UPDATE productos_por_masa
          SET unidades_programadas = $1::integer,
-             kilos_programados = gramaje_unitario * $1::integer / 1000.0,
-             cantidad_paquetes = $1::integer,
-             delta_ajuste = $3::integer,
-             updated_at = NOW()
+             kilos_programados    = gramaje_unitario * $1::integer / 1000.0,
+             cantidad_paquetes    = $1::integer,
+             delta_ajuste         = $3::integer,
+             unidades_ajustadas   = $4::integer,
+             unidades_excedente   = $5::integer,
+             updated_at           = NOW()
          WHERE id = $2`,
-        [nuevasPaq, prod.id, DELTA_DEFAULT_PAQ]
+        [nuevasPaq, prod.id, DELTA_DEFAULT_PAQ, nuevasAjustadas, nuevasExcedente]
       );
     }
     logger.info(`Masa ${id}: delta +${DELTA_DEFAULT_PAQ} paq aplicado a ${prodsSinAjuste.rows.length} productos sin ajuste manual.`);
