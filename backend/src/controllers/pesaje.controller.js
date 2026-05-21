@@ -194,6 +194,7 @@ const getChecklist = async (req, res, next) => {
     // Productos con total de panes calculado
     const productosResult = await db.query(
       `SELECT producto_nombre, sap_item_code, unidades_pedidas,
+              unidades_programadas, unidades_ajustadas, multiplo_divisor,
               unidades_por_paquete, cantidad_paquetes
        FROM productos_por_masa
        WHERE masa_id = $1
@@ -203,13 +204,20 @@ const getChecklist = async (req, res, next) => {
     const productosResumen = productosResult.rows.map(p => {
       const upq = (p.unidades_por_paquete && parseFloat(p.unidades_por_paquete) > 1)
         ? parseFloat(p.unidades_por_paquete)
-        : (() => { const m = (p.producto_nombre || '').match(/ X ?(\d+)/i); return m ? parseInt(m[1]) : 1; })();
+        : (() => { const m = new RegExp(' X ?(\\d+)', 'i').exec(p.producto_nombre || ''); return m ? parseInt(m[1]) : 1; })();
+      // Usar unidades_ajustadas (múltiplo del divisor) si aplica, si no unidades_programadas
+      const paqAProducir = (parseInt(p.multiplo_divisor) > 0 && parseInt(p.unidades_ajustadas) > 0)
+        ? parseInt(p.unidades_ajustadas)
+        : parseInt(p.unidades_programadas);
       return {
         producto_nombre:      p.producto_nombre,
         sap_item_code:        p.sap_item_code,
         unidades_pedidas:     parseInt(p.unidades_pedidas),
+        unidades_programadas: parseInt(p.unidades_programadas),
+        unidades_ajustadas:   parseInt(p.unidades_ajustadas) || parseInt(p.unidades_programadas),
+        multiplo_divisor:     parseInt(p.multiplo_divisor) || 0,
         unidades_por_paquete: upq,
-        panes_totales:        parseInt(p.unidades_pedidas) * upq,
+        panes_totales:        paqAProducir * upq,
       };
     });
 
