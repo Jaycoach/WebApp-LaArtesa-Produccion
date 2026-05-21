@@ -1709,12 +1709,48 @@ const sincronizarInventarioMP = async (_req, res, next) => {
       }
     }
 
+    // 3. Actualizar atributos maestros de artículos PT (multiplo_divisor, tipo_masa, etc.)
+    // Esto evita depender del BOM (muy pesado) para sincronizar campos de producto.
+    let articulosActualizados = 0;
+    try {
+      const articulosPT = await sapService.getArticulosConTipoMasa();
+      for (const articulo of articulosPT) {
+        await db.query(
+          `INSERT INTO sap_articulos
+             (item_code, item_name, tipo_masa, sales_qty_per_pack, gramaje, multiplo_divisor, activo, synced_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, true, NOW(), NOW())
+           ON CONFLICT (item_code) DO UPDATE SET
+             item_name          = EXCLUDED.item_name,
+             tipo_masa          = EXCLUDED.tipo_masa,
+             sales_qty_per_pack = EXCLUDED.sales_qty_per_pack,
+             gramaje            = EXCLUDED.gramaje,
+             multiplo_divisor   = EXCLUDED.multiplo_divisor,
+             activo             = true,
+             synced_at          = NOW(),
+             updated_at         = NOW()`,
+          [
+            articulo.itemCode,
+            articulo.itemName,
+            articulo.tipoMasa,
+            articulo.salesQtyPerPack,
+            articulo.gramaje,
+            articulo.multiploDivisor || 0,
+          ]
+        );
+        articulosActualizados++;
+      }
+      logger.info(`Inventario MP: ${articulosActualizados} artículos PT actualizados en sap_articulos`);
+    } catch (ptErr) {
+      // No crítico — el inventario MP ya sincronizó correctamente
+      logger.warn(`Inventario MP: fallo al actualizar sap_articulos (no crítico): ${ptErr.message}`);
+    }
+
     logger.info(`Inventario MP sincronizado: ${sincronizados} ítems, ${lotesSincronizados} lotes`);
 
     return res.json({
       success: true,
       message: `Inventario sincronizado: ${sincronizados} materias primas, ${lotesSincronizados} lotes`,
-      data: { sincronizados, lotes_sincronizados: lotesSincronizados },
+      data: { sincronizados, lotes_sincronizados: lotesSincronizados, articulos_pt_actualizados: articulosActualizados },
     });
   } catch (error) {
     logger.error('Error sincronizando inventario MP:', error);
