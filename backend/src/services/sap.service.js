@@ -696,58 +696,12 @@ class SAPService {
     if (!itemCodes || itemCodes.length === 0) return {};
     await this.ensureSession();
 
-    // Estrategia: OBTN+OBTQ via SQLQuery filtrado por ítem + WhsCode='ALMP'
-    // Devuelve cantidades reales por lote en bodega ALMP — no distribución uniforme.
-    // Filtrar por ítem individual evita el timeout 502 que ocurre al escanear la tabla completa.
-    // Fallback a BatchNumberDetails (distribución uniforme) si SQLQuery falla para un ítem.
+    // Estrategia: una sola SQLQuery con IN (...) para todos los ítems + paginación $skip.
+    // Validado: 84 ítems → 78 lotes en 4 páginas × ~0.3s = ~1-2s total
+    // (vs. el enfoque anterior: 1 query por ítem × 3 llamadas × 49 ítems = ~2 minutos)
+    const SQL_CODE = 'artesa_lotes_mp_batch';
     const resultado = {};
 
-    const obtenerLotesReales = async (itemCode) => {
-      // Código único por ítem — alfanumérico, sin caracteres especiales
-      const sqlCode = `artlot_${itemCode.replace(/[^a-zA-Z0-9]/g, '_')}`;
-      const sqlText = `SELECT "OBTN"."DistNumber", "OBTQ"."Quantity", "OBTN"."ExpDate", "OBTN"."MnfDate", "OBTN"."CreateDate" FROM "OBTN" INNER JOIN "OBTQ" ON "OBTN"."ItemCode" = "OBTQ"."ItemCode" AND "OBTN"."SysNumber" = "OBTQ"."SysNumber" WHERE "OBTN"."ItemCode" = '${itemCode}' AND "OBTQ"."WhsCode" = 'ALMP' AND "OBTQ"."Quantity" > 0`;
-
-      // DELETE + POST siempre — más simple y confiable que GET-before-POST
-      // El GET por clave en esta instancia de Heinsohn no es confiable con >20 queries
-      try {
-        await this.client.delete(`/SQLQueries('${sqlCode}')`, { timeout: 10000 });
-      } catch {
-        // No existe aún — ignorar error del DELETE
-      }
-      await this.client.post('/SQLQueries', {
-        SqlCode: sqlCode,
-        SqlName: sqlCode,
-        SqlText: sqlText,
-      }, { timeout: 10000 });
-
-      const listResp = await this.client.get(
-        `/SQLQueries('${sqlCode}')/List`,
-        { timeout: 30000 }
-      );
-      return listResp.data?.value || [];
-    };
-
-    const obtenerLotesFallback = async (itemCode) => {
-      // Fallback: BatchNumberDetails con distribución uniforme del stock ALMP
-      const response = await this.client.get(
-        `/BatchNumberDetails?$filter=ItemCode eq '${itemCode}'&$select=ItemCode,Batch,AdmissionDate,ManufacturingDate,ExpirationDate,Status`,
-        { timeout: 30000 }
-      );
-      const lotes = response.data?.value || [];
-      if (lotes.length === 0) return [];
-      const stockTotal = parseFloat(stockPorItem[itemCode]?.stockAlmp || 0);
-      const cantidadPorLote = lotes.length > 0 ? stockTotal / lotes.length : 0;
-      return lotes.map(lote => ({
-        batch:               lote.Batch,
-        cantidad_disponible: parseFloat(cantidadPorLote.toFixed(3)),
-        admissionDate:       lote.AdmissionDate ? lote.AdmissionDate.substring(0, 10) : null,
-        expirationDate:      lote.ExpirationDate ? lote.ExpirationDate.substring(0, 10) : null,
-        manufacturingDate:   lote.ManufacturingDate ? lote.ManufacturingDate.substring(0, 10) : null,
-        status:              'released',
-      }));
-    };
-
-    // Parsear fecha YYYYMMDD de OBTQ/OBTN → 'YYYY-MM-DD' o null
     const parseFechaSAP = (val) => {
       if (!val) return null;
       const s = String(val).replace(/\D/g, '');
@@ -755,35 +709,70 @@ class SAPService {
       return null;
     };
 
-    for (const itemCode of itemCodes) {
+    try {
+      // 1. Construir y registrar la SQLQuery con todos los ítems en el IN
+      const inClause = itemCodes.map(c => `'${c}'`).join(',');
+      const sqlText = `SELECT "OBTN"."ItemCode", "OBTN"."DistNumber", "OBTQ"."Quantity", "OBTN"."ExpDate", "OBTN"."MnfDate", "OBTN"."CreateDate" FROM "OBTN" INNER JOIN "OBTQ" ON "OBTN"."ItemCode" = "OBTQ"."ItemCode" AND "OBTN"."SysNumber" = "OBTQ"."SysNumber" WHERE "OBTN"."ItemCode" IN (${inClause}) AND "OBTQ"."WhsCode" = 'ALMP' AND "OBTQ"."Quantity" > 0`;
+
+      // DELETE + POST siempre para garantizar que el SqlText esté actualizado
       try {
-          const rows = await obtenerLotesReales(itemCode);
-          if (rows.length === 0) continue;
+        await this.client.delete(`/SQLQueries('${SQL_CODE}')`, { timeout: 10000 });
+      } catch {
+        // No existe aún — ignorar
+      }
+      await this.client.post('/SQLQueries', {
+        SqlCode: SQL_CODE,
+        SqlName: SQL_CODE,
+        SqlText: sqlText,
+      }, { timeout: 10000 });
 
-          resultado[itemCode] = rows.map(row => ({
-            batch:               row.DistNumber,
-            cantidad_disponible: parseFloat(parseFloat(row.Quantity).toFixed(3)),
-            admissionDate:       parseFechaSAP(row.CreateDate),
-            expirationDate:      parseFechaSAP(row.ExpDate),
-            manufacturingDate:   parseFechaSAP(row.MnfDate),
-            status:              'released',
-          }));
+      // 2. Paginar con $skip hasta agotar resultados (SAP devuelve máx 20 por página)
+      const todasLasFilas = [];
+      let skip = 0;
+      while (true) {
+        const resp = await this.client.get(
+          `/SQLQueries('${SQL_CODE}')/List?$skip=${skip}`,
+          { timeout: 30000 }
+        );
+        const rows = resp.data?.value || [];
+        todasLasFilas.push(...rows);
+        if (rows.length < 20) break;
+        skip += 20;
+      }
 
-          resultado[itemCode].sort((a, b) => {
-            if (!a.admissionDate) return 1;
-            if (!b.admissionDate) return -1;
-            return a.admissionDate.localeCompare(b.admissionDate);
-          });
+      logger.info(`SAP: lotes MP batch — ${todasLasFilas.length} filas totales para ${itemCodes.length} ítems`);
 
-          logger.info(`SAP: lotes reales ALMP para ${itemCode}: ${rows.length} lotes via OBTQ`);
-        } catch (err) {
-          // NO usar fallback con distribución uniforme — genera cantidades inventadas.
-          // Si OBTQ falla, el ítem queda sin lotes hasta el próximo sync exitoso.
-          logger.warn(`SAP OBTQ falló para ${itemCode}, omitiendo lotes: ${err?.message}`);
-        }
+      // 3. Agrupar por ItemCode
+      for (const row of todasLasFilas) {
+        const itemCode = row.ItemCode;
+        if (!itemCode) continue;
+        if (!resultado[itemCode]) resultado[itemCode] = [];
+        resultado[itemCode].push({
+          batch:               row.DistNumber,
+          cantidad_disponible: parseFloat(parseFloat(row.Quantity).toFixed(3)),
+          admissionDate:       parseFechaSAP(row.CreateDate),
+          expirationDate:      parseFechaSAP(row.ExpDate),
+          manufacturingDate:   parseFechaSAP(row.MnfDate),
+          status:              'released',
+        });
+      }
+
+      // 4. Ordenar lotes por fecha de ingreso (FIFO)
+      for (const itemCode of Object.keys(resultado)) {
+        resultado[itemCode].sort((a, b) => {
+          if (!a.admissionDate) return 1;
+          if (!b.admissionDate) return -1;
+          return a.admissionDate.localeCompare(b.admissionDate);
+        });
+        logger.info(`SAP: lotes ALMP para ${itemCode}: ${resultado[itemCode].length} lotes via batch`);
+      }
+
+    } catch (err) {
+      logger.error(`SAP: getLotesMateriaPrima batch falló: ${err?.message}. Sin lotes disponibles.`);
+      // Retorna vacío — el inventario MP ya se sincronizó correctamente (stock/costo)
     }
 
-    logger.info(`SAP: lotes obtenidos para ${Object.keys(resultado).length} ítems (OBTQ + fallback BatchNumberDetails)`);
+    logger.info(`SAP: lotes obtenidos para ${Object.keys(resultado).length} ítems via batch OBTQ`);
     return resultado;
   }
 }
