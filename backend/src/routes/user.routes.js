@@ -321,7 +321,7 @@ router.get('/:id', checkRole(['admin', 'supervisor']), userIdValidation, userCon
  *       403:
  *         description: Acceso denegado - Se requiere rol Admin
  */
-router.post('/', checkRole(['admin']), createUserValidation, userController.createUser);
+router.post('/', checkRole(['admin', 'supervisor']), createUserValidation, userController.createUser);
 
 /**
  * @swagger
