@@ -732,7 +732,7 @@ class SAPService {
       while (true) {
         const resp = await this.client.get(
           `/SQLQueries('${SQL_CODE}')/List?$skip=${skip}`,
-          { timeout: 30000 }
+          { timeout: 120000 }
         );
         const rows = resp.data?.value || [];
         todasLasFilas.push(...rows);
