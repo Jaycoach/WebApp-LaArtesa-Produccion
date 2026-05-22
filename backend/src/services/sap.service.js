@@ -710,36 +710,43 @@ class SAPService {
     };
 
     try {
-      // 1. Construir y registrar la SQLQuery con todos los ítems en el IN
-      const inClause = itemCodes.map(c => `'${c}'`).join(',');
-      const sqlText = `SELECT "OBTN"."ItemCode", "OBTN"."DistNumber", "OBTQ"."Quantity", "OBTN"."ExpDate", "OBTN"."MnfDate", "OBTN"."CreateDate" FROM "OBTN" INNER JOIN "OBTQ" ON "OBTN"."ItemCode" = "OBTQ"."ItemCode" AND "OBTN"."SysNumber" = "OBTQ"."SysNumber" WHERE "OBTN"."ItemCode" IN (${inClause}) AND "OBTQ"."WhsCode" = 'ALMP' AND "OBTQ"."Quantity" > 0`;
-
-      // DELETE + POST siempre para garantizar que el SqlText esté actualizado
-      try {
-        await this.client.delete(`/SQLQueries('${SQL_CODE}')`, { timeout: 10000 });
-      } catch {
-        // No existe aún — ignorar
+      // 1. Partir itemCodes en chunks de 15 para evitar timeouts en SAP
+      const CHUNK_SIZE = 15;
+      const chunks = [];
+      for (let i = 0; i < itemCodes.length; i += CHUNK_SIZE) {
+        chunks.push(itemCodes.slice(i, i + CHUNK_SIZE));
       }
-      await this.client.post('/SQLQueries', {
-        SqlCode: SQL_CODE,
-        SqlName: SQL_CODE,
-        SqlText: sqlText,
-      }, { timeout: 10000 });
+      logger.info(`SAP: lotes MP — ${itemCodes.length} ítems en ${chunks.length} chunks de ${CHUNK_SIZE}`);
 
-      // 2. Paginar con $skip hasta agotar resultados (SAP devuelve máx 20 por página)
       const todasLasFilas = [];
-      let skip = 0;
-      while (true) {
-        const resp = await this.client.get(
-          `/SQLQueries('${SQL_CODE}')/List?$skip=${skip}`,
-          { timeout: 120000 }
-        );
-        const rows = resp.data?.value || [];
-        todasLasFilas.push(...rows);
-        if (rows.length < 20) break;
-        skip += 20;
-      }
 
+      for (const [idx, chunk] of chunks.entries()) {
+        const inClause = chunk.map(c => `'${c}'`).join(',');
+        const sqlText = `SELECT "OBTN"."ItemCode", "OBTN"."DistNumber", "OBTQ"."Quantity", "OBTN"."ExpDate", "OBTN"."MnfDate", "OBTN"."CreateDate" FROM "OBTN" INNER JOIN "OBTQ" ON "OBTN"."ItemCode" = "OBTQ"."ItemCode" AND "OBTN"."SysNumber" = "OBTQ"."SysNumber" WHERE "OBTN"."ItemCode" IN (${inClause}) AND "OBTQ"."WhsCode" = 'ALMP' AND "OBTQ"."Quantity" > 0`;
+        try {
+          await this.client.delete(`/SQLQueries('${SQL_CODE}')`, { timeout: 10000 });
+        } catch {
+          // No existe aún — ignorar
+        }
+        await this.client.post('/SQLQueries', {
+          SqlCode: SQL_CODE,
+          SqlName: SQL_CODE,
+          SqlText: sqlText,
+        }, { timeout: 10000 });
+        // Paginar con $skip hasta agotar resultados (SAP devuelve máx 20 por página)
+        let skip = 0;
+        while (true) {
+          const resp = await this.client.get(
+            `/SQLQueries('${SQL_CODE}')/List?$skip=${skip}`,
+            { timeout: 30000 }
+          );
+          const rows = resp.data?.value || [];
+          todasLasFilas.push(...rows);
+          if (rows.length < 20) break;
+          skip += 20;
+        }
+        logger.info(`SAP: lotes chunk ${idx + 1}/${chunks.length} — ${chunk.length} ítems OK`);
+      }
       logger.info(`SAP: lotes MP batch — ${todasLasFilas.length} filas totales para ${itemCodes.length} ítems`);
 
       // 3. Agrupar por ItemCode
