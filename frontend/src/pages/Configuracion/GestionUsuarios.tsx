@@ -27,7 +27,7 @@ const ROLES_DISPONIBLES = ['OPERARIO', 'SUPERVISOR', 'CALIDAD', 'AUDITOR', 'ADMI
 
 export const GestionUsuarios: React.FC = () => {
   const usuario = useAuthStore((state) => state.user);
-  const esAdmin = usuario?.rol === 'admin';
+  const esAdmin = usuario?.rol === 'admin' || usuario?.rol === 'supervisor';
 
   const [pendientes, setPendientes] = useState<Usuario[]>([]);
   const [todos, setTodos] = useState<Usuario[]>([]);
