@@ -604,7 +604,7 @@ exports.completarEmpaque = async (req, res) => {
               ItemCode:      mat.item_code_comp,
               Quantity:      qty,
               WarehouseCode: 'ALMP',
-              AccountCode:   '14100502',
+              AccountCode:   '14100501',
             });
           }
         }
@@ -657,7 +657,7 @@ exports.completarEmpaque = async (req, res) => {
           Quantity:      parseInt(prod.uds_empacadas),
           Price:         parseFloat(costoUnitarioProd.toFixed(2)),
           WarehouseCode: 'PROTERMI',
-          AccountCode:   '14100502',
+          AccountCode:   '14100501',
           BatchNumbers: [{
             BatchNumber:       loteProduccion,
             Quantity:          parseInt(prod.uds_empacadas),
