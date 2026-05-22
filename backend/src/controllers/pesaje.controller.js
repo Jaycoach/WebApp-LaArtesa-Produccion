@@ -96,6 +96,7 @@ const getChecklist = async (req, res, next) => {
         `SELECT item_code, batch, status, admission_date, expiration_date, cantidad_disponible
          FROM sap_lotes_mp
          WHERE item_code = ANY($1)
+           AND cantidad_disponible > 0
          ORDER BY item_code, admission_date ASC NULLS LAST`,
         [itemCodes]
       );
