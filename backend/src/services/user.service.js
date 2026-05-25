@@ -138,7 +138,7 @@ class UserService {
    */
   async createUser(userData) {
     const {
-      username, email, password, nombre_completo, rol = 'operador',
+      username, email, password, nombre_completo, rol: rolRaw = 'OPERARIO',
     } = userData;
 
     const client = await pool.getClient();
@@ -158,6 +158,9 @@ class UserService {
 
       // Hash de contraseña
       const hashedPassword = await bcrypt.hash(password, 12);
+
+      // Normalizar rol a mayúsculas (DB almacena en MAYÚSCULAS)
+      const rol = (rolRaw || 'OPERARIO').toUpperCase();
 
       // Insertar usuario
       const result = await client.query(
@@ -185,7 +188,8 @@ class UserService {
    * Actualizar usuario
    */
   async updateUser(userId, updates) {
-    const { nombre_completo, email, rol } = updates;
+    const { nombre_completo, email } = updates;
+    const rol = updates.rol ? updates.rol.toUpperCase() : undefined;
 
     const client = await pool.getClient();
 
@@ -477,10 +481,11 @@ class UserService {
           COUNT(*) FILTER (WHERE activo = true) as activos,
           COUNT(*) FILTER (WHERE activo = false) as inactivos,
           COUNT(*) FILTER (WHERE bloqueado_hasta IS NOT NULL AND bloqueado_hasta > NOW()) as bloqueados,
-          COUNT(*) FILTER (WHERE rol = 'admin') as admins,
-          COUNT(*) FILTER (WHERE rol = 'supervisor') as supervisores,
-          COUNT(*) FILTER (WHERE rol = 'operador') as operadores,
-          COUNT(*) FILTER (WHERE rol = 'visualizador') as visualizadores
+          COUNT(*) FILTER (WHERE rol = 'ADMIN') as admins,
+          COUNT(*) FILTER (WHERE rol = 'SUPERVISOR') as supervisores,
+          COUNT(*) FILTER (WHERE rol = 'OPERARIO') as operadores,
+          COUNT(*) FILTER (WHERE rol = 'CALIDAD') as calidad,
+          COUNT(*) FILTER (WHERE rol = 'AUDITOR') as auditores
         FROM usuarios
       `);
 
