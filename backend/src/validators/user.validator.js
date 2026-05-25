@@ -13,13 +13,13 @@ const handleValidationErrors = (req, res, next) => {
   const errors = validationResult(req);
 
   if (!errors.isEmpty()) {
+    const logger = require('../utils/logger');
+    const errList = errors.array().map((err) => ({ field: err.path, message: err.msg }));
+    logger.warn(`[Validator] ${req.method} ${req.path} — errores: ${JSON.stringify(errList)} — body: ${JSON.stringify({ ...req.body, password: req.body.password ? '***' : undefined })}`);
     return res.status(400).json({
       success: false,
       message: 'Errores de validación',
-      errors: errors.array().map((err) => ({
-        field: err.path,
-        message: err.msg,
-      })),
+      errors: errList,
     });
   }
 
@@ -55,8 +55,8 @@ const createUserValidation = [
     .withMessage('El nombre completo debe tener entre 3 y 100 caracteres'),
 
   body('rol')
-    .isIn(['admin', 'supervisor', 'operador', 'visualizador'])
-    .withMessage('Rol inválido. Debe ser: admin, supervisor, operador o visualizador'),
+    .isIn(['admin', 'supervisor', 'operario', 'calidad'])
+    .withMessage('Rol inválido. Debe ser: admin, supervisor, operario o calidad'),
 
   handleValidationErrors,
 ];
@@ -84,8 +84,8 @@ const updateUserValidation = [
 
   body('rol')
     .optional()
-    .isIn(['admin', 'supervisor', 'operador', 'visualizador'])
-    .withMessage('Rol inválido. Debe ser: admin, supervisor, operador o visualizador'),
+    .isIn(['admin', 'supervisor', 'operario', 'calidad'])
+    .withMessage('Rol inválido. Debe ser: admin, supervisor, operario o calidad'),
 
   handleValidationErrors,
 ];
@@ -134,7 +134,7 @@ const listUsersValidation = [
 
   query('rol')
     .optional()
-    .isIn(['admin', 'supervisor', 'operador', 'visualizador'])
+    .isIn(['admin', 'supervisor', 'operario', 'calidad'])
     .withMessage('Rol inválido'),
 
   query('activo')
