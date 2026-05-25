@@ -23,7 +23,12 @@ interface CrearUsuarioForm {
   rol: string;
 }
 
-const ROLES_DISPONIBLES = ['OPERARIO', 'SUPERVISOR', 'CALIDAD', 'AUDITOR', 'ADMIN'];
+const ROLES_DISPONIBLES: { label: string; value: string }[] = [
+  { label: 'Operario', value: 'operario' },
+  { label: 'Calidad', value: 'calidad' },
+  { label: 'Supervisor', value: 'supervisor' },
+  { label: 'Admin', value: 'admin' },
+];
 
 export const GestionUsuarios: React.FC = () => {
   const usuario = useAuthStore((state) => state.user);
@@ -38,7 +43,7 @@ export const GestionUsuarios: React.FC = () => {
   const [error, setError] = useState('');
 
   const [form, setForm] = useState<CrearUsuarioForm>({
-    username: '', email: '', password: '', nombre_completo: '', rol: 'OPERARIO',
+    username: '', email: '', password: '', nombre_completo: '', rol: 'operario',
   });
   const [creando, setCreando] = useState(false);
 
@@ -109,7 +114,7 @@ export const GestionUsuarios: React.FC = () => {
       const res = await apiService.post(API_CONFIG.ENDPOINTS.USERS.CREATE, form);
       if (res.success) {
         setSuccess(`Usuario "${form.username}" creado. Se enviará email de verificación.`);
-        setForm({ username: '', email: '', password: '', nombre_completo: '', rol: 'OPERARIO' });
+        setForm({ username: '', email: '', password: '', nombre_completo: '', rol: 'operario' });
         setTab('pendientes');
         await cargarPendientes();
       } else {
@@ -124,16 +129,22 @@ export const GestionUsuarios: React.FC = () => {
   };
 
   const rolBadge = (rol: string) => {
+    const rolUp = (rol || '').toUpperCase();
     const colores: Record<string, string> = {
       ADMIN: 'bg-red-100 text-red-800',
       SUPERVISOR: 'bg-blue-100 text-blue-800',
       CALIDAD: 'bg-purple-100 text-purple-800',
-      AUDITOR: 'bg-yellow-100 text-yellow-800',
       OPERARIO: 'bg-gray-100 text-gray-700',
     };
+    const labels: Record<string, string> = {
+      ADMIN: 'Admin',
+      SUPERVISOR: 'Supervisor',
+      CALIDAD: 'Calidad',
+      OPERARIO: 'Operario',
+    };
     return (
-      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${colores[rol] || 'bg-gray-100 text-gray-700'}`}>
-        {rol}
+      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${colores[rolUp] || 'bg-gray-100 text-gray-700'}`}>
+        {labels[rolUp] || rol}
       </span>
     );
   };
@@ -335,7 +346,7 @@ export const GestionUsuarios: React.FC = () => {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
                 >
                   {ROLES_DISPONIBLES.map((r) => (
-                    <option key={r} value={r}>{r}</option>
+                    <option key={r.value} value={r.value}>{r.label}</option>
                   ))}
                 </select>
               </div>
