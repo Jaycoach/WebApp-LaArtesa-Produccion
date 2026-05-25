@@ -880,7 +880,7 @@ const confirmarPesaje = async (req, res, next) => {
     }
 
     // Enviar a SAP — bloqueante. PESAJE aún no se marcó COMPLETADA, no hay nada que revertir.
-    const sapResult = await enviarInventoryGenExits(masaId, req.user.id);
+    const sapResult = await enviarInventoryGenExits(masaId, req.user.id, fecha_local);
     if (!sapResult.success) {
       return res.status(502).json({
         success: false,
