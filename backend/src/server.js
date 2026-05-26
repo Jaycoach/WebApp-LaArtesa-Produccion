@@ -292,6 +292,23 @@ const startServer = async () => {
 
       logger.info('Sistema listo para recibir peticiones');
     });
+
+    // ── Cron: sync stock materiales de empaque ────────────────────────────
+    // Corre a las 5:00, 8:00, 11:00, 14:00, 17:00 — cubre toda la jornada
+    const cron = require('node-cron');
+    const { syncPreciosEmpaque } = require('./controllers/config.controller');
+    cron.schedule('0 5,8,11,14,17 * * *', async () => {
+      logger.info('Cron: iniciando sync stock materiales de empaque...');
+      try {
+        await syncPreciosEmpaque(null, {
+          json: (data) => logger.info(`Cron sync empaque: ${data.message}`),
+        }, (err) => { if (err) logger.error('Cron sync empaque error:', err); });
+      } catch (err) {
+        logger.error('Cron sync empaque excepción:', err.message);
+      }
+    }, { timezone: 'America/Bogota' });
+    logger.info('Cron sync empaque registrado: 5h, 8h, 11h, 14h, 17h (Bogotá)');
+
   } catch (error) {
     logger.error('Error al iniciar el servidor:', error);
     process.exit(1);
