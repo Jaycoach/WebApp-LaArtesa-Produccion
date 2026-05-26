@@ -589,9 +589,9 @@ const PanelEmpaqueMasa: React.FC<{
         body: JSON.stringify({
           unidades_empacadas: parseInt(vals.emp) || 0,
           unidades_merma: (() => {
-            const prod = masaSeleccionada.ovs.flatMap(o => o.productos).find(p => p.id === prodId);
+            const prod = masaActualData?.data?.productos?.find((p: any) => p.id === productoId);
             const emp = parseInt(vals.emp) || 0;
-            const base = prod ? (prod.unidades_divididas > 0 ? prod.unidades_divididas : prod.unidades_horneadas) : 0;
+            const base = prod ? (prod.cantidad_divisiones > 0 ? prod.cantidad_divisiones : (prod.unidades_terminadas_horneado || 0)) : 0;
             return Math.max(0, base - emp);
           })(),
         }),
