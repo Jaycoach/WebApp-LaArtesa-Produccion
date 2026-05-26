@@ -596,7 +596,7 @@ exports.completarEmpaque = async (req, res) => {
             docLines.push({
               ItemCode:      mat.item_code_comp,
               Quantity:      qty,
-              WarehouseCode: 'ALMP',
+              WarehouseCode: 'ALEMP',
               AccountCode:   '14100501',
             });
           }
