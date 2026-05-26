@@ -1015,62 +1015,103 @@ const PanelEmpaqueMasa: React.FC<{
       ))}
 
       {/* Panel de materiales de empaque con stock — solo en modo activo */}
-      {empaque_iniciado && puedeOperar && masa.materiales_alistamiento.length > 0 && (
-        <Card className="p-4 border border-blue-100">
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-sm font-semibold text-blue-800">📦 Materiales de empaque — stock disponible</div>
-            <button
-              onClick={() => api('/config/sync-empaque', { method: 'POST' })
-                .then(() => { refetchMasaActual(); qc.invalidateQueries({ queryKey: ['empaque-pendientes'] }); mostrar('ok', 'Stock sincronizado desde SAP'); })
-                .catch((e: any) => mostrar('err', `Error al sincronizar: ${e.message}`))}
-              className="text-xs px-3 py-1 border border-blue-300 text-blue-600 rounded hover:bg-blue-50"
-            >
-              🔄 Actualizar stock
-            </button>
-          </div>
-          <div className="space-y-2">
-            {masa.materiales_alistamiento.map(mat => {
-              const stockOk = mat.stock_disponible >= mat.cantidad_total;
-              const sinStock = mat.stock_disponible === 0;
-              return (
-                <div key={mat.item_code} className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm border ${
-                  sinStock ? 'bg-red-50 border-red-200' :
-                  !stockOk ? 'bg-yellow-50 border-yellow-200' :
-                  'bg-green-50 border-green-100'
-                }`}>
-                  <div>
-                    <span className="font-medium text-gray-800">{mat.nombre}</span>
-                    <span className="text-gray-400 font-mono text-xs ml-2">{mat.item_code}</span>
-                  </div>
-                  <div className="flex items-center gap-4 shrink-0 ml-3 text-xs">
-                    <div className="text-right text-gray-600">
-                      <div className="font-semibold text-gray-800">
-                        {mat.cantidad_total % 1 === 0 ? mat.cantidad_total : mat.cantidad_total.toFixed(3)} {mat.uom}
-                      </div>
-                      <div>a consumir</div>
-                    </div>
-                    <div className={`text-right font-semibold ${
-                      sinStock ? 'text-red-700' : !stockOk ? 'text-yellow-700' : 'text-green-700'
-                    }`}>
-                      <div>
-                        {mat.stock_disponible % 1 === 0 ? mat.stock_disponible : mat.stock_disponible.toFixed(3)} {mat.uom}
-                      </div>
-                      <div className="font-normal">
-                        {sinStock ? '⚠ Sin stock' : !stockOk ? '⚠ Stock bajo' : '✓ Stock OK'}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          {masa.materiales_alistamiento.some(m => m.stock_disponible < m.cantidad_total) && (
-            <div className="mt-3 bg-red-50 border border-red-200 rounded px-3 py-2 text-xs text-red-700">
-              ⚠ Uno o más materiales no tienen suficiente stock en SAP. Si completas el empaque, SAP rechazará el movimiento con un error de inventario negativo. Usa "Actualizar stock" para verificar el saldo actual, o informa a compras.
+      {empaque_iniciado && puedeOperar && masa.materiales_alistamiento.length > 0 && (() => {
+        // Recalcular consumo real desde lo que el usuario ingresó en detalles
+        // materiales_alistamiento tiene cantidad_total basada en unidades_programadas
+        // pero necesitamos recalcular con las unidades realmente empacadas (detalles)
+        const totalEmpacadasPorProducto: Record<string, number> = {};
+        masa.ovs.forEach(ov => ov.productos.forEach(p => {
+          const emp = parseInt(detalles[p.id]?.emp || '0') || 0;
+          if (p.sap_item_code) totalEmpacadasPorProducto[p.sap_item_code] = (totalEmpacadasPorProducto[p.sap_item_code] || 0) + emp;
+        }));
+
+        // Reconstruir consumo por material usando BOM implícito en materiales_alistamiento
+        // cantidad_total original = cantidad_por_unidad × unidades_programadas
+        // cantidad_real = cantidad_por_unidad × unidades_empacadas
+        // Inferimos cantidad_por_unidad = cantidad_total / unidades_programadas_total
+        const totalProgramadasPorProducto: Record<string, number> = {};
+        masa.ovs.forEach(ov => ov.productos.forEach(p => {
+          if (p.sap_item_code)
+            totalProgramadasPorProducto[p.sap_item_code] = (totalProgramadasPorProducto[p.sap_item_code] || 0) + (p.unidades_programadas || 0);
+        }));
+
+        const materialesConConsumoReal = masa.materiales_alistamiento.map(mat => {
+          // Buscar a qué productos corresponde este material
+          // Como materiales_alistamiento es consolidado, el ratio es:
+          // cantidad_por_unidad = cantidad_total / sum(unidades_programadas de productos que usan este material)
+          // Aproximación: usar el ratio total
+          const totalProg = Object.values(totalProgramadasPorProducto).reduce((s, v) => s + v, 0);
+          const cantPorUnidad = totalProg > 0 ? mat.cantidad_total / totalProg : 0;
+          const totalEmpacadas = Object.values(totalEmpacadasPorProducto).reduce((s, v) => s + v, 0);
+          const consumoReal = cantPorUnidad * totalEmpacadas;
+          return { ...mat, cantidad_consumo_real: consumoReal };
+        });
+
+        return (
+          <Card className="p-4 border border-blue-100">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm font-semibold text-blue-800">📦 Materiales de empaque — stock disponible</div>
+              <button
+                onClick={() => api('/config/sync-empaque', { method: 'POST' })
+                  .then(() => { refetchMasaActual(); qc.invalidateQueries({ queryKey: ['empaque-pendientes'] }); mostrar('ok', 'Stock sincronizado desde SAP'); })
+                  .catch((e: any) => mostrar('err', `Error al sincronizar: ${e.message}`))}
+                className="text-xs px-3 py-1 border border-blue-300 text-blue-600 rounded hover:bg-blue-50"
+              >
+                🔄 Actualizar stock
+              </button>
             </div>
-          )}
-        </Card>
-      )}
+            <div className="space-y-2">
+              {materialesConConsumoReal.map(mat => {
+                const consumo = mat.cantidad_consumo_real;
+                const stockOk = mat.stock_disponible >= consumo;
+                const sinStock = mat.stock_disponible === 0 && consumo > 0;
+                const sinDato = consumo === 0;
+                return (
+                  <div key={mat.item_code} className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm border ${
+                    sinDato   ? 'bg-gray-50 border-gray-200' :
+                    sinStock  ? 'bg-red-50 border-red-200' :
+                    !stockOk  ? 'bg-yellow-50 border-yellow-200' :
+                                'bg-green-50 border-green-100'
+                  }`}>
+                    <div>
+                      <span className="font-medium text-gray-800">{mat.nombre}</span>
+                      <span className="text-gray-400 font-mono text-xs ml-2">{mat.item_code}</span>
+                    </div>
+                    <div className="flex items-center gap-4 shrink-0 ml-3 text-xs">
+                      <div className="text-right text-gray-600">
+                        <div className={`font-semibold ${sinDato ? 'text-gray-400' : 'text-gray-800'}`}>
+                          {sinDato ? '—' : (consumo % 1 === 0 ? consumo : consumo.toFixed(3))} {mat.uom}
+                        </div>
+                        <div>a consumir</div>
+                      </div>
+                      <div className={`text-right font-semibold ${
+                        sinDato ? 'text-gray-400' : sinStock ? 'text-red-700' : !stockOk ? 'text-yellow-700' : 'text-green-700'
+                      }`}>
+                        <div>
+                          {mat.stock_disponible % 1 === 0 ? mat.stock_disponible : mat.stock_disponible.toFixed(3)} {mat.uom}
+                        </div>
+                        <div className="font-normal">
+                          {sinDato ? 'Ingresa unidades' : sinStock ? '⚠ Sin stock' : !stockOk ? '⚠ Stock bajo' : '✓ Stock OK'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {!Object.values(totalEmpacadasPorProducto).some(v => v > 0) && (
+              <p className="text-xs text-gray-400 mt-2">
+                Ingresa las unidades empacadas por producto para ver el consumo estimado de cada material.
+              </p>
+            )}
+            {materialesConConsumoReal.some(m => m.cantidad_consumo_real > 0 && m.stock_disponible < m.cantidad_consumo_real) && (
+              <div className="mt-3 bg-red-50 border border-red-200 rounded px-3 py-2 text-xs text-red-700">
+                ⚠ Hay materiales con stock insuficiente. SAP rechazará el movimiento al completar. Informa a compras para verificar saldos en almacén ALEMP.
+              </div>
+            )}
+          </Card>
+        );
+      })()}
 
       {empaque_iniciado && puedeOperar && (
         <div className="flex justify-end">
