@@ -228,36 +228,18 @@ exports.getEmpaqueInfo = async (req, res) => {
       }));
     }
 
-    // Unidades terminadas del horneado
-    const horneadoR = await db.query(
-      `SELECT unidades_terminadas FROM registros_horneado
-       WHERE masa_id = $1 ORDER BY fecha_registro DESC LIMIT 1`, [masaId]
+    // Leer unidades horneadas por producto directamente del registro — dato ingresado por el usuario
+    const horneadoConProd = await db.query(
+      `SELECT unidades_terminadas_por_producto
+       FROM registros_horneado WHERE masa_id = $1
+       ORDER BY fecha_registro DESC LIMIT 1`,
+      [masaId]
     );
-    const unidades_terminadas_total = horneadoR.rows[0]?.unidades_terminadas || null;
-
-    // Distribuir unidades_terminadas del horneado proporcionalmente por producto
-    // según cantidad_divisiones de cada uno
-    if (unidades_terminadas_total && unidades_terminadas_total > 0) {
-      const totalDiv = productos.reduce((s, p) => s + parseInt(p.cantidad_divisiones || 0), 0);
-      if (totalDiv > 0) {
-        let asignado = 0;
-        productos = productos.map((p, idx) => {
-          const divProd = parseInt(p.cantidad_divisiones || 0);
-          let terminadasProd;
-          if (idx === productos.length - 1) {
-            terminadasProd = unidades_terminadas_total - asignado;
-          } else {
-            terminadasProd = Math.round((divProd / totalDiv) * unidades_terminadas_total);
-          }
-          asignado += terminadasProd;
-          return { ...p, unidades_terminadas_horneado: terminadasProd };
-        });
-      } else {
-        productos = productos.map(p => ({ ...p, unidades_terminadas_horneado: null }));
-      }
-    } else {
-      productos = productos.map(p => ({ ...p, unidades_terminadas_horneado: null }));
-    }
+    const udsTerminadasPorProd = horneadoConProd.rows[0]?.unidades_terminadas_por_producto || {};
+    productos = productos.map(p => ({
+      ...p,
+      unidades_terminadas_horneado: udsTerminadasPorProd[String(p.id)] ?? null,
+    }));
 
     const registroR = await db.query(
       `SELECT id, fecha_vencimiento, estado FROM registros_empaque WHERE masa_id = $1 LIMIT 1`,
@@ -564,14 +546,14 @@ exports.completarEmpaque = async (req, res) => {
 
       await client.query(
         `UPDATE productos_por_masa SET
-           costo_mo_total        = $2,
-           costo_empaque_total   = $3,
-           costo_indirecto_total = $4,
-           costo_total_final     = $5,
-           costo_unitario_final  = $6,
-           costo_pan_unitario    = $7
-         WHERE id = $8`,
-        [masaId, moProd, empaqueProd, indirectoProd,
+           costo_mo_total        = $1,
+           costo_empaque_total   = $2,
+           costo_indirecto_total = $3,
+           costo_total_final     = $4,
+           costo_unitario_final  = $5,
+           costo_pan_unitario    = $6
+         WHERE id = $7`,
+        [moProd, empaqueProd, indirectoProd,
          totalProd, unitarioProd, panUnitProd, prod.id]
       );
     }
