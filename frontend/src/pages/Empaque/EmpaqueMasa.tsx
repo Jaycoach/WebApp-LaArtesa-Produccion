@@ -588,7 +588,12 @@ const PanelEmpaqueMasa: React.FC<{
         method: 'PATCH',
         body: JSON.stringify({
           unidades_empacadas: parseInt(vals.emp) || 0,
-          unidades_merma:     parseInt(vals.merma) || 0,
+          unidades_merma: (() => {
+            const prod = masaSeleccionada.ovs.flatMap(o => o.productos).find(p => p.id === prodId);
+            const emp = parseInt(vals.emp) || 0;
+            const base = prod ? (prod.unidades_divididas > 0 ? prod.unidades_divididas : prod.unidades_horneadas) : 0;
+            return Math.max(0, base - emp);
+          })(),
         }),
       });
       mostrar('ok', 'Guardado');
@@ -873,6 +878,7 @@ const PanelEmpaqueMasa: React.FC<{
                 {ov.productos.map(p => {
                   const det = detalles[p.id] ?? { emp: '0', merma: '0' };
                   const empacadas = parseInt(det.emp) || 0;
+                  const mermaCalculada = (p.unidades_divididas > 0 ? p.unidades_divididas : p.unidades_horneadas) - empacadas;
                   const faltante = p.unidades_referencia - empacadas;
                   return (
                     <tr key={p.id} className="border-b hover:bg-gray-50">
@@ -918,14 +924,9 @@ const PanelEmpaqueMasa: React.FC<{
                       </td>
                       <td className="p-2 text-right">
                         {empaque_iniciado && puedeOperar ? (
-                          <input
-                            type="number" min="0"
-                            value={det.merma}
-                            onChange={e => setDetalles(prev => ({
-                              ...prev, [p.id]: { ...det, merma: e.target.value }
-                            }))}
-                            className="w-16 border border-gray-300 rounded px-2 py-1 text-right text-sm focus:ring-1 focus:ring-orange-400"
-                          />
+                          <span className={`font-mono font-medium text-sm ${mermaCalculada > 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                            {mermaCalculada > 0 ? mermaCalculada : 0}
+                          </span>
                         ) : (
                           <span className="text-gray-400 font-mono">—</span>
                         )}
@@ -1531,7 +1532,12 @@ export const EmpaqueMasa: React.FC = () => {
         method: 'PATCH',
         body: JSON.stringify({
           unidades_empacadas: parseInt(vals.emp) || 0,
-          unidades_merma:     parseInt(vals.merma) || 0,
+          unidades_merma: (() => {
+            const prod = ov?.productos?.find((p: any) => p.id === productoId);
+            const emp = parseInt(vals.emp) || 0;
+            const base = prod ? (prod.unidades_divididas > 0 ? prod.unidades_divididas : prod.unidades_horneadas) : 0;
+            return Math.max(0, base - emp);
+          })(),
         }),
       });
       qc.invalidateQueries({ queryKey: ['empaque-ov', docNumBuscar] });
@@ -1821,7 +1827,9 @@ export const EmpaqueMasa: React.FC = () => {
                               emp: String(p.unidades_empacadas ?? p.unidades_ajustadas ?? ''),
                               merma: String(p.unidades_merma ?? '0'),
                             };
-                            const faltantes = p.unidades_ajustadas - (parseInt(edit.emp) || 0);
+                            const empacadasEdit = parseInt(edit.emp) || 0;
+                            const mermaCalculadaOV = (p.unidades_divididas > 0 ? p.unidades_divididas : p.unidades_horneadas) - empacadasEdit;
+                            const faltantes = p.unidades_ajustadas - empacadasEdit;
                             return (
                               <tr key={p.id} className="border-b hover:bg-gray-50">
                                 <td className="p-2">
@@ -1847,14 +1855,9 @@ export const EmpaqueMasa: React.FC = () => {
                                 </td>
                                 <td className="p-2 text-right">
                                   {tieneEmpaque && !empaqueCompleto ? (
-                                    <input
-                                      type="number" min="0"
-                                      value={edit.merma}
-                                      onChange={e => setDetallesEdit(prev => ({
-                                        ...prev, [p.id]: { ...edit, merma: e.target.value }
-                                      }))}
-                                      className="w-16 border border-gray-300 rounded px-2 py-1 text-right text-sm"
-                                    />
+                                    <span className={`font-mono font-medium text-sm ${mermaCalculadaOV > 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                                      {mermaCalculadaOV > 0 ? mermaCalculadaOV : 0}
+                                    </span>
                                   ) : (
                                     <span className="font-mono text-orange-600">{p.unidades_merma ?? '-'}</span>
                                   )}
