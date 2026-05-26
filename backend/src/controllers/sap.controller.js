@@ -1482,6 +1482,20 @@ const sincronizarBOM = async (req, res, next) => {
         const itemCodeComp = bomLines.map(l => l.ItemCode);
         const uomMap       = await sapService.getItemsUoM(itemCodeComp);
 
+        // 4b. Eliminar componentes que ya no existen en el BOM de SAP
+        //     Esto garantiza que la DB quede idéntica a lo que dice SAP.
+        if (itemCodeComp.length > 0) {
+          const deleted = await db.query(
+            `DELETE FROM sap_bom_componentes
+             WHERE item_code_padre = $1
+               AND item_code_comp != ALL($2::varchar[])`,
+            [articulo.itemCode, itemCodeComp]
+          );
+          if (deleted.rowCount > 0) {
+            logger.info(`BOM sync: eliminados ${deleted.rowCount} componentes obsoletos de ${articulo.itemCode}`);
+          }
+        }
+
         // 5. Upsert de cada componente con uom y grupo_sap
         for (const line of bomLines) {
           const uomInfo  = uomMap[line.ItemCode] || { uom: null, grupoSap: null };
