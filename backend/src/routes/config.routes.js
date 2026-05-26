@@ -47,6 +47,6 @@ router.get('/catalogo-tipos-masa',     c.getCatalogoTiposMasa);
 router.put('/catalogo-tipos-masa/:id', checkRole(['admin', 'supervisor']), c.updateCatalogoTiposMasa);
 
 // Sync precios empaque SAP
-router.post('/sync-empaque',     checkRole(['admin']), c.syncPreciosEmpaque);
+router.post('/sync-empaque',     checkRole(['admin', 'supervisor']), c.syncPreciosEmpaque);
 
 module.exports = router;
