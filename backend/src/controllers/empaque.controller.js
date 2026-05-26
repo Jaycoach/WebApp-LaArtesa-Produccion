@@ -230,11 +230,12 @@ exports.getEmpaqueInfo = async (req, res) => {
 
     // Leer unidades horneadas por producto directamente del registro — dato ingresado por el usuario
     const horneadoConProd = await db.query(
-      `SELECT unidades_terminadas_por_producto
+      `SELECT unidades_terminadas, unidades_terminadas_por_producto
        FROM registros_horneado WHERE masa_id = $1
        ORDER BY fecha_registro DESC LIMIT 1`,
       [masaId]
     );
+    const unidades_terminadas_total = horneadoConProd.rows[0]?.unidades_terminadas || null;
     const udsTerminadasPorProd = horneadoConProd.rows[0]?.unidades_terminadas_por_producto || {};
     productos = productos.map(p => ({
       ...p,

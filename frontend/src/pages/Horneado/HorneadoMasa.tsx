@@ -556,6 +556,11 @@ export const HorneadoMasa: React.FC = () => {
                             placeholder="Ej: Corrección de conteo manual post-horneado"
                             className="w-full border border-amber-300 rounded px-2 py-1 text-sm focus:ring-1 focus:ring-amber-400"
                           />
+                          {motivoRetro.trim().length < 5 && (
+                            <p className="text-xs text-amber-700 mt-1">
+                              ⚠️ Ingresa al menos 5 caracteres para habilitar el guardado ({motivoRetro.trim().length}/5)
+                            </p>
+                          )}
                         </div>
                         {msgRetro && (
                           <div className={`text-xs px-2 py-1 rounded ${msgRetro.tipo === 'ok' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
