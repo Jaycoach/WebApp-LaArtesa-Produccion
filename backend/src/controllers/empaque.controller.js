@@ -612,7 +612,29 @@ exports.completarEmpaque = async (req, res) => {
       const sapErrDetail = sapErr.response?.data?.error?.message?.value
         || sapErr.response?.data?.error?.message
         || sapErr.message;
+      logger.warn(`SAP HTTP Error: Bad Request`);
       logger.error(`Error GoodsIssues empaque masa ${masaId}: ${sapErrDetail}`);
+
+      // Identificar el ítem sin stock por número de línea en el error SAP
+      let itemSinStock = null;
+      const matchLinea = sapErrDetail?.match(/\[line:\s*(\d+)\]/i);
+      if (matchLinea) {
+        const lineaIdx = parseInt(matchLinea[1]) - 1;
+        if (docLines[lineaIdx]) {
+          const itemCode = docLines[lineaIdx].ItemCode;
+          const itemR = await db.query(
+            `SELECT item_name FROM sap_inventario_mp WHERE item_code = $1`,
+            [itemCode]
+          );
+          const nombre = itemR.rows[0]?.item_name || itemCode;
+          itemSinStock = { codigo: itemCode, nombre };
+        }
+      }
+
+      const mensajeUsuario = itemSinStock
+        ? `No hay suficiente stock de "${itemSinStock.nombre}" (${itemSinStock.codigo}) en SAP — almacén ALMP. Informa a compras para que verifiquen el saldo antes de reintentar. La entrada de producto terminado NO fue creada.`
+        : `No se pudo registrar la salida de materiales de empaque en SAP. Verifica los saldos en el almacén ALMP e intenta de nuevo. La entrada de producto terminado NO fue creada.`;
+
       await client.query(
         `UPDATE registros_empaque SET sap_error_salida = $1 WHERE masa_id = $2`,
         [sapErrDetail, masaId]
@@ -621,7 +643,8 @@ exports.completarEmpaque = async (req, res) => {
       return res.status(502).json({
         success: false,
         sap_salida_error: sapErrDetail,
-        message: `No se pudo registrar la salida de materiales de empaque en SAP: ${sapErrDetail}. Corrija el inventario en SAP e intente de nuevo. La entrada de producto terminado NO fue creada.`,
+        item_sin_stock: itemSinStock,
+        message: mensajeUsuario,
       });
     }
 
