@@ -196,26 +196,46 @@ export const PesajeMasa: React.FC = () => {
       navigate(`/planificacion/masas/${masaId}`);
     } catch (err: any) {
         const data = err?.data || {};
-        const mensaje = err?.message || 'Error al transmitir consumos a SAP';
-        const loteFallido = data?.lote_fallido || null;
-        const alternativas: any[] = data?.alternativas || [];
+        const mensaje = err?.message || 'Error al confirmar pesaje';
 
-        let textoError = `⚠ Error SAP\n\n${mensaje}`;
-        if (loteFallido) {
-          textoError += `\n\nIngrediente: ${loteFallido.item_name || loteFallido.item_code}`;
-          textoError += `\nLote sin stock suficiente en SAP: ${loteFallido.batch}`;
+        // Caso 1: lote inválido o faltante (validación previa a SAP, HTTP 422)
+        const sinLote: string[] = data?.sin_lote || [];
+        const loteInvalido: string[] = data?.lote_invalido || [];
+
+        if (sinLote.length > 0 || loteInvalido.length > 0) {
+          let textoError = `⚠ Lotes incompletos\n\n${mensaje}\n`;
+          if (sinLote.length > 0) {
+            textoError += `\nIngredientes sin lote registrado:\n`;
+            sinLote.forEach((n: string) => { textoError += `  • ${n}\n`; });
+          }
+          if (loteInvalido.length > 0) {
+            textoError += `\nIngredientes con lote no encontrado en SAP:\n`;
+            loteInvalido.forEach((n: string) => { textoError += `  • ${n}\n`; });
+          }
+          textoError += `\nCorrige el lote en el pesaje y vuelve a confirmar.`;
+          alert(textoError);
+
+        // Caso 2: stock insuficiente en SAP (HTTP 502)
+        } else {
+          const loteFallido = data?.lote_fallido || null;
+          const alternativas: any[] = data?.alternativas || [];
+          let textoError = `⚠ Error SAP\n\n${mensaje}`;
+          if (loteFallido) {
+            textoError += `\n\nIngrediente: ${loteFallido.item_name || loteFallido.item_code}`;
+            textoError += `\nLote sin stock suficiente en SAP: ${loteFallido.batch}`;
+          }
+          if (alternativas.length > 0) {
+            textoError += `\n\nLotes alternativos disponibles:`;
+            alternativas.forEach((a: any) => {
+              textoError += `\n  • Lote ${a.batch}: ${Number(a.cantidad_disponible).toFixed(3)} kg`;
+              if (a.expiration_date) textoError += ` (vence ${a.expiration_date})`;
+            });
+            textoError += `\n\nCambia el lote en el pesaje y vuelve a confirmar.`;
+          } else if (loteFallido) {
+            textoError += `\n\nNo hay lotes alternativos con stock. Sincroniza el inventario SAP o contacta al supervisor.`;
+          }
+          alert(textoError);
         }
-        if (alternativas.length > 0) {
-          textoError += `\n\nLotes alternativos disponibles:`;
-          alternativas.forEach((a: any) => {
-            textoError += `\n  • Lote ${a.batch}: ${Number(a.cantidad_disponible).toFixed(3)} kg`;
-            if (a.expiration_date) textoError += ` (vence ${a.expiration_date})`;
-          });
-          textoError += `\n\nCambia el lote en el pesaje y vuelve a confirmar.`;
-        } else if (loteFallido) {
-          textoError += `\n\nNo hay lotes alternativos con stock. Sincroniza el inventario SAP o contacta al supervisor.`;
-        }
-        alert(textoError);
       } finally {
         setConfirmando(false);
       }
