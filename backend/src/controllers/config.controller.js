@@ -289,13 +289,16 @@ exports.upsertEtiqueta = async (req, res, next) => {
 
 // ── SYNC PRECIOS EMPAQUE DESDE SAP ───────────────────────────────────────────
 exports.syncPreciosEmpaque = async (req, res, next) => {
+  const esCron = !res || typeof res.json !== 'function';
   try {
     const itemsR = await db.query(
       `SELECT DISTINCT item_code_comp FROM sap_bom_componentes WHERE es_empaque = true`
     );
     const items = itemsR.rows.map(r => r.item_code_comp);
-    if (!items.length)
-      return res.json({ success: true, message: 'No hay items de empaque en BOM', actualizados: 0 });
+    if (!items.length) {
+      if (!esCron) res.json({ success: true, message: 'No hay items de empaque en BOM', actualizados: 0 });
+      return;
+    }
 
     const sapService = require('../services/sap.service');
     await sapService.ensureSession();
@@ -334,13 +337,16 @@ exports.syncPreciosEmpaque = async (req, res, next) => {
     }
 
     logger.info(`syncPreciosEmpaque: ${actualizados}/${items.length} items actualizados`);
-    res.json({
+    if (!esCron) res.json({
       success: true,
       message: `${actualizados} items de empaque sincronizados desde SAP`,
       actualizados,
       errores: errores.length ? errores : undefined,
     });
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (esCron) throw e;
+    else next(e);
+  }
 };
 
 exports.getCatalogoTiposMasa = async (req, res) => {
