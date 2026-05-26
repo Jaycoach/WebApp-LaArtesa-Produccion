@@ -1016,36 +1016,27 @@ const PanelEmpaqueMasa: React.FC<{
 
       {/* Panel de materiales de empaque con stock — solo en modo activo */}
       {empaque_iniciado && puedeOperar && masa.materiales_alistamiento.length > 0 && (() => {
-        // Recalcular consumo real desde lo que el usuario ingresó en detalles
-        // materiales_alistamiento tiene cantidad_total basada en unidades_programadas
-        // pero necesitamos recalcular con las unidades realmente empacadas (detalles)
-        const totalEmpacadasPorProducto: Record<string, number> = {};
-        masa.ovs.forEach(ov => ov.productos.forEach(p => {
-          const emp = parseInt(detalles[p.id]?.emp || '0') || 0;
-          if (p.sap_item_code) totalEmpacadasPorProducto[p.sap_item_code] = (totalEmpacadasPorProducto[p.sap_item_code] || 0) + emp;
-        }));
-
-        // Reconstruir consumo por material usando BOM implícito en materiales_alistamiento
-        // cantidad_total original = cantidad_por_unidad × unidades_programadas
-        // cantidad_real = cantidad_por_unidad × unidades_empacadas
-        // Inferimos cantidad_por_unidad = cantidad_total / unidades_programadas_total
-        const totalProgramadasPorProducto: Record<string, number> = {};
-        masa.ovs.forEach(ov => ov.productos.forEach(p => {
-          if (p.sap_item_code)
-            totalProgramadasPorProducto[p.sap_item_code] = (totalProgramadasPorProducto[p.sap_item_code] || 0) + (p.unidades_programadas || 0);
-        }));
-
-        const materialesConConsumoReal = masa.materiales_alistamiento.map(mat => {
-          // Buscar a qué productos corresponde este material
-          // Como materiales_alistamiento es consolidado, el ratio es:
-          // cantidad_por_unidad = cantidad_total / sum(unidades_programadas de productos que usan este material)
-          // Aproximación: usar el ratio total
-          const totalProg = Object.values(totalProgramadasPorProducto).reduce((s, v) => s + v, 0);
-          const cantPorUnidad = totalProg > 0 ? mat.cantidad_total / totalProg : 0;
-          const totalEmpacadas = Object.values(totalEmpacadasPorProducto).reduce((s, v) => s + v, 0);
-          const consumoReal = cantPorUnidad * totalEmpacadas;
-          return { ...mat, cantidad_consumo_real: consumoReal };
+        // Calcular consumo real por material usando BOM por producto
+        const materialesConConsumo = (masaActualData?.data?.materiales_alistamiento || masa.materiales_alistamiento).map((mat: any) => {
+          let consumoReal = 0;
+          if (mat.por_producto) {
+            // BOM desglosado: sumar cantidad_por_unidad × empacadas por cada producto
+            for (const [prodId, cantPorUnidad] of Object.entries(mat.por_producto)) {
+              const emp = parseInt(detalles[Number(prodId)]?.emp || '0') || 0;
+              consumoReal += (cantPorUnidad as number) * emp;
+            }
+          } else {
+            // Fallback: ratio proporcional sobre total programadas
+            const totalProg = masa.ovs.reduce((s: number, ov: any) =>
+              s + ov.productos.reduce((ss: number, p: any) => ss + (p.unidades_programadas || 0), 0), 0);
+            const totalEmp = masa.ovs.reduce((s: number, ov: any) =>
+              s + ov.productos.reduce((ss: number, p: any) => ss + (parseInt(detalles[p.id]?.emp || '0') || 0), 0), 0);
+            consumoReal = totalProg > 0 ? (mat.cantidad_total / totalProg) * totalEmp : 0;
+          }
+          return { ...mat, consumo_real: consumoReal };
         });
+
+        const hayUnidades = materialesConConsumo.some((m: any) => m.consumo_real > 0);
 
         return (
           <Card className="p-4 border border-blue-100">
@@ -1061,17 +1052,17 @@ const PanelEmpaqueMasa: React.FC<{
               </button>
             </div>
             <div className="space-y-2">
-              {materialesConConsumoReal.map(mat => {
-                const consumo = mat.cantidad_consumo_real;
-                const stockOk = mat.stock_disponible >= consumo;
-                const sinStock = mat.stock_disponible === 0 && consumo > 0;
+              {materialesConConsumo.map((mat: any) => {
+                const consumo = mat.consumo_real;
                 const sinDato = consumo === 0;
+                const stockOk = mat.stock_disponible >= consumo;
+                const sinStock = !sinDato && mat.stock_disponible === 0;
                 return (
                   <div key={mat.item_code} className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm border ${
-                    sinDato   ? 'bg-gray-50 border-gray-200' :
-                    sinStock  ? 'bg-red-50 border-red-200' :
-                    !stockOk  ? 'bg-yellow-50 border-yellow-200' :
-                                'bg-green-50 border-green-100'
+                    sinDato  ? 'bg-gray-50 border-gray-200' :
+                    sinStock ? 'bg-red-50 border-red-200' :
+                    !stockOk ? 'bg-yellow-50 border-yellow-200' :
+                               'bg-green-50 border-green-100'
                   }`}>
                     <div>
                       <span className="font-medium text-gray-800">{mat.nombre}</span>
@@ -1099,12 +1090,12 @@ const PanelEmpaqueMasa: React.FC<{
                 );
               })}
             </div>
-            {!Object.values(totalEmpacadasPorProducto).some(v => v > 0) && (
+            {!hayUnidades && (
               <p className="text-xs text-gray-400 mt-2">
                 Ingresa las unidades empacadas por producto para ver el consumo estimado de cada material.
               </p>
             )}
-            {materialesConConsumoReal.some(m => m.cantidad_consumo_real > 0 && m.stock_disponible < m.cantidad_consumo_real) && (
+            {materialesConConsumo.some((m: any) => m.consumo_real > 0 && m.stock_disponible < m.consumo_real) && (
               <div className="mt-3 bg-red-50 border border-red-200 rounded px-3 py-2 text-xs text-red-700">
                 ⚠ Hay materiales con stock insuficiente. SAP rechazará el movimiento al completar. Informa a compras para verificar saldos en almacén ALEMP.
               </div>

@@ -284,6 +284,16 @@ exports.getEmpaqueInfo = async (req, res) => {
           parseFloat(mat.cantidad_por_unidad) * unidades;
       }
       materiales_alistamiento = Object.values(mapa);
+
+      // BOM desglosado por producto_masa_id para cálculo de consumo real en frontend
+      for (const mat of matR.rows) {
+        const prod = productos.find(p => p.sap_item_code === mat.item_code_padre);
+        if (!prod) continue;
+        if (!mapa[mat.item_code]) continue;
+        if (!mapa[mat.item_code].por_producto) mapa[mat.item_code].por_producto = {};
+        mapa[mat.item_code].por_producto[prod.id] = parseFloat(mat.cantidad_por_unidad);
+      }
+      materiales_alistamiento = Object.values(mapa);
     }
 
     res.json({ success: true, data: {
