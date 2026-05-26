@@ -575,11 +575,11 @@ exports.completarEmpaque = async (req, res) => {
     // 10. Salida de materiales de empaque SAP (InventoryGenExits) — PRIMERO
     // Si falla → informar inmediatamente, NO crear entrada de producto terminado
     let sapResult = null;
+    const docLines = [];
     try {
       const sapService = require('../services/sap.service');
       await sapService.ensureSession();
 
-      const docLines = [];
       for (const prod of prodsR.rows) {
         if (!prod.sap_item_code || !prod.uds_empacadas) continue;
         const matsR = await client.query(
