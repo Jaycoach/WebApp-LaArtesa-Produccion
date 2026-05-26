@@ -310,6 +310,8 @@ exports.syncPreciosEmpaque = async (req, res, next) => {
         );
         const item = resp.data;
         const warehouseInfo = (item.ItemWarehouseInfoCollection || [])
+          .find(w => w.WarehouseCode === 'ALEMP') ||
+          (item.ItemWarehouseInfoCollection || [])
           .find(w => w.WarehouseCode === 'ALMP');
         const precio = parseFloat(warehouseInfo?.StandardAveragePrice || 0);
         const stock  = parseFloat(warehouseInfo?.InStock || 0);
