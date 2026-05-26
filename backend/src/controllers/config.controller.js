@@ -315,13 +315,13 @@ exports.syncPreciosEmpaque = async (req, res, next) => {
         const stock  = parseFloat(warehouseInfo?.InStock || 0);
 
         await db.query(
-          `INSERT INTO sap_inventario_mp (item_code, item_name, manage_batch_numbers, stock_almp, costo_unitario)
-           VALUES ($1, $2, false, $3, $4)
+          `INSERT INTO sap_inventario_mp (item_code, item_name, manage_batch_numbers, stock_almp, costo_unitario, ultimo_sync)
+           VALUES ($1, $2, false, $3, $4, NOW())
            ON CONFLICT (item_code) DO UPDATE SET
              item_name      = EXCLUDED.item_name,
              stock_almp     = $3,
              costo_unitario = $4,
-             updated_at     = NOW()`,
+             ultimo_sync    = NOW()`,
           [itemCode, item.ItemName, stock, precio]
         );
         actualizados++;

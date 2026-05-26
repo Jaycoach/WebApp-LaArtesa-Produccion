@@ -558,6 +558,7 @@ const PanelEmpaqueMasa: React.FC<{
   const [modalMO, setModalMO] = useState(false);
   const [modalFaltantes, setModalFaltantes] = useState<{ faltantes: any[] } | null>(null);
   const [etiquetaData, setEtiquetaData] = useState<any>(null);
+  const [guardadoIds, setGuardadoIds] = useState<Set<number>>(new Set());
 
   const mostrar = (tipo: 'ok' | 'err', texto: string) => {
     setMsg({ tipo, texto });
@@ -596,7 +597,10 @@ const PanelEmpaqueMasa: React.FC<{
           })(),
         }),
       });
-      mostrar('ok', 'Guardado');
+      setGuardadoIds(prev => { const n = new Set(prev); n.add(productoId); return n; });
+      await refetchMasaActual();
+      qc.invalidateQueries({ queryKey: ['empaque-pendientes'] });
+      mostrar('ok', 'Guardado correctamente');
     } catch (e: any) { mostrar('err', e.message); }
     finally { setSavingId(null); }
   };
@@ -632,7 +636,17 @@ const PanelEmpaqueMasa: React.FC<{
         mostrar('ok', 'Empaque completado');
         setTimeout(() => onCompletado(), 1500);
       }
-    } catch (e: any) { mostrar('err', e.message); }
+    } catch (e: any) {
+      const itemSinStock = e?.data?.item_sin_stock;
+      if (itemSinStock) {
+        mostrar('err',
+          `⚠ Sin stock de "${itemSinStock.nombre}" (${itemSinStock.codigo}) en SAP. ` +
+          `Informa a compras para verificar saldo en almacén ALMP antes de reintentar.`
+        );
+      } else {
+        mostrar('err', e?.data?.message || e.message);
+      }
+    }
     finally { setSaving(false); }
   };
 
@@ -943,15 +957,25 @@ const PanelEmpaqueMasa: React.FC<{
                         )}
                       </td>
                       <td className="p-2">
-                        <div className="flex gap-1 justify-end">
+                        <div className="flex gap-1 justify-end flex-wrap">
                           {empaque_iniciado && puedeOperar && (
-                            <button
-                              onClick={() => guardarDetalle(p.id)}
-                              disabled={savingId === p.id}
-                              className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-                            >
-                              {savingId === p.id ? '...' : 'Guardar'}
-                            </button>
+                            guardadoIds.has(p.id) ? (
+                              <button
+                                onClick={() => { setGuardadoIds(prev => { const n = new Set(prev); n.delete(p.id); return n; }); }}
+                                className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded border border-green-200 font-medium hover:bg-yellow-50 hover:text-yellow-700 hover:border-yellow-300"
+                                title="Guardado — clic para editar de nuevo"
+                              >
+                                ✓ Guardado
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => guardarDetalle(p.id)}
+                                disabled={savingId === p.id}
+                                className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                              >
+                                {savingId === p.id ? '...' : 'Guardar'}
+                              </button>
+                            )
                           )}
                           <button
                             onClick={() => verEtiqueta(p.id)}
@@ -970,6 +994,64 @@ const PanelEmpaqueMasa: React.FC<{
           </div>
         </Card>
       ))}
+
+      {/* Panel de materiales de empaque con stock — solo en modo activo */}
+      {empaque_iniciado && puedeOperar && masa.materiales_alistamiento.length > 0 && (
+        <Card className="p-4 border border-blue-100">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm font-semibold text-blue-800">📦 Materiales de empaque — stock disponible</div>
+            <button
+              onClick={() => api('/config/sync-empaque', { method: 'POST' })
+                .then(() => { refetchMasaActual(); qc.invalidateQueries({ queryKey: ['empaque-pendientes'] }); mostrar('ok', 'Stock sincronizado desde SAP'); })
+                .catch((e: any) => mostrar('err', `Error al sincronizar: ${e.message}`))}
+              className="text-xs px-3 py-1 border border-blue-300 text-blue-600 rounded hover:bg-blue-50"
+            >
+              🔄 Actualizar stock
+            </button>
+          </div>
+          <div className="space-y-2">
+            {masa.materiales_alistamiento.map(mat => {
+              const stockOk = mat.stock_disponible >= mat.cantidad_total;
+              const sinStock = mat.stock_disponible === 0;
+              return (
+                <div key={mat.item_code} className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm border ${
+                  sinStock ? 'bg-red-50 border-red-200' :
+                  !stockOk ? 'bg-yellow-50 border-yellow-200' :
+                  'bg-green-50 border-green-100'
+                }`}>
+                  <div>
+                    <span className="font-medium text-gray-800">{mat.nombre}</span>
+                    <span className="text-gray-400 font-mono text-xs ml-2">{mat.item_code}</span>
+                  </div>
+                  <div className="flex items-center gap-4 shrink-0 ml-3 text-xs">
+                    <div className="text-right text-gray-600">
+                      <div className="font-semibold text-gray-800">
+                        {mat.cantidad_total % 1 === 0 ? mat.cantidad_total : mat.cantidad_total.toFixed(3)} {mat.uom}
+                      </div>
+                      <div>a consumir</div>
+                    </div>
+                    <div className={`text-right font-semibold ${
+                      sinStock ? 'text-red-700' : !stockOk ? 'text-yellow-700' : 'text-green-700'
+                    }`}>
+                      <div>
+                        {mat.stock_disponible % 1 === 0 ? mat.stock_disponible : mat.stock_disponible.toFixed(3)} {mat.uom}
+                      </div>
+                      <div className="font-normal">
+                        {sinStock ? '⚠ Sin stock' : !stockOk ? '⚠ Stock bajo' : '✓ Stock OK'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {masa.materiales_alistamiento.some(m => m.stock_disponible < m.cantidad_total) && (
+            <div className="mt-3 bg-red-50 border border-red-200 rounded px-3 py-2 text-xs text-red-700">
+              ⚠ Uno o más materiales no tienen suficiente stock en SAP. Si completas el empaque, SAP rechazará el movimiento con un error de inventario negativo. Usa "Actualizar stock" para verificar el saldo actual, o informa a compras.
+            </div>
+          )}
+        </Card>
+      )}
 
       {empaque_iniciado && puedeOperar && (
         <div className="flex justify-end">
