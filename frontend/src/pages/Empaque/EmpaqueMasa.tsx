@@ -581,7 +581,8 @@ const PanelEmpaqueMasa: React.FC<{
 
   const mostrar = (tipo: 'ok' | 'err', texto: string) => {
     setMsg({ tipo, texto });
-    setTimeout(() => setMsg(null), 4000);
+    if (tipo === 'ok') setTimeout(() => setMsg(null), 4000);
+    // Los errores no se auto-cierran — requieren OK del usuario
   };
 
   const iniciar = async () => {
