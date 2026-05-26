@@ -120,6 +120,7 @@ class ApiService {
           success: false,
           status: 422,
           message: data?.message || 'Datos inválidos',
+          data: (data as any)?.data,
           error: data?.error,
         });
 
