@@ -543,10 +543,29 @@ const PanelEmpaqueMasa: React.FC<{
   const [detalles, setDetalles] = useState<Record<number, { emp: string; merma: string }>>(() => {
     const init: Record<number, { emp: string; merma: string }> = {};
     masa.ovs.forEach(ov => ov.productos.forEach(p => {
-      init[p.id] = { emp: '0', merma: '0' };
+      init[p.id] = { emp: '', merma: '' };
     }));
     return init;
   });
+
+  // Cargar valores guardados desde la DB cuando llegan
+  useEffect(() => {
+    if (!masaActualData?.data?.productos) return;
+    setDetalles(prev => {
+      const next = { ...prev };
+      for (const p of masaActualData.data.productos) {
+        const empacadas = p.unidades_producidas ?? null;
+        // Solo sobreescribir si el campo está vacío (no tocar lo que el usuario está editando)
+        if (next[p.id] !== undefined && next[p.id].emp === '') {
+          next[p.id] = {
+            emp:   empacadas !== null && empacadas > 0 ? String(empacadas) : '',
+            merma: '',
+          };
+        }
+      }
+      return next;
+    });
+  }, [masaActualData]);
 
   const fechaVencInicial = masa.fecha_vencimiento
     || (masaActualData?.data?.masa?.empaque_datos_fase as Record<string, string> | null)?.fecha_vencimiento_sugerida
