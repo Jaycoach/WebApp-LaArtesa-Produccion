@@ -458,9 +458,9 @@ exports.completarEmpaque = async (req, res) => {
       [masaId, empaqueId]
     );
 
-    // 1b. Lote de producción y fecha de vencimiento
+    // 1b. Lote de producción, fecha de vencimiento y codigo_masa para U_JZ_NumMasa
     const masaDatosR = await client.query(
-      `SELECT mp.lote_produccion,
+      `SELECT mp.lote_produccion, mp.codigo_masa,
               re.fecha_vencimiento,
               rh.fecha_vencimiento_sugerida
        FROM masas_produccion mp
@@ -472,6 +472,7 @@ exports.completarEmpaque = async (req, res) => {
       [masaId]
     );
     const loteProduccion   = masaDatosR.rows[0]?.lote_produccion || `LOTE-${masaId}`;
+    const codigoMasa       = masaDatosR.rows[0]?.codigo_masa     || String(masaId);
     const fechaVencimiento = masaDatosR.rows[0]?.fecha_vencimiento
       || masaDatosR.rows[0]?.fecha_vencimiento_sugerida
       || null;
@@ -617,7 +618,7 @@ exports.completarEmpaque = async (req, res) => {
         const sapResp = await sapService.client.post('/InventoryGenExits', {
           DocDate:       fecha_local || new Date().toISOString().split('T')[0],
           Comments:      `Consumo empaque masa ${masaId}`,
-          U_JZ_NumMasa:  String(masaId),
+          U_JZ_NumMasa:  codigoMasa,
           DocumentLines: docLines,
         });
         sapResult = { doc_entry: sapResp.data.DocEntry, lineas: docLines.length };
@@ -735,7 +736,7 @@ exports.completarEmpaque = async (req, res) => {
         const sapRespEntrada = await sapServiceEntrada.client.post('/InventoryGenEntries', {
           DocDate:       fecha_local || new Date().toISOString().split('T')[0],
           Comments:      `Producción terminada masa ${masaId} - Lote ${loteProduccion}`,
-          U_JZ_NumMasa:  String(masaId),
+          U_JZ_NumMasa:  codigoMasa,
           DocumentLines: entradaLines,
         });
         sapEntradaResult = { doc_entry: sapRespEntrada.data.DocEntry, lineas: entradaLines.length };

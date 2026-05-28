@@ -445,9 +445,16 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
       return line;
     });
 
+    // Obtener codigo_masa para U_JZ_NumMasa
+    const codigoMasaR = await db.query(
+      `SELECT codigo_masa FROM masas_produccion WHERE id = $1`, [masaId]
+    );
+    const codigoMasaPesaje = codigoMasaR.rows[0]?.codigo_masa || String(masaId);
+
     requestPayload = {
       DocDate:       today,
       Comments:      `Consumo pesaje masa ${masaId}`,
+      U_JZ_NumMasa:  codigoMasaPesaje,
       DocumentLines: documentLines,
     };
 
