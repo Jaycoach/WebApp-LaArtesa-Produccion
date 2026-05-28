@@ -618,7 +618,7 @@ exports.completarEmpaque = async (req, res) => {
         const sapResp = await sapService.client.post('/InventoryGenExits', {
           DocDate:       fecha_local || new Date().toISOString().split('T')[0],
           Comments:      `Consumo empaque masa ${masaId}`,
-          U_JZ_NumMasa:  codigoMasa,
+          U_JZ_NumMasa:  String(masaId),
           DocumentLines: docLines,
         });
         sapResult = { doc_entry: sapResp.data.DocEntry, lineas: docLines.length };
@@ -717,7 +717,7 @@ exports.completarEmpaque = async (req, res) => {
         const linea = {
           ItemCode:      prod.sap_item_code,
           Quantity:      udsEnt,
-          Price:         parseFloat(costoUnitarioProd.toFixed(2)),
+          UnitPrice:     parseFloat(costoUnitarioProd.toFixed(2)),
           WarehouseCode: 'PROTERMI',
           AccountCode:   '14100501',
           BatchNumbers: [{
@@ -736,7 +736,7 @@ exports.completarEmpaque = async (req, res) => {
         const sapRespEntrada = await sapServiceEntrada.client.post('/InventoryGenEntries', {
           DocDate:       fecha_local || new Date().toISOString().split('T')[0],
           Comments:      `Producción terminada masa ${masaId} - Lote ${loteProduccion}`,
-          U_JZ_NumMasa:  codigoMasa,
+          U_JZ_NumMasa:  String(masaId),
           DocumentLines: entradaLines,
         });
         sapEntradaResult = { doc_entry: sapRespEntrada.data.DocEntry, lineas: entradaLines.length };

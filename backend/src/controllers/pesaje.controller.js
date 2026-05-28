@@ -454,7 +454,7 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
     requestPayload = {
       DocDate:       today,
       Comments:      `Consumo pesaje masa ${masaId}`,
-      U_JZ_NumMasa:  codigoMasaPesaje,
+      U_JZ_NumMasa:  String(masaId),
       DocumentLines: documentLines,
     };
 
