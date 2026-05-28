@@ -1779,7 +1779,7 @@ export const EmpaqueMasa: React.FC = () => {
           masa={masaSeleccionada}
           tiposMO={tiposMO}
           onVolver={() => { setModo('lista'); setMasaSeleccionada(null); }}
-          onCompletado={() => { setModo('lista'); setMasaSeleccionada(null); refetchPendientes(); }}
+          onCompletado={() => { refetchPendientes(); }}
         />
       </div>
     );
