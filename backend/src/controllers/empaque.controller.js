@@ -506,21 +506,38 @@ exports.completarEmpaque = async (req, res) => {
     );
     const costoMPTotal = parseFloat(mpR.rows[0].total);
 
-    // 5. Costo empaque: BOM × precio SAP × unidades empacadas
+    // 5. Costo empaque: BOM × precio SAP × unidades empacadas — calculado POR PRODUCTO
+    // Construye también el mapa de materiales por producto para SAP (paso 10)
     let costoEmpaqueTotal = 0;
+    // materialesPorProducto: { producto_masa_id → [{ item_code, nombre, cantidad, uom, precio }] }
+    const materialesPorProducto = {};
     for (const prod of prodsR.rows) {
-      if (!prod.sap_item_code || !prod.uds_empacadas) continue;
+      if (!prod.sap_item_code || !parseInt(prod.uds_empacadas)) continue;
       const matsR = await client.query(
-        `SELECT sbc.cantidad, COALESCE(sim.costo_unitario, 0) AS precio
+        `SELECT sbc.item_code_comp, sbc.item_name_comp, sbc.cantidad, sbc.uom,
+                COALESCE(sim.costo_unitario, 0) AS precio
          FROM sap_bom_componentes sbc
          LEFT JOIN sap_inventario_mp sim ON sim.item_code = sbc.item_code_comp
          WHERE sbc.item_code_padre = $1 AND sbc.es_empaque = true`,
         [prod.sap_item_code]
       );
+      let costoEmpaqueProd = 0;
+      materialesPorProducto[prod.id] = [];
       for (const mat of matsR.rows) {
-        costoEmpaqueTotal +=
-          parseFloat(mat.cantidad) * parseFloat(mat.precio) * parseInt(prod.uds_empacadas);
+        const cantTotal = parseFloat(mat.cantidad) * parseInt(prod.uds_empacadas);
+        const costoMat  = cantTotal * parseFloat(mat.precio);
+        costoEmpaqueProd += costoMat;
+        materialesPorProducto[prod.id].push({
+          item_code:   mat.item_code_comp,
+          nombre:      mat.item_name_comp,
+          cantidad:    cantTotal,
+          uom:         mat.uom,
+          precio:      parseFloat(mat.precio),
+          costo_total: costoMat,
+        });
       }
+      prod._costo_empaque = costoEmpaqueProd;
+      costoEmpaqueTotal += costoEmpaqueProd;
     }
 
     // 6. Costo indirecto
@@ -528,25 +545,24 @@ exports.completarEmpaque = async (req, res) => {
     const costoDepPorKg = await getCfg('costo_depreciacion_por_kg');
     const costoIndirectoTotal = (costoIndPorKg + costoDepPorKg) * totalKgProducidos;
 
-    // 7. Totales
+    // 7. Totales masa
     const costoTotalFinal = costoMPTotal + costoMOTotal + costoEmpaqueTotal + costoIndirectoTotal;
     const costoUnitarioFinal = totalUdsProducidas > 0
       ? costoTotalFinal / totalUdsProducidas : 0;
-    // Costo por pan individual (para reportería y etiqueta interna)
     const costoPanUnitario = totalPanesProducidos > 0
       ? costoTotalFinal / totalPanesProducidos : 0;
 
-    // 8. Actualizar costos finales en productos_por_masa — prorrateados por kilos por producto
+    // 8. Actualizar costos finales — empaque REAL por producto, MO/indirecto por kilos
     const totalKilosPPM = prodsR.rows.reduce(
       (s, p) => s + parseFloat(p.kilos_programados || 0), 0
     );
     for (const prod of prodsR.rows) {
-      const ratio = totalKilosPPM > 0
+      const ratio         = totalKilosPPM > 0
         ? parseFloat(prod.kilos_programados || 0) / totalKilosPPM
         : 1 / prodsR.rows.length;
       const moProd        = costoMOTotal        * ratio;
-      const empaqueProd   = costoEmpaqueTotal   * ratio;
       const indirectoProd = costoIndirectoTotal * ratio;
+      const empaqueProd   = prod._costo_empaque || 0;   // ← costo real de su BOM
       const mpProd        = parseFloat(prod.costo_mp_total_prod || 0);
       const totalProd     = mpProd + moProd + empaqueProd + indirectoProd;
       const udsEmpacadas  = parseInt(prod.uds_empacadas || 0);
@@ -559,6 +575,7 @@ exports.completarEmpaque = async (req, res) => {
         `UPDATE productos_por_masa SET
            costo_mo_total        = $1,
            costo_empaque_total   = $2,
+           costo_empaque_real    = $2,
            costo_indirecto_total = $3,
            costo_total_final     = $4,
            costo_unitario_final  = $5,
@@ -572,34 +589,27 @@ exports.completarEmpaque = async (req, res) => {
     // 9. Marcar empaque y fase completados — SE EJECUTA DESPUÉS de SAP (ver paso 9b más abajo)
     // No se marca COMPLETADA aquí para evitar estado inconsistente si SAP falla
 
-    // 10. Salida de materiales de empaque SAP (InventoryGenExits) — PRIMERO
-    // Si falla → informar inmediatamente, NO crear entrada de producto terminado
+    // 10. Salida de materiales de empaque SAP (InventoryGenExits) — UNA LÍNEA POR PRODUCTO
+    // NO se colapsan materiales iguales de productos distintos: cada producto tiene su propia línea
+    // para que el costo quede discriminado en SAP por producto terminado.
     let sapResult = null;
-    const docLines = [];
+    const docLines = [];  // líneas para SAP — sin colapsar por ItemCode
     try {
       const sapService = require('../services/sap.service');
       await sapService.ensureSession();
 
       for (const prod of prodsR.rows) {
-        if (!prod.sap_item_code || !prod.uds_empacadas) continue;
-        const matsR = await client.query(
-          `SELECT sbc.item_code_comp, sbc.cantidad, sbc.uom
-           FROM sap_bom_componentes sbc
-           WHERE sbc.item_code_padre = $1 AND sbc.es_empaque = true`,
-          [prod.sap_item_code]
-        );
-        for (const mat of matsR.rows) {
-          const qty = parseFloat(mat.cantidad) * parseInt(prod.uds_empacadas);
-          const existing = docLines.find(l => l.ItemCode === mat.item_code_comp);
-          if (existing) { existing.Quantity += qty; }
-          else {
-            docLines.push({
-              ItemCode:      mat.item_code_comp,
-              Quantity:      qty,
-              WarehouseCode: 'ALEMP',
-              AccountCode:   '14100501',
-            });
-          }
+        if (!prod.sap_item_code || !parseInt(prod.uds_empacadas)) continue;
+        const mats = materialesPorProducto[prod.id] || [];
+        for (const mat of mats) {
+          if (mat.cantidad <= 0) continue;
+          // Línea separada por producto — NO buscar existing para colapsar
+          docLines.push({
+            ItemCode:      mat.item_code,
+            Quantity:      mat.cantidad,
+            WarehouseCode: 'ALEMP',
+            AccountCode:   '14100501',
+          });
         }
       }
 
@@ -607,16 +617,39 @@ exports.completarEmpaque = async (req, res) => {
         const sapResp = await sapService.client.post('/InventoryGenExits', {
           DocDate:       fecha_local || new Date().toISOString().split('T')[0],
           Comments:      `Consumo empaque masa ${masaId}`,
+          U_JZ_NumMasa:  String(masaId),
           DocumentLines: docLines,
         });
         sapResult = { doc_entry: sapResp.data.DocEntry, lineas: docLines.length };
-        logger.info(`GoodsIssues empaque masa ${masaId}: DocEntry ${sapResp.data.DocEntry}`);
+        logger.info(`GoodsIssues empaque masa ${masaId}: DocEntry ${sapResp.data.DocEntry} (${docLines.length} líneas)`);
         await client.query(
           `UPDATE registros_empaque
              SET sap_doc_entry_salida = $1, sap_doc_num_salida = $2, sap_error_salida = NULL
            WHERE masa_id = $3`,
           [sapResp.data.DocEntry, String(sapResp.data.DocNum || ''), masaId]
         );
+
+        // Registrar consumo por producto en empaque_consumo_materiales
+        let lineaIdx = 0;
+        for (const prod of prodsR.rows) {
+          if (!prod.sap_item_code || !parseInt(prod.uds_empacadas)) continue;
+          const mats = materialesPorProducto[prod.id] || [];
+          for (const mat of mats) {
+            if (mat.cantidad <= 0) continue;
+            await client.query(
+              `INSERT INTO empaque_consumo_materiales
+                 (masa_id, producto_masa_id, item_code_comp, item_name_comp,
+                  cantidad_consumida, uom, costo_unitario_mat, costo_total_mat,
+                  sap_doc_entry_salida, sap_doc_num_salida)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+               ON CONFLICT DO NOTHING`,
+              [masaId, prod.id, mat.item_code, mat.nombre,
+               mat.cantidad, mat.uom, mat.precio, mat.costo_total,
+               sapResp.data.DocEntry, String(sapResp.data.DocNum || '')]
+            );
+            lineaIdx++;
+          }
+        }
       }
     } catch (sapErr) {
       const sapErrDetail = sapErr.response?.data?.error?.message?.value
@@ -642,8 +675,8 @@ exports.completarEmpaque = async (req, res) => {
       }
 
       const mensajeUsuario = itemSinStock
-        ? `No hay suficiente stock de "${itemSinStock.nombre}" (${itemSinStock.codigo}) en SAP — almacén ALMP. Informa a compras para que verifiquen el saldo antes de reintentar. La entrada de producto terminado NO fue creada.`
-        : `No se pudo registrar la salida de materiales de empaque en SAP. Verifica los saldos en el almacén ALMP e intenta de nuevo. La entrada de producto terminado NO fue creada.`;
+        ? `No hay suficiente stock de "${itemSinStock.nombre}" (${itemSinStock.codigo}) en SAP — almacén ALEMP. Informa a compras para que verifiquen el saldo antes de reintentar. La entrada de producto terminado NO fue creada.`
+        : `No se pudo registrar la salida de materiales de empaque en SAP. Verifica los saldos en el almacén ALEMP e intenta de nuevo. La entrada de producto terminado NO fue creada.`;
 
       await client.query(
         `UPDATE registros_empaque SET sap_error_salida = $1 WHERE masa_id = $2`,
@@ -667,16 +700,28 @@ exports.completarEmpaque = async (req, res) => {
       const entradaLines = [];
       for (const prod of prodsR.rows) {
         if (!prod.sap_item_code || !prod.uds_empacadas || parseInt(prod.uds_empacadas) <= 0) continue;
-        const costoUnitarioProd = totalUdsProducidas > 0 ? costoTotalFinal / totalUdsProducidas : 0;
+        // Costo unitario REAL de este producto específico (no promedio de la masa)
+        const mpProdEntrada      = parseFloat(prod.costo_mp_total_prod || 0);
+        const empaqueProdEntrada = prod._costo_empaque || 0;
+        const totalKilosPPMEnt   = prodsR.rows.reduce((s, p) => s + parseFloat(p.kilos_programados || 0), 0);
+        const ratioEnt           = totalKilosPPMEnt > 0
+          ? parseFloat(prod.kilos_programados || 0) / totalKilosPPMEnt
+          : 1 / prodsR.rows.length;
+        const moProdEntrada      = costoMOTotal        * ratioEnt;
+        const indProdEntrada     = costoIndirectoTotal * ratioEnt;
+        const totalProdEntrada   = mpProdEntrada + moProdEntrada + empaqueProdEntrada + indProdEntrada;
+        const udsEnt             = parseInt(prod.uds_empacadas);
+        const costoUnitarioProd  = udsEnt > 0 ? totalProdEntrada / udsEnt : 0;
+
         const linea = {
           ItemCode:      prod.sap_item_code,
-          Quantity:      parseInt(prod.uds_empacadas),
+          Quantity:      udsEnt,
           Price:         parseFloat(costoUnitarioProd.toFixed(2)),
           WarehouseCode: 'PROTERMI',
           AccountCode:   '14100501',
           BatchNumbers: [{
             BatchNumber:       loteProduccion,
-            Quantity:          parseInt(prod.uds_empacadas),
+            Quantity:          udsEnt,
             ExpiryDate:        fechaVencimiento
               ? new Date(fechaVencimiento).toISOString().split('T')[0]
               : null,
@@ -690,6 +735,7 @@ exports.completarEmpaque = async (req, res) => {
         const sapRespEntrada = await sapServiceEntrada.client.post('/InventoryGenEntries', {
           DocDate:       fecha_local || new Date().toISOString().split('T')[0],
           Comments:      `Producción terminada masa ${masaId} - Lote ${loteProduccion}`,
+          U_JZ_NumMasa:  String(masaId),
           DocumentLines: entradaLines,
         });
         sapEntradaResult = { doc_entry: sapRespEntrada.data.DocEntry, lineas: entradaLines.length };
