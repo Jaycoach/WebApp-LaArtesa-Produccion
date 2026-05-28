@@ -1029,6 +1029,51 @@ const PanelEmpaqueMasa: React.FC<{
               </tbody>
             </table>
           </div>
+          {/* Materiales de empaque por OV — trazabilidad visual */}
+          {(() => {
+            const matsOv = (masaActualData?.data?.materiales_alistamiento || masa.materiales_alistamiento)
+              .map((mat: any) => {
+                // Filtrar solo materiales que corresponden a productos de ESTA OV
+                const prodIdsOv = new Set(ov.productos.map((p: any) => p.id));
+                if (!mat.por_producto) return null;
+                let cantidadOv = 0;
+                for (const [prodId, cantPorUnidad] of Object.entries(mat.por_producto)) {
+                  if (!prodIdsOv.has(Number(prodId))) continue;
+                  const empacadas = parseInt(detalles[Number(prodId)]?.emp || '0') || 0;
+                  // Si hay empacadas usar empacadas, si no usar programadas como estimado
+                  const unidades = empacadas > 0
+                    ? empacadas
+                    : ov.productos.find((p: any) => p.id === Number(prodId))?.unidades_programadas || 0;
+                  cantidadOv += (cantPorUnidad as number) * unidades;
+                }
+                if (cantidadOv === 0) return null;
+                return { ...mat, cantidad_ov: cantidadOv };
+              })
+              .filter(Boolean);
+
+            if (!matsOv.length) return null;
+
+            return (
+              <div className="mt-3 pt-3 border-t border-gray-100">
+                <div className="text-xs font-semibold text-gray-500 mb-2">
+                  📦 Empaque requerido para esta OV
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {matsOv.map((mat: any) => (
+                    <div key={mat.item_code}
+                      className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-lg px-3 py-1.5 text-xs"
+                    >
+                      <span className="font-medium text-gray-700">{mat.nombre}</span>
+                      <span className="text-gray-400 font-mono">{mat.item_code}</span>
+                      <span className="font-bold text-blue-700 ml-1">
+                        {mat.cantidad_ov % 1 === 0 ? mat.cantidad_ov : mat.cantidad_ov.toFixed(3)} {mat.uom}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </Card>
       ))}
 
