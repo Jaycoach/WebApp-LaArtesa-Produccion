@@ -885,23 +885,33 @@ const sincronizarDesdeOV = async (req, res, next) => {
             // OV nueva para este producto — verificar si el item ya existe con otra OV
             const itemExistenteResult = await client.query(
               `SELECT id FROM productos_por_masa
-               WHERE masa_id = $1 AND sap_item_code = $2`,
-              [masaIdExistente, prod.itemCode]
+               WHERE masa_id = $1 AND sap_item_code = $2
+                 AND sap_doc_entry != $3`,
+              [masaIdExistente, prod.itemCode, prod.docEntry]
             );
 
             if (itemExistenteResult.rows.length > 0) {
-              // Mismo producto, OV diferente — sumar unidades
-              await client.query(
-                `UPDATE productos_por_masa
-                 SET unidades_pedidas = unidades_pedidas + $1,
-                     unidades_programadas = unidades_programadas + $1,
-                     kilos_pedidos = kilos_pedidos + $2,
-                     kilos_programados = kilos_programados + $2,
-                     updated_at = NOW()
-                 WHERE masa_id = $3 AND sap_item_code = $4`,
-                [prod.unidadesPedidas, prod.kilosPedidos || 0, masaIdExistente, prod.itemCode]
+              // Mismo producto, OV diferente — sumar unidades solo si ese docEntry no está ya
+              const docEntryYaRegistradoResult = await client.query(
+                `SELECT id FROM productos_por_masa
+                 WHERE masa_id = $1 AND sap_item_code = $2 AND sap_doc_entry = $3`,
+                [masaIdExistente, prod.itemCode, prod.docEntry]
               );
-              logger.info(`Producto ${prod.itemCode} OV ${prod.docEntry} nueva — sumado a masa ${masaIdExistente} (+${prod.unidadesPedidas} und)`);
+              if (docEntryYaRegistradoResult.rows.length === 0) {
+                await client.query(
+                  `UPDATE productos_por_masa
+                   SET unidades_pedidas = unidades_pedidas + $1,
+                       unidades_programadas = unidades_programadas + $1,
+                       kilos_pedidos = kilos_pedidos + $2,
+                       kilos_programados = kilos_programados + $2,
+                       updated_at = NOW()
+                   WHERE masa_id = $3 AND sap_item_code = $4`,
+                  [prod.unidadesPedidas, prod.kilosPedidos || 0, masaIdExistente, prod.itemCode]
+                );
+                logger.info(`Producto ${prod.itemCode} OV ${prod.docEntry} nueva — sumado a masa ${masaIdExistente} (+${prod.unidadesPedidas} und)`);
+              } else {
+                logger.info(`Producto ${prod.itemCode} OV ${prod.docEntry} ya registrado en masa ${masaIdExistente} — omitido`);
+              }
             } else {
               // Producto completamente nuevo en esta masa — insertar
               await client.query(
