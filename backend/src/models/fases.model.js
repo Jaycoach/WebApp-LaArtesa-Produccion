@@ -61,7 +61,7 @@ const getMasasByFecha = async (fecha, fase = null) => {
     SELECT
       m.*,
       (SELECT COUNT(DISTINCT ov.sap_doc_entry) FROM productos_por_masa_ov ov WHERE ov.masa_id = m.id) as total_ordenes,
-      (SELECT array_agg(DISTINCT ov.sap_doc_num::text ORDER BY ov.sap_doc_num) FROM productos_por_masa_ov ov WHERE ov.masa_id = m.id) as numeros_ov,
+      (SELECT array_agg(ov.sap_doc_num::text ORDER BY ov.sap_doc_num) FROM (SELECT DISTINCT sap_doc_num FROM productos_por_masa_ov WHERE masa_id = m.id) ov) as numeros_ov,
       COUNT(pm.id) as total_productos,
       SUM(pm.unidades_pedidas) as total_unidades_pedidas,
       SUM(pm.unidades_programadas) as total_unidades_programadas,
