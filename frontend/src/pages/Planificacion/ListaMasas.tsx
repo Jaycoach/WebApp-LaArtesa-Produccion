@@ -368,6 +368,13 @@ export const ListaMasas: React.FC = () => {
                     <div className="text-center">
                       <p className="text-2xl font-bold text-gray-900">{masa.total_ordenes}</p>
                       <p className="text-xs text-gray-500">Órdenes</p>
+                      {masa.numeros_ov && masa.numeros_ov.length > 0 && (
+                        <p className="text-xs text-gray-400 mt-1" title={masa.numeros_ov.join(', ')}>
+                          {masa.numeros_ov.length <= 3
+                            ? masa.numeros_ov.join(', ')
+                            : `${masa.numeros_ov.slice(0, 3).join(', ')}…`}
+                        </p>
+                      )}
                     </div>
                     <div className="text-center">
                       <p className="text-2xl font-bold text-emerald-700">
