@@ -724,7 +724,7 @@ const PanelEmpaqueMasa: React.FC<{
       )}
 
       {/* Banner PENDIENTE + materiales de alistamiento */}
-      {!puedeOperar && (
+      {!puedeOperar && !yaEnviadoSAP && (
         <div className="space-y-3">
           <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex items-start gap-3">
             <span className="text-amber-500 text-xl">⏳</span>
