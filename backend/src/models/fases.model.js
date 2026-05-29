@@ -60,7 +60,8 @@ const getMasasByFecha = async (fecha, fase = null) => {
   const result = await db.query(`
     SELECT
       m.*,
-      COUNT(DISTINCT pm.sap_doc_entry) as total_ordenes,
+      (SELECT COUNT(DISTINCT ov.sap_doc_entry) FROM productos_por_masa_ov ov WHERE ov.masa_id = m.id) as total_ordenes,
+      (SELECT array_agg(DISTINCT ov.sap_doc_num::text ORDER BY ov.sap_doc_num) FROM productos_por_masa_ov ov WHERE ov.masa_id = m.id) as numeros_ov,
       COUNT(pm.id) as total_productos,
       SUM(pm.unidades_pedidas) as total_unidades_pedidas,
       SUM(pm.unidades_programadas) as total_unidades_programadas,
