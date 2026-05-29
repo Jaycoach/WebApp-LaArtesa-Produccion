@@ -536,6 +536,8 @@ const PanelEmpaqueMasa: React.FC<{
     masaActualData?.data?.registro_empaque != null || masa.empaque_iniciado;
   const lote_produccion: string | null =
     masa.lote_produccion || masaActualData?.data?.masa?.lote_produccion || null;
+  const yaEnviadoSAP: boolean =
+    !!(masaActualData?.data?.registro_empaque?.sap_doc_entry_entrada ?? masa.sap_doc_entry_entrada);
   // El formulario activo solo cuando EMPAQUE está EN_PROGRESO (horneado terminado)
   // Si está PENDIENTE → solo consulta, sin iniciar ni guardar
   const puedeOperar = estadoEmpaqueActual === 'EN_PROGRESO';
@@ -649,6 +651,7 @@ const PanelEmpaqueMasa: React.FC<{
         body: JSON.stringify({ observaciones: obsOverride || null, fecha_local }),
       });
       qc.invalidateQueries({ queryKey: ['empaque-pendientes'] });
+      refetchMasaActual();
       if (resultado?.sap_advertencias?.length > 0) {
         mostrar('err', `⚠ Empaque guardado, pero hubo errores en SAP:\n${resultado.sap_advertencias.join('\n')}\n\nContacta al supervisor para corregir el movimiento en SAP.`);
         // No navegar — dejar al usuario ver el error
@@ -1171,10 +1174,10 @@ const PanelEmpaqueMasa: React.FC<{
         <div className="flex justify-end">
           <button
             onClick={() => handleCompletar()}
-            disabled={saving}
+            disabled={saving || yaEnviadoSAP}
             className="bg-green-600 text-white px-6 py-2.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium"
           >
-            {saving ? 'Completando...' : 'Completar empaque'}
+            {saving ? 'Completando...' : yaEnviadoSAP ? 'Empaque enviado a SAP ✓' : 'Completar empaque'}
           </button>
         </div>
       )}
