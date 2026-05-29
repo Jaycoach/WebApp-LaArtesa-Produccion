@@ -50,7 +50,7 @@ exports.getEmpaqueByOV = async (req, res) => {
          FROM masas_produccion mp
          LEFT JOIN progreso_fases pf_h ON pf_h.masa_id = mp.id AND pf_h.fase = 'HORNEADO'
          LEFT JOIN progreso_fases pf_e ON pf_e.masa_id = mp.id AND pf_e.fase = 'EMPAQUE'
-         LEFT JOIN registros_empaque re ON re.masa_id = mp.id AND re.estado = 'EN_PROGRESO'
+         LEFT JOIN registros_empaque re ON re.masa_id = mp.id
          WHERE (mp.id = $1 OR mp.masa_padre_id = $1)
            AND mp.estado != 'SUBDIVIDIDA'
          ORDER BY mp.codigo_masa`,
