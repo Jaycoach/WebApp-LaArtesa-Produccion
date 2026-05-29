@@ -346,16 +346,34 @@ exports.iniciarEmpaque = async (req, res) => {
     );
     const empaqueId = empR.rows[0].id;
 
-    // Crear detalles por producto
+    // Crear detalles por producto — uno por OV para trazabilidad
+    // Si no hay OVs en productos_por_masa_ov (masas antiguas), crear uno genérico por producto
     const prodsR = await client.query(
       `SELECT id FROM productos_por_masa WHERE masa_id = $1`, [masaId]
     );
     for (const p of prodsR.rows) {
-      await client.query(
-        `INSERT INTO empaque_detalles (empaque_id, producto_masa_id, sub_masa_id, unidades_empacadas, unidades_merma)
-         VALUES ($1, $2, $3, 0, 0) ON CONFLICT DO NOTHING`,
-        [empaqueId, p.id, masaId]
+      // Verificar si hay OVs registradas para este producto
+      const ovsR = await client.query(
+        `SELECT id FROM productos_por_masa_ov WHERE producto_masa_id = $1`,
+        [p.id]
       );
+      if (ovsR.rows.length > 0) {
+        // Crear un detalle de empaque por OV — el operario empaca OV por OV
+        for (const ov of ovsR.rows) {
+          await client.query(
+            `INSERT INTO empaque_detalles (empaque_id, producto_masa_id, sub_masa_id, unidades_empacadas, unidades_merma, ppm_ov_id)
+             VALUES ($1, $2, $3, 0, 0, $4) ON CONFLICT DO NOTHING`,
+            [empaqueId, p.id, masaId, ov.id]
+          );
+        }
+      } else {
+        // Masa sin OVs registradas (anterior al nuevo modelo) — detalle genérico
+        await client.query(
+          `INSERT INTO empaque_detalles (empaque_id, producto_masa_id, sub_masa_id, unidades_empacadas, unidades_merma)
+           VALUES ($1, $2, $3, 0, 0) ON CONFLICT DO NOTHING`,
+          [empaqueId, p.id, masaId]
+        );
+      }
     }
 
     await client.query(
