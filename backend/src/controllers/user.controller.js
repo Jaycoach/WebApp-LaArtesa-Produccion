@@ -27,7 +27,7 @@ class UserController {
 
       res.json({
         success: true,
-        data: result.users,
+        data: { users: result.users },
         pagination: result.pagination,
       });
     } catch (error) {

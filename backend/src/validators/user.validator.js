@@ -55,6 +55,7 @@ const createUserValidation = [
     .withMessage('El nombre completo debe tener entre 3 y 100 caracteres'),
 
   body('rol')
+    .customSanitizer((value) => (value ? value.toLowerCase() : value))
     .isIn(['admin', 'supervisor', 'operario', 'calidad'])
     .withMessage('Rol inválido. Debe ser: admin, supervisor, operario o calidad'),
 
@@ -84,6 +85,7 @@ const updateUserValidation = [
 
   body('rol')
     .optional()
+    .customSanitizer((value) => (value ? value.toLowerCase() : value))
     .isIn(['admin', 'supervisor', 'operario', 'calidad'])
     .withMessage('Rol inválido. Debe ser: admin, supervisor, operario o calidad'),
 
