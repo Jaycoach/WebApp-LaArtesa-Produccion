@@ -1,19 +1,57 @@
 #!/bin/bash
-# Uso: ARTESA_DOMAIN="app.laartesa.com" bash ~/LaArtesa/deployment/deploy.sh
-set -euo pipefail
-DOMAIN="${ARTESA_DOMAIN:-}"
-[[ -z "$DOMAIN" ]] && { echo "ERROR: ARTESA_DOMAIN requerido"; exit 1; }
+# =============================================================
+# Script de deployment para ARTESA
+# Uso staging : bash ~/LaArtesa/deployment/deploy.sh staging
+# Uso prod    : bash ~/LaArtesa/deployment/deploy.sh prod
+# =============================================================
+set -e
+
+AMBIENTE="${1:-staging}"
+
+if [ "$AMBIENTE" = "prod" ]; then
+  PM2_NAME="artesa-backend-prod"
+  FRONTEND_URL="https://produccion.artesapanaderia.com"
+  NGINX_CONF="deployment/nginx/artesa-prod.conf"
+  NGINX_ENABLED="/etc/nginx/sites-enabled/artesa-prod"
+else
+  PM2_NAME="artesa-backend-staging"
+  FRONTEND_URL="http://54.196.194.114"
+  NGINX_CONF="deployment/nginx/artesa-staging.conf"
+  NGINX_ENABLED="/etc/nginx/sites-enabled/artesa"
+fi
+
+echo ""
+echo "Iniciando deployment ARTESA [$AMBIENTE]..."
+echo "============================================"
+
 cd ~/LaArtesa
+
 echo "[1/4] git pull..."
 git pull origin main
-echo "[2/4] backend..."
-cd backend && npm install --production --quiet && pm2 reload artesa-backend-prod
-echo "[3/4] frontend..."
-cd ../frontend
-echo "VITE_API_URL=https://$DOMAIN/api" > .env.production
-npm install --quiet && npm run build
+
+echo "[2/4] Backend..."
+cd ~/LaArtesa/backend
+npm install --production
+pm2 restart $PM2_NAME
+sleep 3
+pm2 status
+
+echo "[3/4] Frontend..."
+cd ~/LaArtesa/frontend
+echo "VITE_API_URL=$FRONTEND_URL/api" > .env.production
+npm install
+npx vite build
+
+echo "[4/4] NGINX..."
 sudo cp -r dist/* /var/www/artesa-frontend/dist/
-echo "[4/4] nginx..."
-sudo nginx -t && sudo systemctl reload nginx
-echo "✅ Deploy prod completado — https://$DOMAIN"
-pm2 list
+sudo chmod 644 /var/www/artesa-frontend/dist/index.html
+sudo touch /var/www/artesa-frontend/dist/index.html
+sudo cp ~/LaArtesa/$NGINX_CONF $NGINX_ENABLED
+sudo nginx -t && sudo nginx -s reload
+
+echo ""
+echo "============================================"
+echo "Deploy [$AMBIENTE] completado"
+echo "URL: $FRONTEND_URL"
+echo "============================================"
+pm2 logs $PM2_NAME --lines 10 --nostream
