@@ -31,6 +31,7 @@ export const API_CONFIG = {
       DEACTIVATE: (id: number) => `/users/${id}/deactivate`,
       CREATE: '/users',
       LIST: '/users',
+      UPDATE: (id: number) => `/users/${id}`,
     },
 
     // Masas

@@ -47,6 +47,44 @@ export const GestionUsuarios: React.FC = () => {
   });
   const [creando, setCreando] = useState(false);
 
+  const [editando, setEditando] = useState<Usuario | null>(null);
+  const [rolEditando, setRolEditando] = useState('');
+  const [guardandoRol, setGuardandoRol] = useState(false);
+
+  const abrirEdicion = (u: Usuario) => {
+    setEditando(u);
+    setRolEditando(u.rol.toLowerCase());
+  };
+
+  const cerrarEdicion = () => {
+    setEditando(null);
+    setRolEditando('');
+    setError('');
+  };
+
+  const guardarRol = async () => {
+    if (!editando) return;
+    setGuardandoRol(true);
+    setError('');
+    try {
+      const res = await apiService.put(API_CONFIG.ENDPOINTS.USERS.UPDATE(editando.id), {
+        rol: rolEditando.toLowerCase(),
+      });
+      if (res.success) {
+        setSuccess(`Rol de "${editando.nombre_completo}" actualizado a ${rolEditando}.`);
+        cerrarEdicion();
+        await cargarTodos();
+      } else {
+        setError(res.message || 'Error al actualizar rol');
+      }
+    } catch (e: any) {
+      setError(e.message || 'Error al actualizar rol');
+    } finally {
+      setGuardandoRol(false);
+      limpiarMensajes();
+    }
+  };
+
   const limpiarMensajes = () => {
     setTimeout(() => { setSuccess(''); setError(''); }, 4000);
   };
@@ -279,6 +317,10 @@ export const GestionUsuarios: React.FC = () => {
                 </div>
                 {esAdmin && u.username !== 'admin' && (
                   <div className="flex gap-2">
+                    <Button variant="outline" size="sm"
+                      onClick={() => abrirEdicion(u)}>
+                      Editar rol
+                    </Button>
                     {!u.activo ? (
                       <Button variant="success" size="sm" isLoading={accionando === u.id}
                         onClick={() => aprobar(u.id)}>
@@ -364,6 +406,52 @@ export const GestionUsuarios: React.FC = () => {
             </Button>
           </form>
         </Card>
+      )}
+      {/* Modal edición de rol */}
+      {editando && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-lg w-full max-w-sm mx-4 p-6">
+            <h3 className="text-base font-semibold text-gray-900 mb-1">Editar rol</h3>
+            <p className="text-sm text-gray-500 mb-5">
+              {editando.nombre_completo}
+              <span className="ml-2 text-xs text-gray-400">@{editando.username}</span>
+            </p>
+
+            <label className="block text-sm font-medium text-gray-700 mb-1">Nuevo rol</label>
+            <select
+              value={rolEditando}
+              onChange={(e) => setRolEditando(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 mb-2"
+            >
+              {ROLES_DISPONIBLES.map((r) => (
+                <option key={r.value} value={r.value}>{r.label}</option>
+              ))}
+            </select>
+
+            {rolEditando !== editando.rol.toLowerCase() && (
+              <p className="text-xs text-amber-600 mb-4">
+                Cambiará de <strong>{editando.rol}</strong> → <strong>{rolEditando}</strong>
+              </p>
+            )}
+
+            {error && <p className="text-xs text-red-600 mb-3">{error}</p>}
+
+            <div className="flex gap-2 justify-end mt-4">
+              <Button variant="outline" size="sm" onClick={cerrarEdicion} disabled={guardandoRol}>
+                Cancelar
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                isLoading={guardandoRol}
+                onClick={guardarRol}
+                disabled={rolEditando === editando.rol.toLowerCase()}
+              >
+                Guardar
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
