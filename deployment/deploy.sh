@@ -31,7 +31,7 @@ git pull origin main
 
 echo "[2/4] Backend..."
 cd ~/LaArtesa/backend
-npm install --production
+npm install --omit=dev
 pm2 restart $PM2_NAME
 sleep 3
 pm2 status
