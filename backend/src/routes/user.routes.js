@@ -382,7 +382,7 @@ router.post('/', checkRole(['admin', 'supervisor']), createUserValidation, userC
  *       401:
  *         description: No autorizado
  */
-router.put('/:id', checkRole(['admin']), updateUserValidation, userController.updateUser);
+router.put('/:id', checkRole(['admin', 'supervisor']), updateUserValidation, userController.updateUser);
 
 /**
  * @swagger
@@ -422,7 +422,7 @@ router.put('/:id', checkRole(['admin']), updateUserValidation, userController.up
  *       403:
  *         description: Acceso denegado
  */
-router.delete('/:id', checkRole(['admin']), userIdValidation, userController.deleteUser);
+router.delete('/:id', checkRole(['admin', 'supervisor']), userIdValidation, userController.deleteUser);
 
 /**
  * @swagger
@@ -460,7 +460,7 @@ router.delete('/:id', checkRole(['admin']), userIdValidation, userController.del
  *       401:
  *         description: No autorizado
  */
-router.post('/:id/activate', checkRole(['admin']), userIdValidation, userController.activateUser);
+router.post('/:id/activate', checkRole(['admin', 'supervisor']), userIdValidation, userController.activateUser);
 
 /**
  * @swagger
@@ -498,7 +498,7 @@ router.post('/:id/activate', checkRole(['admin']), userIdValidation, userControl
  *       401:
  *         description: No autorizado
  */
-router.post('/:id/deactivate', checkRole(['admin']), userIdValidation, userController.deactivateUser);
+router.post('/:id/deactivate', checkRole(['admin', 'supervisor']), userIdValidation, userController.deactivateUser);
 
 /**
  * @swagger
@@ -550,7 +550,7 @@ router.post('/:id/deactivate', checkRole(['admin']), userIdValidation, userContr
  *       401:
  *         description: No autorizado
  */
-router.post('/:id/reset-password', checkRole(['admin']), resetPasswordValidation, userController.resetUserPassword);
+router.post('/:id/reset-password', checkRole(['admin', 'supervisor']), resetPasswordValidation, userController.resetUserPassword);
 
 /**
  * @swagger
@@ -588,7 +588,7 @@ router.post('/:id/reset-password', checkRole(['admin']), resetPasswordValidation
  *       401:
  *         description: No autorizado
  */
-router.post('/:id/unlock', checkRole(['admin']), userIdValidation, userController.unlockUser);
+router.post('/:id/unlock', checkRole(['admin', 'supervisor']), userIdValidation, userController.unlockUser);
 
 /**
  * @swagger
