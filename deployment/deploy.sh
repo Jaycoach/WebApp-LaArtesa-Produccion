@@ -16,7 +16,7 @@ if [ "$AMBIENTE" = "prod" ]; then
 else
   PM2_NAME="artesa-backend-staging"
   FRONTEND_URL="http://54.196.194.114"
-  NGINX_CONF="deployment/nginx/artesa-staging.conf"
+  NGINX_CONF="deployment/nginx/artesa.conf"
   NGINX_ENABLED="/etc/nginx/sites-enabled/artesa"
 fi
 
