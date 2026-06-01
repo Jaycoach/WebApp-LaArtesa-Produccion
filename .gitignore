@@ -123,3 +123,11 @@ temp/
 *.sql.gz
 *.dump
 backups/
+# === PRODUCCIÓN — secretos (nunca a Git) ===
+*.pem
+deployment/aws-prod/prod-recursos.txt
+deployment/aws-staging/produccion-artesa-staging-key.pem
+deployment/aws-staging/DB_PASSWORD_TEMP.txt
+deployment/aws-staging/aws-deployment-config.env
+backend/.env
+frontend/.env.production

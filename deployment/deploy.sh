@@ -1,57 +1,19 @@
 #!/bin/bash
-# =============================================================
-# Script de deployment para ARTESA Staging
-# Uso: bash ~/LaArtesa/deployment/deploy.sh
-# =============================================================
-
-set -e
-
-echo ""
-echo "🚀 Iniciando deployment ARTESA Staging..."
-echo "============================================"
-
+# Uso: ARTESA_DOMAIN="app.laartesa.com" bash ~/LaArtesa/deployment/deploy.sh
+set -euo pipefail
+DOMAIN="${ARTESA_DOMAIN:-}"
+[[ -z "$DOMAIN" ]] && { echo "ERROR: ARTESA_DOMAIN requerido"; exit 1; }
 cd ~/LaArtesa
-
-# 1. Pull últimos cambios
-echo ""
-echo "📥 [1/4] Pulling cambios de Git..."
+echo "[1/4] git pull..."
 git pull origin main
-
-# 2. Backend - instalar dependencias y reiniciar
-echo ""
-echo "⚙️  [2/4] Actualizando backend..."
-cd ~/LaArtesa/backend
-npm install --production
-pm2 restart artesa-backend-staging
-sleep 2
-pm2 status
-
-# 3. Frontend - asegurar .env.production y buildear
-echo ""
-echo "🎨 [3/4] Buildeando frontend..."
-cd ~/LaArtesa/frontend
-# IMPORTANTE: .env.production no está en Git (seguridad)
-# Se regenera en cada deploy con la IP del servidor
-echo "VITE_API_URL=http://54.196.194.114/api" > .env.production
-npm install
-npx vite build
-
-# 4. Copiar build a nginx y recargar
-echo ""
-echo "📦 [4/4] Desplegando frontend a nginx..."
+echo "[2/4] backend..."
+cd backend && npm install --production --quiet && pm2 reload artesa-backend-prod
+echo "[3/4] frontend..."
+cd ../frontend
+echo "VITE_API_URL=https://$DOMAIN/api" > .env.production
+npm install --quiet && npm run build
 sudo cp -r dist/* /var/www/artesa-frontend/dist/
-# Forzar que index.html no sea cacheado por el navegador
-sudo chmod 644 /var/www/artesa-frontend/dist/index.html
-sudo touch /var/www/artesa-frontend/dist/index.html
-
-# Actualizar config de nginx desde el repositorio
-sudo cp ~/LaArtesa/deployment/nginx-artesa.conf /etc/nginx/sites-enabled/artesa
-sudo nginx -t && sudo nginx -s reload
-
-echo ""
-echo "============================================"
-echo "✅ Deployment completado exitosamente"
-echo "🌐 URL: http://54.196.194.114"
-echo "============================================"
-echo ""
-pm2 logs artesa-backend-staging --lines 10 --nostream
+echo "[4/4] nginx..."
+sudo nginx -t && sudo systemctl reload nginx
+echo "✅ Deploy prod completado — https://$DOMAIN"
+pm2 list
