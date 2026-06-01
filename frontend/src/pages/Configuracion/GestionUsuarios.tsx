@@ -32,7 +32,7 @@ const ROLES_DISPONIBLES: { label: string; value: string }[] = [
 
 export const GestionUsuarios: React.FC = () => {
   const usuario = useAuthStore((state) => state.user);
-  const esAdmin = usuario?.rol === 'admin' || usuario?.rol === 'supervisor';
+  const esAdmin = ['admin', 'supervisor', 'ADMIN', 'SUPERVISOR'].includes(usuario?.rol || '');
 
   const [pendientes, setPendientes] = useState<Usuario[]>([]);
   const [todos, setTodos] = useState<Usuario[]>([]);
@@ -111,14 +111,22 @@ export const GestionUsuarios: React.FC = () => {
     setCreando(true);
     setError('');
     try {
-      const res = await apiService.post(API_CONFIG.ENDPOINTS.USERS.CREATE, form);
+      const res = await apiService.post(API_CONFIG.ENDPOINTS.USERS.CREATE, {
+        ...form,
+        rol: form.rol.toLowerCase(),
+      });
       if (res.success) {
-        setSuccess(`Usuario "${form.username}" creado. Se enviará email de verificación.`);
+        setSuccess(`Usuario "${form.username}" creado exitosamente.`);
         setForm({ username: '', email: '', password: '', nombre_completo: '', rol: 'operario' });
-        setTab('pendientes');
-        await cargarPendientes();
+        setTab('todos');
+        await cargarTodos();
       } else {
-        setError(res.message || 'Error al crear usuario');
+        if (res.errors && Array.isArray(res.errors) && res.errors.length > 0) {
+          const detalles = res.errors.map((err: any) => `${err.field}: ${err.message}`).join(' | ');
+          setError(detalles);
+        } else {
+          setError(res.message || 'Error al crear usuario');
+        }
       }
     } catch (e: any) {
       setError(e.message || 'Error al crear usuario');
@@ -295,8 +303,7 @@ export const GestionUsuarios: React.FC = () => {
         <Card>
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Nuevo usuario</h3>
           <p className="text-sm text-gray-500 mb-6">
-            El usuario recibirá un email para verificar su cuenta.
-            Después deberás aprobar su acceso desde la pestaña "Pendientes".
+            El usuario quedará activo inmediatamente. Comparte la contraseña temporal con el operario para que pueda ingresar.
           </p>
           <form onSubmit={crearUsuario} className="space-y-4 max-w-lg">
             <div className="grid grid-cols-2 gap-4">
@@ -335,8 +342,9 @@ export const GestionUsuarios: React.FC = () => {
                   type="password" required value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
-                  placeholder="Mínimo 8 caracteres"
+                  placeholder="Ej: Artesa2024@"
                 />
+                <p className="text-xs text-gray-400 mt-1">Mayúscula, minúscula, número y símbolo (@$!%*?&#)</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Rol</label>
@@ -352,7 +360,7 @@ export const GestionUsuarios: React.FC = () => {
               </div>
             </div>
             <Button type="submit" variant="primary" isLoading={creando}>
-              Crear usuario y enviar invitación
+              Crear usuario
             </Button>
           </form>
         </Card>
