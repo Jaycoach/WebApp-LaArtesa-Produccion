@@ -81,6 +81,7 @@
     "moment-timezone": "^0.5.45",
     "morgan": "^1.10.0",
     "node-cron": "^3.0.3",
+    "nodemailer": "^8.0.10",
     "p-queue": "^7.3.4",
     "pg": "^8.11.3",
     "pg-hstore": "^2.3.4",
@@ -151,10 +152,13 @@
       "class-methods-use-this": "off",
       "camelcase": "off",
       "consistent-return": "warn",
-      "no-unused-vars": ["warn", {
-        "argsIgnorePattern": "^_",
-        "varsIgnorePattern": "^_"
-      }],
+      "no-unused-vars": [
+        "warn",
+        {
+          "argsIgnorePattern": "^_",
+          "varsIgnorePattern": "^_"
+        }
+      ],
       "no-plusplus": "off",
       "radix": "off",
       "global-require": "warn",
