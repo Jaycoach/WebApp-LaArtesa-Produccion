@@ -30,6 +30,7 @@ import GestionUsuarios from '@/pages/Configuracion/GestionUsuarios';
 import ForgotPassword from '@/pages/Auth/ForgotPassword';
 import ResetPassword from '@/pages/Auth/ResetPassword';
 import VerifyEmail from '@/pages/Auth/VerifyEmail';
+import { SetPassword } from '@/pages/Auth/SetPassword';
 import FaseListado from '@/pages/Fases/FaseListado';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -46,6 +47,7 @@ function App() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/verify-email" element={<VerifyEmail />} />
+        <Route path="/set-password" element={<SetPassword />} />
 
         <Route
           path="/"

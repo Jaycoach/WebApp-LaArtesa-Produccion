@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Button, Alert, Card } from '@/components/common';
 import { useAuthStore } from '@/store';
 import { apiService } from '@/services/api';
+import { authService } from '@/services/authService';
 import { API_CONFIG } from '@/config/api.config';
 
 interface Usuario {
@@ -36,7 +37,7 @@ export const GestionUsuarios: React.FC = () => {
 
   const [pendientes, setPendientes] = useState<Usuario[]>([]);
   const [todos, setTodos] = useState<Usuario[]>([]);
-  const [tab, setTab] = useState<'pendientes' | 'todos' | 'crear'>('pendientes');
+  const [tab, setTab] = useState<'pendientes' | 'todos' | 'crear' | 'password'>('pendientes');
   const [isLoading, setIsLoading] = useState(false);
   const [accionando, setAccionando] = useState<number | null>(null);
   const [success, setSuccess] = useState('');
@@ -50,6 +51,12 @@ export const GestionUsuarios: React.FC = () => {
   const [editando, setEditando] = useState<Usuario | null>(null);
   const [rolEditando, setRolEditando] = useState('');
   const [guardandoRol, setGuardandoRol] = useState(false);
+
+  // Cambio de contraseña
+  const [pwActual, setPwActual] = useState('');
+  const [pwNueva, setPwNueva] = useState('');
+  const [pwConfirm, setPwConfirm] = useState('');
+  const [cambiandoPw, setCambiandoPw] = useState(false);
 
   const abrirEdicion = (u: Usuario) => {
     setEditando(u);
@@ -82,6 +89,33 @@ export const GestionUsuarios: React.FC = () => {
     } finally {
       setGuardandoRol(false);
       limpiarMensajes();
+    }
+  };
+
+  const cambiarPassword = async () => {
+    setError('');
+    if (!pwActual || !pwNueva || !pwConfirm) {
+      setError('Todos los campos son requeridos.');
+      return;
+    }
+    if (pwNueva.length < 8) {
+      setError('La nueva contraseña debe tener al menos 8 caracteres.');
+      return;
+    }
+    if (pwNueva !== pwConfirm) {
+      setError('Las contraseñas nuevas no coinciden.');
+      return;
+    }
+    setCambiandoPw(true);
+    try {
+      await authService.changePassword(pwActual, pwNueva);
+      setSuccess('Contraseña actualizada correctamente.');
+      setPwActual(''); setPwNueva(''); setPwConfirm('');
+      limpiarMensajes();
+    } catch (e: any) {
+      setError(e.message || 'Error al cambiar la contraseña.');
+    } finally {
+      setCambiandoPw(false);
     }
   };
 
@@ -234,6 +268,16 @@ export const GestionUsuarios: React.FC = () => {
             }`}
           >
             Todos los usuarios
+          </button>
+          <button
+            onClick={() => setTab('password')}
+            className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+              tab === 'password'
+                ? 'border-primary-600 text-primary-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Mi contraseña
           </button>
           {esAdmin && (
             <button
@@ -407,6 +451,55 @@ export const GestionUsuarios: React.FC = () => {
           </form>
         </Card>
       )}
+      {/* Tab: Mi contraseña */}
+      {tab === 'password' && (
+        <Card>
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">Cambiar contraseña</h3>
+          <p className="text-sm text-gray-500 mb-6">
+            Actualiza tu contraseña de acceso al sistema.
+          </p>
+          <div className="space-y-4 max-w-sm">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Contraseña actual</label>
+              <input
+                type="password"
+                value={pwActual}
+                onChange={e => setPwActual(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                placeholder="Tu contraseña actual"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Nueva contraseña</label>
+              <input
+                type="password"
+                value={pwNueva}
+                onChange={e => setPwNueva(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                placeholder="Mínimo 8 caracteres"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Confirmar nueva contraseña</label>
+              <input
+                type="password"
+                value={pwConfirm}
+                onChange={e => setPwConfirm(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                placeholder="Repite la nueva contraseña"
+              />
+            </div>
+            <Button
+              variant="primary"
+              isLoading={cambiandoPw}
+              onClick={cambiarPassword}
+            >
+              Actualizar contraseña
+            </Button>
+          </div>
+        </Card>
+      )}
+
       {/* Modal edición de rol */}
       {editando && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">

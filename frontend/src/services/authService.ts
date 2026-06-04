@@ -225,14 +225,50 @@ class AuthService {
   /**
    * Verificar email con token
    */
-  async verifyEmail(token: string): Promise<{ email: string; nombre: string }> {
-    const response = await apiService.get<{ email: string; nombre: string }>(
+  async verifyEmail(token: string): Promise<{ email: string; nombre: string; debe_cambiar_password: boolean }> {
+    const response = await apiService.get<{
+      email: string;
+      nombre: string;
+      debe_cambiar_password: boolean;
+      accessToken?: string;
+    }>(
       `${API_CONFIG.ENDPOINTS.AUTH.VERIFY_EMAIL}?token=${token}`
     );
     if (!response.success || !response.data) {
       throw new Error(response.message || 'Token inválido o ya utilizado');
     }
+    // Guardar token temporal para set-initial-password
+    if (response.data.accessToken) {
+      localStorage.setItem('auth_token', response.data.accessToken);
+    }
     return response.data;
+  }
+
+  /**
+   * Establecer contraseña inicial (usuario recién verificado)
+   * Requiere accessToken en localStorage (se guarda al verificar email)
+   */
+  async setInitialPassword(newPassword: string): Promise<void> {
+    const response = await apiService.post<{ message: string }>(
+      '/auth/set-initial-password',
+      { newPassword }
+    );
+    if (!response.success) {
+      throw new Error(response.message || 'Error al establecer la contraseña');
+    }
+  }
+
+  /**
+   * Cambiar contraseña (usuario autenticado, requiere contraseña actual)
+   */
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    const response = await apiService.post<{ message: string }>(
+      '/auth/change-password',
+      { currentPassword, newPassword }
+    );
+    if (!response.success) {
+      throw new Error(response.message || 'Error al cambiar la contraseña');
+    }
   }
 
   /**

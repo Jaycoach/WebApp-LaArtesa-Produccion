@@ -450,6 +450,50 @@ class AuthService {
   }
 
   /**
+   * Establecer contraseña inicial (usuario recién verificado, sin requerir contraseña actual)
+   */
+  async setInitialPassword(userId, newPassword) {
+    const client = await pool.getClient();
+    try {
+      await client.query('BEGIN');
+
+      const result = await client.query(
+        'SELECT id, debe_cambiar_password FROM usuarios WHERE id = $1',
+        [userId],
+      );
+
+      if (result.rows.length === 0) {
+        throw new Error('Usuario no encontrado');
+      }
+
+      if (!result.rows[0].debe_cambiar_password) {
+        throw new Error('Esta acción no está permitida para este usuario');
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+      await client.query(
+        `UPDATE usuarios
+         SET password_hash = $1,
+             debe_cambiar_password = false,
+             fecha_actualizacion = NOW()
+         WHERE id = $2`,
+        [hashedPassword, userId],
+      );
+
+      await client.query('COMMIT');
+      logger.info(`Contraseña inicial establecida para usuario ID ${userId}`);
+      return { message: 'Contraseña establecida exitosamente' };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      logger.error('Error al establecer contraseña inicial:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Solicitar verificación de email para usuario existente sin verificar
    */
   async requestEmailVerification(username, email) {
