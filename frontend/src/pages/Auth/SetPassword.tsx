@@ -24,7 +24,7 @@ export const SetPassword: React.FC = () => {
     }
     setLoading(true);
     try {
-      await authService.setInitialPassword(password);
+      await authService.setInitialPassword(password.trim());
       localStorage.removeItem('auth_token');
       localStorage.removeItem('refresh_token');
       navigate('/login?password_set=1');
@@ -52,7 +52,7 @@ export const SetPassword: React.FC = () => {
               <input
                 type="password"
                 value={password}
-                onChange={e => setPassword(e.target.value)}
+                onChange={e => setPassword(e.target.value.trim())}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
                 placeholder="Mínimo 8 caracteres"
               />
@@ -62,7 +62,7 @@ export const SetPassword: React.FC = () => {
               <input
                 type="password"
                 value={confirm}
-                onChange={e => setConfirm(e.target.value)}
+                onChange={e => setConfirm(e.target.value.trim())}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
                 placeholder="Repite la contraseña"
               />
