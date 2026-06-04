@@ -156,23 +156,40 @@ class UserService {
         throw new Error('El usuario o email ya existe');
       }
 
-      // Hash de contraseña
+      // Hash de contraseña temporal
       const hashedPassword = await bcrypt.hash(password, 12);
 
       // Normalizar rol a mayúsculas (DB almacena en MAYÚSCULAS)
       const rol = (rolRaw || 'OPERARIO').toUpperCase();
 
-      // Insertar usuario
+      // Generar token de verificación
+      const crypto = require('crypto');
+      const verificationToken = crypto.randomBytes(32).toString('hex');
+      const hashedVerificationToken = crypto
+        .createHash('sha256')
+        .update(verificationToken)
+        .digest('hex');
+
+      // Insertar usuario inactivo hasta que verifique correo
       const result = await client.query(
-        `INSERT INTO usuarios (username, email, password_hash, nombre_completo, rol, activo)
-         VALUES ($1, $2, $3, $4, $5, true)
+        `INSERT INTO usuarios (username, email, password_hash, nombre_completo, rol,
+                               activo, email_verificado, token_verificacion, debe_cambiar_password)
+         VALUES ($1, $2, $3, $4, $5, false, false, $6, true)
          RETURNING id, username, email, nombre_completo, rol, activo, fecha_creacion`,
-        [username, email, hashedPassword, nombre_completo, rol],
+        [username, email, hashedPassword, nombre_completo, rol, hashedVerificationToken],
       );
 
       await client.query('COMMIT');
 
-      logger.info(`Usuario creado: ${username} por admin`);
+      // Enviar correo de verificación fuera de la transacción
+      const emailService = require('./email.service');
+      emailService.sendVerificationEmail({
+        to: email,
+        nombre: nombre_completo,
+        token: verificationToken,
+      }).catch(err => logger.error('Error enviando email de verificación:', err));
+
+      logger.info(`Usuario creado (pendiente verificación): ${username}`);
 
       return result.rows[0];
     } catch (error) {

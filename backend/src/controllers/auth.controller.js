@@ -204,6 +204,33 @@ class AuthController {
   }
 
   /**
+   * Establecer contraseña inicial tras verificación de email
+   * POST /api/auth/set-initial-password
+   */
+  async setInitialPassword(req, res, next) {
+    try {
+      const { newPassword } = req.body;
+      const userId = req.user.id;
+
+      if (!newPassword || newPassword.length < 8) {
+        return res.status(400).json({
+          success: false,
+          message: 'La contraseña debe tener al menos 8 caracteres',
+        });
+      }
+
+      const result = await authService.setInitialPassword(userId, newPassword);
+      res.json({
+        success: true,
+        message: result.message,
+      });
+    } catch (error) {
+      logger.error('Error al establecer contraseña inicial:', error);
+      next(error);
+    }
+  }
+
+  /**
    * Obtener perfil del usuario autenticado
    * GET /api/auth/profile
    */
@@ -321,7 +348,7 @@ class AuthController {
              fecha_actualizacion = NOW()
          WHERE token_verificacion = $1
            AND email_verificado = false
-         RETURNING id, username, email, nombre_completo`,
+         RETURNING id, username, email, nombre_completo, rol, debe_cambiar_password`,
         [hashedToken],
       );
 
@@ -335,10 +362,23 @@ class AuthController {
       const user = result.rows[0];
       require('../utils/logger').info(`Email verificado: ${user.email}`);
 
+      // Emitir accessToken para que el frontend pueda llamar set-initial-password
+      const jwt = require('jsonwebtoken');
+      const accessToken = jwt.sign(
+        { id: user.id, username: user.username, email: user.email, rol: user.rol },
+        process.env.JWT_SECRET,
+        { expiresIn: '15m' }, // token corto — solo para set-password
+      );
+
       return res.json({
         success: true,
         message: '¡Correo verificado exitosamente! Ya puedes iniciar sesión.',
-        data: { email: user.email, nombre: user.nombre_completo },
+        data: {
+          email: user.email,
+          nombre: user.nombre_completo,
+          debe_cambiar_password: user.debe_cambiar_password,
+          accessToken: user.debe_cambiar_password ? accessToken : undefined,
+        },
       });
     } catch (error) {
       next(error);

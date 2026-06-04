@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { Alert } from '@/components/common';
 import { authService } from '@/services/authService';
 
@@ -12,6 +12,8 @@ export const VerifyEmail: React.FC = () => {
   const [nombre, setNombre] = useState('');
   const [mensaje, setMensaje] = useState('');
 
+  const navigate = useNavigate();
+
   useEffect(() => {
     if (!token) {
       setEstado('error');
@@ -23,9 +25,18 @@ export const VerifyEmail: React.FC = () => {
       .then((data) => {
         setNombre(data.nombre);
         setEstado('ok');
+        if (data.debe_cambiar_password) {
+          // Redirigir a set-password pasando el token de verificación como referencia
+          setTimeout(() => {
+            navigate(`/set-password?verified=1&nombre=${encodeURIComponent(data.nombre)}`);
+          }, 1500);
+        }
       })
       .catch((err) => {
-        setMensaje(err.message || 'El enlace es inválido o ya fue utilizado.');
+        const msg = err.message && err.message !== 'Error del servidor. Por favor, intenta nuevamente más tarde.'
+          ? err.message
+          : 'El enlace ya fue utilizado o expiró. Si tu cuenta ya está activa, intenta iniciar sesión directamente.';
+        setMensaje(msg);
         setEstado('error');
       });
   }, [token]);

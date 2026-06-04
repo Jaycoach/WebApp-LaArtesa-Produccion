@@ -386,6 +386,7 @@ router.post('/reset-password', resetPasswordValidation, authController.resetPass
  *         description: No autorizado
  */
 router.post('/change-password', verifyToken, changePasswordValidation, authController.changePassword);
+router.post('/set-initial-password', verifyToken, authController.setInitialPassword);
 
 /**
  * @swagger
