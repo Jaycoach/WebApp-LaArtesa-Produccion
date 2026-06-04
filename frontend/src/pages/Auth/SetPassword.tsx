@@ -27,7 +27,9 @@ export const SetPassword: React.FC = () => {
       await authService.setInitialPassword(password.trim());
       localStorage.removeItem('auth_token');
       localStorage.removeItem('refresh_token');
-      navigate('/login?password_set=1');
+      const params = new URLSearchParams(window.location.search);
+      const usr = params.get('username') || '';
+      navigate(`/login?password_set=1&username=${encodeURIComponent(usr)}`);
     } catch (err: any) {
       setError(err.message || 'Error al establecer la contraseña.');
     } finally {

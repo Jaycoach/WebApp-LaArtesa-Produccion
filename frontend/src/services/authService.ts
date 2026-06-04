@@ -225,10 +225,11 @@ class AuthService {
   /**
    * Verificar email con token
    */
-  async verifyEmail(token: string): Promise<{ email: string; nombre: string; debe_cambiar_password: boolean }> {
+  async verifyEmail(token: string): Promise<{ email: string; nombre: string; username: string; debe_cambiar_password: boolean }> {
     const response = await apiService.get<{
       email: string;
       nombre: string;
+      username: string;
       debe_cambiar_password: boolean;
       accessToken?: string;
     }>(

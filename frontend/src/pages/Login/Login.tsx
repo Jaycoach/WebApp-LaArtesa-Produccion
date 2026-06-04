@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '@/store';
 import { Button, Alert } from '@/components/common';
 import { authService } from '@/services/authService';
@@ -10,7 +10,8 @@ export const Login: React.FC = () => {
   const navigate = useNavigate();
   const login = useAuthStore((state) => state.login);
 
-  const [username, setUsername] = useState('');
+  const [searchParams] = useSearchParams();
+  const [username, setUsername] = useState(searchParams.get('username') || '');
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
