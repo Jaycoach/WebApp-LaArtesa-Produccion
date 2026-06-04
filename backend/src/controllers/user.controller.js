@@ -32,6 +32,14 @@ class UserController {
       });
     } catch (error) {
       logger.error('Error al listar usuarios:', error);
+      const businessErrors = [
+        'Usuario no encontrado',
+        'El usuario o email ya existe',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.includes(error.message)) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -52,6 +60,14 @@ class UserController {
       });
     } catch (error) {
       logger.error('Error al obtener usuario:', error);
+      const businessErrors = [
+        'Usuario no encontrado',
+        'El usuario o email ya existe',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.includes(error.message)) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -81,6 +97,14 @@ class UserController {
       });
     } catch (error) {
       logger.error('Error al crear usuario:', error);
+      const businessErrors = [
+        'Usuario no encontrado',
+        'El usuario o email ya existe',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.includes(error.message)) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -107,6 +131,14 @@ class UserController {
       });
     } catch (error) {
       logger.error('Error al actualizar usuario:', error);
+      const businessErrors = [
+        'Usuario no encontrado',
+        'El usuario o email ya existe',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.includes(error.message)) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -135,6 +167,14 @@ class UserController {
       });
     } catch (error) {
       logger.error('Error al eliminar usuario:', error);
+      const businessErrors = [
+        'Usuario no encontrado',
+        'El usuario o email ya existe',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.includes(error.message)) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -156,6 +196,14 @@ class UserController {
       });
     } catch (error) {
       logger.error('Error al activar usuario:', error);
+      const businessErrors = [
+        'Usuario no encontrado',
+        'El usuario o email ya existe',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.includes(error.message)) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -185,6 +233,14 @@ class UserController {
       });
     } catch (error) {
       logger.error('Error al desactivar usuario:', error);
+      const businessErrors = [
+        'Usuario no encontrado',
+        'El usuario o email ya existe',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.includes(error.message)) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -213,6 +269,14 @@ class UserController {
       });
     } catch (error) {
       logger.error('Error al resetear contraseña:', error);
+      const businessErrors = [
+        'Usuario no encontrado',
+        'El usuario o email ya existe',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.includes(error.message)) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -234,6 +298,14 @@ class UserController {
       });
     } catch (error) {
       logger.error('Error al desbloquear usuario:', error);
+      const businessErrors = [
+        'Usuario no encontrado',
+        'El usuario o email ya existe',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.includes(error.message)) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -255,6 +327,14 @@ class UserController {
       });
     } catch (error) {
       logger.error('Error al obtener actividad:', error);
+      const businessErrors = [
+        'Usuario no encontrado',
+        'El usuario o email ya existe',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.includes(error.message)) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -273,6 +353,14 @@ class UserController {
       });
     } catch (error) {
       logger.error('Error al obtener estadísticas:', error);
+      const businessErrors = [
+        'Usuario no encontrado',
+        'El usuario o email ya existe',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.includes(error.message)) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -292,6 +380,14 @@ class UserController {
       res.json({ success: true, data: result.rows });
     } catch (error) {
       logger.error('Error al obtener usuarios pendientes:', error);
+      const businessErrors = [
+        'Usuario no encontrado',
+        'El usuario o email ya existe',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.includes(error.message)) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -318,6 +414,14 @@ class UserController {
       res.json({ success: true, message: 'Usuario aprobado exitosamente', data: result.rows[0] });
     } catch (error) {
       logger.error('Error al aprobar usuario:', error);
+      const businessErrors = [
+        'Usuario no encontrado',
+        'El usuario o email ya existe',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.includes(error.message)) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
