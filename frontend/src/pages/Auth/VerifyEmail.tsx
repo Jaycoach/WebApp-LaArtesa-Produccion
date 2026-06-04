@@ -28,7 +28,7 @@ export const VerifyEmail: React.FC = () => {
         if (data.debe_cambiar_password) {
           // Redirigir a set-password pasando el token de verificación como referencia
           setTimeout(() => {
-            navigate(`/set-password?verified=1&nombre=${encodeURIComponent(data.nombre)}`);
+            navigate(`/set-password?verified=1&nombre=${encodeURIComponent(data.nombre)}&username=${encodeURIComponent(data.username || '')}`);
           }, 1500);
         }
       })

@@ -32,6 +32,25 @@ class AuthController {
       });
     } catch (error) {
       logger.error('Error en registro:', error);
+      const businessErrors = [
+        'El usuario o email ya existe',
+        'Credenciales inválidas',
+        'Cuenta bloqueada hasta',
+        'Cuenta desactivada',
+        'Token inválido o revocado',
+        'Token expirado',
+        'Usuario no encontrado o desactivado',
+        'Token inválido o expirado',
+        'Usuario no encontrado',
+        'Contraseña actual incorrecta',
+        'Esta acción no está permitida para este usuario',
+        'Este usuario ya tiene el correo verificado',
+        'Ese correo ya está registrado en otro usuario',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.some(msg => error.message?.startsWith(msg))) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -59,6 +78,25 @@ class AuthController {
           code: 'EMAIL_NOT_VERIFIED',
           message: error.message,
         });
+      }
+      const businessErrors = [
+        'El usuario o email ya existe',
+        'Credenciales inválidas',
+        'Cuenta bloqueada hasta',
+        'Cuenta desactivada',
+        'Token inválido o revocado',
+        'Token expirado',
+        'Usuario no encontrado o desactivado',
+        'Token inválido o expirado',
+        'Usuario no encontrado',
+        'Contraseña actual incorrecta',
+        'Esta acción no está permitida para este usuario',
+        'Este usuario ya tiene el correo verificado',
+        'Ese correo ya está registrado en otro usuario',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.some(msg => error.message?.startsWith(msg))) {
+        return res.status(400).json({ success: false, message: error.message });
       }
       next(error);
     }
@@ -88,6 +126,25 @@ class AuthController {
       });
     } catch (error) {
       logger.error('Error al refrescar token:', error);
+      const businessErrors = [
+        'El usuario o email ya existe',
+        'Credenciales inválidas',
+        'Cuenta bloqueada hasta',
+        'Cuenta desactivada',
+        'Token inválido o revocado',
+        'Token expirado',
+        'Usuario no encontrado o desactivado',
+        'Token inválido o expirado',
+        'Usuario no encontrado',
+        'Contraseña actual incorrecta',
+        'Esta acción no está permitida para este usuario',
+        'Este usuario ya tiene el correo verificado',
+        'Ese correo ya está registrado en otro usuario',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.some(msg => error.message?.startsWith(msg))) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -115,6 +172,25 @@ class AuthController {
       });
     } catch (error) {
       logger.error('Error en logout:', error);
+      const businessErrors = [
+        'El usuario o email ya existe',
+        'Credenciales inválidas',
+        'Cuenta bloqueada hasta',
+        'Cuenta desactivada',
+        'Token inválido o revocado',
+        'Token expirado',
+        'Usuario no encontrado o desactivado',
+        'Token inválido o expirado',
+        'Usuario no encontrado',
+        'Contraseña actual incorrecta',
+        'Esta acción no está permitida para este usuario',
+        'Este usuario ya tiene el correo verificado',
+        'Ese correo ya está registrado en otro usuario',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.some(msg => error.message?.startsWith(msg))) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -144,6 +220,25 @@ class AuthController {
       });
     } catch (error) {
       logger.error('Error en forgot password:', error);
+      const businessErrors = [
+        'El usuario o email ya existe',
+        'Credenciales inválidas',
+        'Cuenta bloqueada hasta',
+        'Cuenta desactivada',
+        'Token inválido o revocado',
+        'Token expirado',
+        'Usuario no encontrado o desactivado',
+        'Token inválido o expirado',
+        'Usuario no encontrado',
+        'Contraseña actual incorrecta',
+        'Esta acción no está permitida para este usuario',
+        'Este usuario ya tiene el correo verificado',
+        'Ese correo ya está registrado en otro usuario',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.some(msg => error.message?.startsWith(msg))) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -171,6 +266,25 @@ class AuthController {
       });
     } catch (error) {
       logger.error('Error al resetear contraseña:', error);
+      const businessErrors = [
+        'El usuario o email ya existe',
+        'Credenciales inválidas',
+        'Cuenta bloqueada hasta',
+        'Cuenta desactivada',
+        'Token inválido o revocado',
+        'Token expirado',
+        'Usuario no encontrado o desactivado',
+        'Token inválido o expirado',
+        'Usuario no encontrado',
+        'Contraseña actual incorrecta',
+        'Esta acción no está permitida para este usuario',
+        'Este usuario ya tiene el correo verificado',
+        'Ese correo ya está registrado en otro usuario',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.some(msg => error.message?.startsWith(msg))) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -199,6 +313,25 @@ class AuthController {
       });
     } catch (error) {
       logger.error('Error al cambiar contraseña:', error);
+      const businessErrors = [
+        'El usuario o email ya existe',
+        'Credenciales inválidas',
+        'Cuenta bloqueada hasta',
+        'Cuenta desactivada',
+        'Token inválido o revocado',
+        'Token expirado',
+        'Usuario no encontrado o desactivado',
+        'Token inválido o expirado',
+        'Usuario no encontrado',
+        'Contraseña actual incorrecta',
+        'Esta acción no está permitida para este usuario',
+        'Este usuario ya tiene el correo verificado',
+        'Ese correo ya está registrado en otro usuario',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.some(msg => error.message?.startsWith(msg))) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -226,6 +359,25 @@ class AuthController {
       });
     } catch (error) {
       logger.error('Error al establecer contraseña inicial:', error);
+      const businessErrors = [
+        'El usuario o email ya existe',
+        'Credenciales inválidas',
+        'Cuenta bloqueada hasta',
+        'Cuenta desactivada',
+        'Token inválido o revocado',
+        'Token expirado',
+        'Usuario no encontrado o desactivado',
+        'Token inválido o expirado',
+        'Usuario no encontrado',
+        'Contraseña actual incorrecta',
+        'Esta acción no está permitida para este usuario',
+        'Este usuario ya tiene el correo verificado',
+        'Ese correo ya está registrado en otro usuario',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.some(msg => error.message?.startsWith(msg))) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -246,6 +398,25 @@ class AuthController {
       });
     } catch (error) {
       logger.error('Error al obtener perfil:', error);
+      const businessErrors = [
+        'El usuario o email ya existe',
+        'Credenciales inválidas',
+        'Cuenta bloqueada hasta',
+        'Cuenta desactivada',
+        'Token inválido o revocado',
+        'Token expirado',
+        'Usuario no encontrado o desactivado',
+        'Token inválido o expirado',
+        'Usuario no encontrado',
+        'Contraseña actual incorrecta',
+        'Esta acción no está permitida para este usuario',
+        'Este usuario ya tiene el correo verificado',
+        'Ese correo ya está registrado en otro usuario',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.some(msg => error.message?.startsWith(msg))) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -271,6 +442,25 @@ class AuthController {
       });
     } catch (error) {
       logger.error('Error al actualizar perfil:', error);
+      const businessErrors = [
+        'El usuario o email ya existe',
+        'Credenciales inválidas',
+        'Cuenta bloqueada hasta',
+        'Cuenta desactivada',
+        'Token inválido o revocado',
+        'Token expirado',
+        'Usuario no encontrado o desactivado',
+        'Token inválido o expirado',
+        'Usuario no encontrado',
+        'Contraseña actual incorrecta',
+        'Esta acción no está permitida para este usuario',
+        'Este usuario ya tiene el correo verificado',
+        'Ese correo ya está registrado en otro usuario',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.some(msg => error.message?.startsWith(msg))) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -298,6 +488,25 @@ class AuthController {
       });
     } catch (error) {
       logger.error('Error en requestEmailVerification:', error);
+      const businessErrors = [
+        'El usuario o email ya existe',
+        'Credenciales inválidas',
+        'Cuenta bloqueada hasta',
+        'Cuenta desactivada',
+        'Token inválido o revocado',
+        'Token expirado',
+        'Usuario no encontrado o desactivado',
+        'Token inválido o expirado',
+        'Usuario no encontrado',
+        'Contraseña actual incorrecta',
+        'Esta acción no está permitida para este usuario',
+        'Este usuario ya tiene el correo verificado',
+        'Ese correo ya está registrado en otro usuario',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.some(msg => error.message?.startsWith(msg))) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -316,6 +525,25 @@ class AuthController {
       });
     } catch (error) {
       logger.error('Error al verificar token:', error);
+      const businessErrors = [
+        'El usuario o email ya existe',
+        'Credenciales inválidas',
+        'Cuenta bloqueada hasta',
+        'Cuenta desactivada',
+        'Token inválido o revocado',
+        'Token expirado',
+        'Usuario no encontrado o desactivado',
+        'Token inválido o expirado',
+        'Usuario no encontrado',
+        'Contraseña actual incorrecta',
+        'Esta acción no está permitida para este usuario',
+        'Este usuario ya tiene el correo verificado',
+        'Ese correo ya está registrado en otro usuario',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.some(msg => error.message?.startsWith(msg))) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
@@ -376,11 +604,31 @@ class AuthController {
         data: {
           email: user.email,
           nombre: user.nombre_completo,
+          username: user.username,
           debe_cambiar_password: user.debe_cambiar_password,
           accessToken: user.debe_cambiar_password ? accessToken : undefined,
         },
       });
     } catch (error) {
+      const businessErrors = [
+        'El usuario o email ya existe',
+        'Credenciales inválidas',
+        'Cuenta bloqueada hasta',
+        'Cuenta desactivada',
+        'Token inválido o revocado',
+        'Token expirado',
+        'Usuario no encontrado o desactivado',
+        'Token inválido o expirado',
+        'Usuario no encontrado',
+        'Contraseña actual incorrecta',
+        'Esta acción no está permitida para este usuario',
+        'Este usuario ya tiene el correo verificado',
+        'Ese correo ya está registrado en otro usuario',
+        'El email ya está en uso',
+      ];
+      if (businessErrors.some(msg => error.message?.startsWith(msg))) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
       next(error);
     }
   }
