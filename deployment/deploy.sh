@@ -33,7 +33,12 @@ echo "[2/4] Backend..."
 cd ~/LaArtesa/backend
 npm install --omit=dev
 pm2 flush $PM2_NAME
-pm2 restart $PM2_NAME
+if pm2 list | grep -q "$PM2_NAME"; then
+  pm2 restart $PM2_NAME --update-env
+else
+  pm2 start ~/LaArtesa/backend/ecosystem.config.js
+fi
+pm2 save
 sleep 3
 pm2 status
 
