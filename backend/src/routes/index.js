@@ -26,6 +26,10 @@ const reportesRoutes = require('./reportes.routes');
  * @desc    Endpoint raíz de la API
  * @access  Public
  */
+router.get('/version', (req, res) => {
+  res.json({ version: process.env.APP_VERSION || '1.0.0' });
+});
+
 router.get('/', (req, res) => {
   res.json({
     success: true,
