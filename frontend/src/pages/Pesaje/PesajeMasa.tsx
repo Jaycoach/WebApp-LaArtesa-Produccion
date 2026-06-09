@@ -120,9 +120,21 @@ export const PesajeMasa: React.FC = () => {
   const handleGuardar = async (ingredienteId: number) => {
     setStockError(null);
 
-    // Construir lotes_consumo solo si el ingrediente tiene lotes SAP
     const ing = checklist?.ingredientes.find((i: any) => i.id === ingredienteId);
     const tieneLotesSAP = ing?.lotes && ing.lotes.length > 0;
+
+    // Validar peso real obligatorio
+    const pesoReal = Number(formData.peso_real);
+    if (!formData.peso_real || isNaN(pesoReal) || pesoReal <= 0) {
+      setStockError({
+        ingredienteId,
+        mensaje: 'El peso real es obligatorio y debe ser mayor a 0.',
+        lote_fallido: null,
+        disponible: null,
+        lotes_actuales: [],
+      });
+      return;
+    }
 
     const lotes_consumo = tieneLotesSAP
       ? formData.lotes_consumo
@@ -130,14 +142,25 @@ export const PesajeMasa: React.FC = () => {
           .map(l => ({ batch: l.batch, cantidad_kg: parseFloat(l.cantidad_kg) / 1000 }))
       : undefined;
 
+    // Validar lote obligatorio para ingredientes con lotes SAP
+    if (tieneLotesSAP && (!lotes_consumo || lotes_consumo.length === 0)) {
+      setStockError({
+        ingredienteId,
+        mensaje: 'Debes seleccionar al menos un lote e ingresar los gramos consumidos.',
+        lote_fallido: null,
+        disponible: null,
+        lotes_actuales: [],
+      });
+      return;
+    }
+
     // Validar que la suma de lotes coincida con el peso real (tolerancia 1g)
     if (lotes_consumo && lotes_consumo.length > 0) {
-      const pesoReal = Number(formData.peso_real);
       const sumaGramos = lotes_consumo.reduce((s, l) => s + l.cantidad_kg * 1000, 0);
       if (Math.abs(sumaGramos - pesoReal) > 1) {
         setStockError({
           ingredienteId,
-          mensaje: `La suma de lotes (${sumaGramos.toFixed(0)}g) no coincide con el peso real (${pesoReal.toFixed(0)}g).`,
+          mensaje: `La suma de lotes (${sumaGramos.toFixed(0)}g) no coincide con el peso real (${pesoReal.toFixed(0)}g). Ajusta las cantidades.`,
           lote_fallido: null,
           disponible: null,
           lotes_actuales: [],
@@ -729,7 +752,19 @@ export const PesajeMasa: React.FC = () => {
                     <div className="col-span-2 flex gap-2">
                       <button
                         onClick={() => handleGuardar(ing.id)}
-                        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                        disabled={
+                          !formData.peso_real ||
+                          Number(formData.peso_real) <= 0 ||
+                          (ing.lotes?.length > 0 && formData.lotes_consumo.filter(l => parseFloat(l.cantidad_kg) > 0).length === 0)
+                        }
+                        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                        title={
+                          !formData.peso_real || Number(formData.peso_real) <= 0
+                            ? 'Ingresa el peso real'
+                            : ing.lotes?.length > 0 && formData.lotes_consumo.filter(l => parseFloat(l.cantidad_kg) > 0).length === 0
+                            ? 'Selecciona un lote e ingresa la cantidad'
+                            : 'Guardar pesaje'
+                        }
                       >
                         Guardar
                       </button>
