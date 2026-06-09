@@ -698,10 +698,10 @@ class SAPService {
     if (!itemCodes || itemCodes.length === 0) return {};
     await this.ensureSession();
 
-    // Estrategia: una sola SQLQuery con IN (...) para todos los ítems + paginación $skip.
-    // Validado: 84 ítems → 78 lotes en 4 páginas × ~0.3s = ~1-2s total
-    // (vs. el enfoque anterior: 1 query por ítem × 3 llamadas × 49 ítems = ~2 minutos)
-    const SQL_CODE = 'artesa_lotes_mp_batch';
+    // Estrategia: artlot_ individual por ítem via SQLQuery (OBTN+OBTQ filtrado por ItemCode+ALMP).
+    // Concurrencia de 5 ítems en paralelo — HBT_ARTESA tarda ~28s por ítem en OBTQ full scan.
+    // Promise.allSettled garantiza que un ítem fallido no cancela los demás.
+    const CONCURRENCIA = 5;
     const resultado = {};
 
     const parseFechaSAP = (val) => {
@@ -711,77 +711,52 @@ class SAPService {
       return null;
     };
 
-    try {
-      // 1. Partir itemCodes en chunks de 15 para evitar timeouts en SAP
-      const CHUNK_SIZE = 15;
-      const chunks = [];
-      for (let i = 0; i < itemCodes.length; i += CHUNK_SIZE) {
-        chunks.push(itemCodes.slice(i, i + CHUNK_SIZE));
-      }
-      logger.info(`SAP: lotes MP — ${itemCodes.length} ítems en ${chunks.length} chunks de ${CHUNK_SIZE}`);
+    const obtenerLotesItem = async (itemCode) => {
+      const sqlCode = `artlot_${itemCode.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      const sqlText = `SELECT "OBTN"."DistNumber", "OBTQ"."Quantity", "OBTN"."ExpDate", "OBTN"."MnfDate", "OBTN"."CreateDate" FROM "OBTN" INNER JOIN "OBTQ" ON "OBTN"."ItemCode" = "OBTQ"."ItemCode" AND "OBTN"."SysNumber" = "OBTQ"."SysNumber" WHERE "OBTN"."ItemCode" = '${itemCode}' AND "OBTQ"."WhsCode" = 'ALMP' AND "OBTQ"."Quantity" > 0`;
+      try {
+        await this.client.delete(`/SQLQueries('${sqlCode}')`, { timeout: 10000 });
+      } catch { /* no existe aún — ignorar */ }
+      await this.client.post('/SQLQueries', {
+        SqlCode: sqlCode, SqlName: sqlCode, SqlText: sqlText,
+      }, { timeout: 10000 });
+      const resp = await this.client.get(
+        `/SQLQueries('${sqlCode}')/List`,
+        { timeout: 60000 }
+      );
+      return { itemCode, rows: resp.data?.value || [] };
+    };
 
-      const todasLasFilas = [];
-
-      for (const [idx, chunk] of chunks.entries()) {
-        const inClause = chunk.map(c => `'${c}'`).join(',');
-        const sqlText = `SELECT "OBTN"."ItemCode", "OBTN"."DistNumber", "OBTQ"."Quantity", "OBTN"."ExpDate", "OBTN"."MnfDate", "OBTN"."CreateDate" FROM "OBTN" INNER JOIN "OBTQ" ON "OBTN"."ItemCode" = "OBTQ"."ItemCode" AND "OBTN"."SysNumber" = "OBTQ"."SysNumber" WHERE "OBTN"."ItemCode" IN (${inClause}) AND "OBTQ"."WhsCode" = 'ALMP' AND "OBTQ"."Quantity" > 0`;
-        try {
-          await this.client.delete(`/SQLQueries('${SQL_CODE}')`, { timeout: 10000 });
-        } catch {
-          // No existe aún — ignorar
+    // Procesar en grupos de CONCURRENCIA ítems en paralelo
+    logger.info(`SAP: lotes MP — ${itemCodes.length} ítems, concurrencia ${CONCURRENCIA}`);
+    for (let i = 0; i < itemCodes.length; i += CONCURRENCIA) {
+      const grupo = itemCodes.slice(i, i + CONCURRENCIA);
+      const resultados = await Promise.allSettled(grupo.map(code => obtenerLotesItem(code)));
+      for (const res of resultados) {
+        if (res.status === 'rejected') {
+          logger.warn(`SAP: lotes fallaron para un ítem del grupo: ${res.reason?.message}`);
+          continue;
         }
-        await this.client.post('/SQLQueries', {
-          SqlCode: SQL_CODE,
-          SqlName: SQL_CODE,
-          SqlText: sqlText,
-        }, { timeout: 10000 });
-        // Paginar con $skip hasta agotar resultados (SAP devuelve máx 20 por página)
-        let skip = 0;
-        while (true) {
-          const resp = await this.client.get(
-            `/SQLQueries('${SQL_CODE}')/List?$skip=${skip}`,
-            { timeout: 30000 }
-          );
-          const rows = resp.data?.value || [];
-          todasLasFilas.push(...rows);
-          if (rows.length < 20) break;
-          skip += 20;
-        }
-        logger.info(`SAP: lotes chunk ${idx + 1}/${chunks.length} — ${chunk.length} ítems OK`);
-      }
-      logger.info(`SAP: lotes MP batch — ${todasLasFilas.length} filas totales para ${itemCodes.length} ítems`);
-
-      // 3. Agrupar por ItemCode
-      for (const row of todasLasFilas) {
-        const itemCode = row.ItemCode;
-        if (!itemCode) continue;
-        if (!resultado[itemCode]) resultado[itemCode] = [];
-        resultado[itemCode].push({
+        const { itemCode, rows } = res.value;
+        if (rows.length === 0) continue;
+        resultado[itemCode] = rows.map(row => ({
           batch:               row.DistNumber,
           cantidad_disponible: parseFloat(parseFloat(row.Quantity).toFixed(3)),
           admissionDate:       parseFechaSAP(row.CreateDate),
           expirationDate:      parseFechaSAP(row.ExpDate),
           manufacturingDate:   parseFechaSAP(row.MnfDate),
           status:              'released',
-        });
-      }
-
-      // 4. Ordenar lotes por fecha de ingreso (FIFO)
-      for (const itemCode of Object.keys(resultado)) {
-        resultado[itemCode].sort((a, b) => {
+        })).sort((a, b) => {
           if (!a.admissionDate) return 1;
           if (!b.admissionDate) return -1;
           return a.admissionDate.localeCompare(b.admissionDate);
         });
-        logger.info(`SAP: lotes ALMP para ${itemCode}: ${resultado[itemCode].length} lotes via batch`);
+        logger.info(`SAP: lotes ALMP para ${itemCode}: ${resultado[itemCode].length} lotes`);
       }
-
-    } catch (err) {
-      logger.error(`SAP: getLotesMateriaPrima batch falló: ${err?.message}. Sin lotes disponibles.`);
-      // Retorna vacío — el inventario MP ya se sincronizó correctamente (stock/costo)
+      logger.info(`SAP: lotes grupo ${Math.floor(i/CONCURRENCIA)+1}/${Math.ceil(itemCodes.length/CONCURRENCIA)} completado`);
     }
 
-    logger.info(`SAP: lotes obtenidos para ${Object.keys(resultado).length} ítems via batch OBTQ`);
+    logger.info(`SAP: lotes obtenidos para ${Object.keys(resultado).length} ítems via artlot_ individual`);
     return resultado;
   }
 }
