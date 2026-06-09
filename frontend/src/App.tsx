@@ -44,20 +44,20 @@ function App() {
   const { hayNuevaVersion } = useVersionCheck();
   return (
     <BrowserRouter>
+      {hayNuevaVersion && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-white text-center py-3 px-4 shadow-lg flex items-center justify-center gap-4">
+          <span className="font-semibold text-sm">
+            🔄 Hay una nueva versión disponible. Guarda tu trabajo y actualiza.
+          </span>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-1.5 bg-white text-amber-700 rounded font-bold text-sm hover:bg-amber-50"
+          >
+            Actualizar ahora
+          </button>
+        </div>
+      )}
       <Routes>
-        {hayNuevaVersion && (
-          <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-white text-center py-3 px-4 shadow-lg flex items-center justify-center gap-4">
-            <span className="font-semibold text-sm">
-              🔄 Hay una nueva versión disponible. Guarda tu trabajo y actualiza.
-            </span>
-            <button
-              onClick={() => window.location.reload()}
-              className="px-4 py-1.5 bg-white text-amber-700 rounded font-bold text-sm hover:bg-amber-50"
-            >
-              Actualizar ahora
-            </button>
-          </div>
-        )}
         <Route path="/login" element={<Login />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
