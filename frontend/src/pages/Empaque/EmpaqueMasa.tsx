@@ -728,42 +728,7 @@ const PanelEmpaqueMasa: React.FC<{
             </div>
           </div>
 
-          {/* Productos a empacar */}
-          {masa.ovs.map(ov => (
-            <Card key={ov.doc_num} className="p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <span className={`text-sm font-bold px-3 py-1 rounded-full ${
-                  ov.doc_num === 'SIN_OV' ? 'bg-gray-100 text-gray-600' : 'bg-blue-100 text-blue-800'
-                }`}>
-                  {ov.doc_num === 'SIN_OV' ? 'Sin OV asignada' : `OV ${ov.doc_num}`}
-                </span>
-                <span className="text-xs text-gray-400">{ov.productos.length} producto{ov.productos.length !== 1 ? 's' : ''}</span>
-              </div>
-              <div className="space-y-2">
-                {ov.productos.map(p => (
-                  <div key={p.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
-                    <div>
-                      <div className="text-sm font-medium text-gray-800">{p.producto_nombre}</div>
-                      <div className="text-xs text-gray-400 font-mono">{p.sap_item_code} · {p.presentacion}</div>
-                    </div>
-                    <div className="text-right shrink-0 ml-3">
-                      <div className="text-lg font-bold text-gray-800">{p.unidades_programadas}</div>
-                      <div className="text-xs text-gray-500">
-                        paquetes
-                        {p.unidades_por_paquete && p.unidades_por_paquete > 1 && (
-                          <span className="text-gray-400 ml-1">
-                            · {p.unidades_programadas * p.unidades_por_paquete} panes
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          ))}
-
-          {/* Materiales de empaque a alistar */}
+          {/* Materiales de empaque a alistar — siempre primero */}
           {masa.materiales_alistamiento && masa.materiales_alistamiento.length > 0 && (
             <Card className="p-4">
               <div className="text-sm font-semibold text-gray-700 mb-3">📦 Materiales de empaque a alistar</div>

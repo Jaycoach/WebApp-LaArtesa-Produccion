@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-const CHECK_INTERVAL_MS = 30_000;
+const CHECK_INTERVAL_MS = 15_000;
 
 export const useVersionCheck = () => {
   const initialVersion = useRef<string | null>(null);

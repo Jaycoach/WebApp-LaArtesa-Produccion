@@ -32,6 +32,8 @@ git pull origin main
 echo "[2/4] Backend..."
 cd ~/LaArtesa/backend
 npm install --omit=dev
+DEPLOY_VERSION=$(date +%Y%m%d%H%M%S)
+sed -i "s/APP_VERSION=.*/APP_VERSION=${DEPLOY_VERSION}/" ~/LaArtesa/backend/.env
 pm2 flush $PM2_NAME
 if pm2 list | grep -q "$PM2_NAME"; then
   pm2 restart $PM2_NAME --update-env
@@ -44,8 +46,6 @@ pm2 status
 
 echo "[3/4] Frontend..."
 cd ~/LaArtesa/frontend
-DEPLOY_VERSION=$(date +%Y%m%d%H%M%S)
-sed -i "s/APP_VERSION=.*/APP_VERSION=${DEPLOY_VERSION}/" ~/LaArtesa/backend/.env
 echo "VITE_API_URL=$FRONTEND_URL/api" > .env.production
 npm install
 npx vite build
