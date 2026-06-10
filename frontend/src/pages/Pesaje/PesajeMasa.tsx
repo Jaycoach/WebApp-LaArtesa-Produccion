@@ -112,7 +112,7 @@ export const PesajeMasa: React.FC = () => {
       fecha_vencimiento: vencimientoPreseleccionado,
       fecha_vencimiento_display: undefined,
       lotes_consumo: lotePreseleccionado
-        ? [{ batch: lotePreseleccionado, cantidad_kg: '', fecha_vencimiento: vencimientoPreseleccionado }]
+        ? [{ batch: lotePreseleccionado, cantidad_kg: ingrediente.pesado && ingrediente.peso_real ? String(ingrediente.peso_real) : '', fecha_vencimiento: vencimientoPreseleccionado }]
         : [],
     });
   };
@@ -548,13 +548,10 @@ export const PesajeMasa: React.FC = () => {
                 {ing.verificado && ((!ing.pesado && editando === ing.id) || (ing.pesado && editando === ing.id && puedeEditar)) && (
                   <div className="mt-4 grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Peso Real (g)</label>
-                      <input
-                        type="number"
-                        value={formData.peso_real}
-                        onChange={(e) => setFormData({ ...formData, peso_real: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                      />
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Peso teórico BOM (g)</label>
+                      <div className="w-full px-3 py-2 border border-gray-200 rounded bg-gray-100 text-gray-700 font-semibold">
+                        {formData.peso_real || '—'}
+                      </div>
                     </div>
                     <div className="col-span-3">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -753,15 +750,11 @@ export const PesajeMasa: React.FC = () => {
                       <button
                         onClick={() => handleGuardar(ing.id)}
                         disabled={
-                          !formData.peso_real ||
-                          Number(formData.peso_real) <= 0 ||
-                          (ing.lotes?.length > 0 && formData.lotes_consumo.filter(l => parseFloat(l.cantidad_kg) > 0).length === 0)
+                          ing.lotes?.length > 0 && formData.lotes_consumo.filter(l => parseFloat(l.cantidad_kg) > 0).length === 0
                         }
                         className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
                         title={
-                          !formData.peso_real || Number(formData.peso_real) <= 0
-                            ? 'Ingresa el peso real'
-                            : ing.lotes?.length > 0 && formData.lotes_consumo.filter(l => parseFloat(l.cantidad_kg) > 0).length === 0
+                          ing.lotes?.length > 0 && formData.lotes_consumo.filter(l => parseFloat(l.cantidad_kg) > 0).length === 0
                             ? 'Selecciona un lote e ingresa la cantidad'
                             : 'Guardar pesaje'
                         }
