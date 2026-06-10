@@ -461,17 +461,8 @@ const PanelPendientes: React.FC<{
                         <span className="text-gray-400 font-mono">{p.sap_item_code} · {p.presentacion}</span>
                       </div>
                       <div className="flex items-center gap-3 ml-3 shrink-0">
-                        <span className="text-gray-500">
-                          <span className="font-semibold text-gray-700">{p.unidades_programadas}</span> uds
-                        </span>
                         <span className="text-purple-700 font-semibold">
-                          {(() => {
-                            const xSAP = parseFloat(String(p.unidades_por_paquete || 0));
-                            const xNombre = p.producto_nombre?.match(/ X ?(\d+)/i);
-                            const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
-                            const paquetes = xPaq > 1 ? Math.ceil(p.unidades_programadas / xPaq) : p.unidades_programadas;
-                            return `${paquetes} paq`;
-                          })()}
+                          {p.unidades_programadas} paq
                         </span>
                         {p.division_completada && (
                           <span className="text-blue-600 font-semibold">{p.unidades_referencia} div.</span>
