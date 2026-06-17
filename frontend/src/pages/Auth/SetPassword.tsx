@@ -41,7 +41,7 @@ export const SetPassword: React.FC = () => {
     <div className="min-h-screen flex items-center justify-center py-12 px-4" style={{ background: '#F5F0E4' }}>
       <div className="max-w-md w-full space-y-6">
         <div className="flex justify-center">
-          <img src="/Logo_Artesa.png" alt="La Artesa" className="h-24 w-auto" />
+          <img src="/Orbit_LogoVertical.jpeg" alt="Orbit Producción Artesa" className="h-32 w-auto" />
         </div>
         <div className="bg-white rounded-xl shadow p-8 space-y-5">
           <div className="text-center">

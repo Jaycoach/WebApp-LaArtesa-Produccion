@@ -45,7 +45,7 @@ export const VerifyEmail: React.FC = () => {
     <div className="min-h-screen flex items-center justify-center py-12 px-4">
       <div className="max-w-md w-full space-y-8 text-center">
         <div className="flex justify-center">
-          <img src="/Logo_Artesa.png" alt="La Artesa" className="h-24 w-auto" />
+          <img src="/Orbit_LogoVertical.jpeg" alt="Orbit Producción Artesa" className="h-32 w-auto" />
         </div>
 
         {estado === 'verificando' && (

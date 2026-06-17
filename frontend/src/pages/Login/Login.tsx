@@ -57,7 +57,7 @@ export const Login: React.FC = () => {
         {/* Logo */}
         <div>
           <div className="flex justify-center">
-            <img src="/Logo_Artesa.png" alt="La Artesa" className="h-24 w-auto" />
+            <img src="/Orbit_LogoVertical.jpeg" alt="Orbit Producción Artesa" className="h-32 w-auto" />
           </div>
           <p className="mt-2 text-center text-sm text-gray-600">
             Control de Producción
