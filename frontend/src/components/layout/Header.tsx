@@ -25,7 +25,7 @@ export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
               </svg>
             </button>
             <Link to="/" className="flex items-center">
-              <img src="/Logo_Artesa.png" alt="La Artesa" className="h-10 w-auto" />
+              <img src="/Orbit_LogoHorizontal.jpeg" alt="Orbit Producción Artesa" className="h-10 w-auto" />
               <span className="ml-2 text-sm text-gray-500 hidden sm:inline">Control de Producción</span>
             </Link>
           </div>

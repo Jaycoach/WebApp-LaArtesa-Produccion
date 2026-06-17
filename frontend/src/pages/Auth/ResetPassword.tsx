@@ -59,7 +59,7 @@ export const ResetPassword: React.FC = () => {
       <div className="max-w-md w-full space-y-8">
         <div>
           <div className="flex justify-center">
-            <img src="/Logo_Artesa.png" alt="La Artesa" className="h-24 w-auto" />
+            <img src="/Orbit_LogoVertical.jpeg" alt="Orbit Producción Artesa" className="h-32 w-auto" />
           </div>
           <h2 className="mt-4 text-center text-2xl font-bold text-gray-900">
             Nueva contraseña
