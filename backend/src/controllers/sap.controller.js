@@ -1702,10 +1702,20 @@ const sincronizarInventarioMP = async (_req, res, next) => {
     }
 
     // 2. Sincronizar lotes — solo ítems con manage_batch_numbers=true
+    const itemCodesSinStock = [];
     const itemCodesConLotes = itemCodesLotes.filter(code => {
       const inv = stocks[code];
-      return inv && inv.manageBatchNumbers === true;
+      const tieneBatch = inv && inv.manageBatchNumbers === true;
+      if (tieneBatch && (inv.stockAlmp ?? 0) <= 0) {
+        itemCodesSinStock.push({ code, nombre: inv.itemName });
+        return false;
+      }
+      return tieneBatch;
     });
+
+    if (itemCodesSinStock.length > 0) {
+      logger.info(`Sync lotes: omitiendo ${itemCodesSinStock.length} ítems con manage_batch_numbers=true pero stock_almp=0: ${itemCodesSinStock.map(i => i.code).join(', ')}`);
+    }
 
     const lotesMap = itemCodesConLotes.length > 0
       ? await sapService.getLotesMateriaPrima(itemCodesConLotes, stocks)
