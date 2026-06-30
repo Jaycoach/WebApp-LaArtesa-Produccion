@@ -746,13 +746,17 @@ class SAPService {
       return { itemCode, rows: resp.data?.value || [] };
     };
 
+    const itemsFallidos = [];
     // Procesar en grupos de CONCURRENCIA ítems en paralelo
     logger.info(`SAP: lotes MP — ${itemCodes.length} ítems, concurrencia ${CONCURRENCIA}`);
     for (let i = 0; i < itemCodes.length; i += CONCURRENCIA) {
       const grupo = itemCodes.slice(i, i + CONCURRENCIA);
       const resultados = await Promise.allSettled(grupo.map(code => retryConBackoff(() => obtenerLotesItem(code), code)));
-      for (const res of resultados) {
+      for (let j = 0; j < resultados.length; j++) {
+        const res = resultados[j];
+        const code = grupo[j];
         if (res.status === 'rejected') {
+          itemsFallidos.push(code);
           logger.warn(`SAP: lotes fallaron para un ítem del grupo: ${res.reason?.message}`);
           continue;
         }
@@ -776,7 +780,7 @@ class SAPService {
     }
 
     logger.info(`SAP: lotes obtenidos para ${Object.keys(resultado).length} ítems via artlot_ individual`);
-    return resultado;
+    return { lotes: resultado, itemsFallidos };
   }
 }
 
