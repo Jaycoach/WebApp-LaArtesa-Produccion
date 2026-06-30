@@ -325,8 +325,9 @@ const descontarInventarioLocal = async (rows, masaId) => {
   }
 
   // 2. Descontar cantidad por lote en sap_lotes_mp usando pesaje_lotes_consumo
+  // Solo filas aún no confirmadas, por si esta función se llama más de una vez (defensivo)
   const lotesResult = await db.query(
-    `SELECT item_code, batch, cantidad_kg FROM pesaje_lotes_consumo WHERE masa_id = $1`,
+    `SELECT item_code, batch, cantidad_kg FROM pesaje_lotes_consumo WHERE masa_id = $1 AND confirmado_sap = false`,
     [masaId]
   );
   for (const lote of lotesResult.rows) {
@@ -338,6 +339,14 @@ const descontarInventarioLocal = async (rows, masaId) => {
       [parseFloat(lote.cantidad_kg), lote.item_code, lote.batch]
     );
   }
+
+  // Marcar como confirmadas: ya se restaron acá, el sync periódico no debe
+  // volver a restarlas como "reservado" (eso causaba el doble descuento).
+  await db.query(
+    `UPDATE pesaje_lotes_consumo SET confirmado_sap = true, confirmado_en = NOW()
+     WHERE masa_id = $1 AND confirmado_sap = false`,
+    [masaId]
+  );
 
   logger.info(`Inventario local descontado para masa ${masaId}: ${rows.length} ítems, ${lotesResult.rows.length} lotes`);
 };
@@ -385,6 +394,8 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
        JOIN ingredientes_masa im ON im.id = plc.ingrediente_id
        LEFT JOIN sap_inventario_mp inv ON inv.item_code = plc.item_code
        WHERE plc.masa_id = $1
+         AND plc.confirmado_sap = false
+         AND plc.liberado_en IS NULL
          AND im.es_empaque = false
          AND ($2::text[] IS NULL OR plc.item_code != ALL($2::text[]))`,
       [masaId, excluidosParam]
@@ -584,6 +595,15 @@ const confirmarPesaje = async (req, res, next) => {
       logger.info(`Masa ${masaId}: pesaje ya transmitido (DocNum ${masaRow.sap_doc_num_pesaje}). Completando fases sin re-envío SAP.`);
       await fasesModel.updateEstadoFase(masaId, 'PLANIFICACION', 'COMPLETADA', 100, req.user.id, {});
       await fasesModel.updateEstadoFase(masaId, 'PESAJE', 'COMPLETADA', 100, req.user.id, { confirmado_en: new Date() });
+      // Red de seguridad: si el intento original dejó filas sin marcar
+      // (por ejemplo, descontarInventarioLocal falló a medias), las cerramos aquí.
+      // No se vuelve a restar cantidad_disponible — solo se evita que el sync
+      // las siga contando como "reservado" indefinidamente.
+      await db.query(
+        `UPDATE pesaje_lotes_consumo SET confirmado_sap = true, confirmado_en = NOW()
+         WHERE masa_id = $1 AND confirmado_sap = false`,
+        [masaId]
+      );
       await db.query(
         `UPDATE progreso_fases SET estado = 'EN_PROGRESO', updated_at = NOW()
          WHERE masa_id = $1 AND fase = 'AMASADO' AND estado = 'BLOQUEADA'`, [masaId]
@@ -1012,7 +1032,7 @@ const devolverStockMasa = async (masaId) => {
   const lotes = await db.query(
     `SELECT item_code, batch, SUM(cantidad_kg) as total_kg
      FROM pesaje_lotes_consumo
-     WHERE masa_id = $1
+     WHERE masa_id = $1 AND confirmado_sap = false AND liberado_en IS NULL
      GROUP BY item_code, batch`,
     [masaId]
   );
@@ -1024,7 +1044,14 @@ const devolverStockMasa = async (masaId) => {
       [l.total_kg, l.item_code, l.batch]
     );
   }
-  await db.query(`DELETE FROM pesaje_lotes_consumo WHERE masa_id = $1`, [masaId]);
+  // No se elimina el registro: se conserva para auditoría y reportes de OVs
+  // canceladas. Solo se marca liberado_en para que el sync no lo siga
+  // contando como reservado.
+  await db.query(
+    `UPDATE pesaje_lotes_consumo SET liberado_en = NOW()
+     WHERE masa_id = $1 AND confirmado_sap = false AND liberado_en IS NULL`,
+    [masaId]
+  );
   logger.info(`Stock devuelto para masa cancelada ${masaId}: ${lotes.rows.length} lotes liberados`);
 };
 
