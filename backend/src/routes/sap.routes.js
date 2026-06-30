@@ -107,6 +107,7 @@ router.post('/sincronizar-bom', checkRole(['admin', 'supervisor']), (req, res, n
  * @access  Private (Admin/Supervisor only)
  */
 router.post('/sincronizar-inventario-mp', checkRole(['admin', 'supervisor']), sapController.sincronizarInventarioMP);
+router.post('/sincronizar-lotes-item', checkRole(['admin', 'supervisor']), sapController.sincronizarLotesItem);
 
 /**
  * @route   GET /api/sap/inventario-mp

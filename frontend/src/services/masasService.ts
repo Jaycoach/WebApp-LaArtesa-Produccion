@@ -10,6 +10,8 @@ import {
   UpdateUnidadesProgramadasRequest,
   SincronizacionSAPResponse,
   SincronizacionBOMResponse,
+  SincronizacionInventarioMPResponse,
+  SincronizacionLotesItemResponse,
 } from '../types/api';
 
 /**
@@ -33,6 +35,25 @@ export const masasService = {
   sincronizarBOM: async (): Promise<SincronizacionBOMResponse> => {
     const response = await apiService.post<SincronizacionBOMResponse>(
       API_CONFIG.ENDPOINTS.SAP.SINCRONIZAR_BOM
+    );
+    return response.data!;
+  },
+  /**
+   * Sincronizar Inventario y Lotes completos (todas las materias primas del BOM)
+   */
+  sincronizarInventarioMP: async (): Promise<SincronizacionInventarioMPResponse> => {
+    const response = await apiService.post<SincronizacionInventarioMPResponse>(
+      API_CONFIG.ENDPOINTS.SAP.SINCRONIZAR_INVENTARIO_MP
+    );
+    return response.data!;
+  },
+  /**
+   * Sincronizar lotes de ítems puntuales (códigos separados por coma)
+   */
+  sincronizarLotesItem: async (items: string): Promise<SincronizacionLotesItemResponse> => {
+    const response = await apiService.post<SincronizacionLotesItemResponse>(
+      API_CONFIG.ENDPOINTS.SAP.SINCRONIZAR_LOTES_ITEM,
+      { items }
     );
     return response.data!;
   },

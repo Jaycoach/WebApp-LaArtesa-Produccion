@@ -1637,10 +1637,28 @@ const sincronizarBOM = async (req, res, next) => {
   }
 };
 
+const LOCK_KEY_INVENTARIO_LOTES = 990001;
+
 const sincronizarInventarioMP = async (_req, res, next) => {
+  const client = await db.getClient();
   try {
+    await client.query('BEGIN');
+
+    const lockResult = await client.query(
+      `SELECT pg_try_advisory_xact_lock($1) AS adquirido`,
+      [LOCK_KEY_INVENTARIO_LOTES]
+    );
+    if (!lockResult.rows[0].adquirido) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        success: false,
+        message: 'Ya hay una sincronización de inventario/lotes en curso. Intenta nuevamente en unos minutos.',
+      });
+    }
+    logger.info(`Advisory lock adquirido para sincronización de inventario/lotes (key=${LOCK_KEY_INVENTARIO_LOTES})`);
+
     // Obtener todos los ítems MP del BOM
-    const itemsResult = await db.query(
+    const itemsResult = await client.query(
       `SELECT DISTINCT item_code_comp AS item_code
        FROM sap_bom_componentes
        WHERE grupo_sap = 181 AND es_empaque = false`
@@ -1658,7 +1676,7 @@ const sincronizarInventarioMP = async (_req, res, next) => {
 
     // Siempre sincronizar lotes de todos los ítems MP presentes en cualquier masa activa
     // (PLANIFICACION → HORNEADO) para mantener stock consistente con SAP
-    const activasResult = await db.query(
+    const activasResult = await client.query(
       `SELECT DISTINCT im.ingrediente_sap_code AS item_code
        FROM ingredientes_masa im
        JOIN masas_produccion mp ON im.masa_id = mp.id
@@ -1681,7 +1699,7 @@ const sincronizarInventarioMP = async (_req, res, next) => {
     for (const [itemCode, datos] of Object.entries(stocks)) {
       if (!datos) continue;
 
-      await db.query(
+      await client.query(
         `INSERT INTO sap_inventario_mp
            (item_code, item_name, uom, stock_almp, committed_almp, ordered_almp, costo_promedio, manage_batch_numbers, ultimo_sync)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
@@ -1727,7 +1745,7 @@ const sincronizarInventarioMP = async (_req, res, next) => {
     // sin lotes de otras bodegas (PRODPROC, ALFABRIC) ni lotes agotados.
     if (Object.keys(lotesMap).length > 0) {
       const itemsConLotesNuevos = Object.keys(lotesMap);
-      await db.query(
+      await client.query(
         `DELETE FROM sap_lotes_mp
          WHERE item_code = ANY($1)`,
         [itemsConLotesNuevos]
@@ -1738,7 +1756,7 @@ const sincronizarInventarioMP = async (_req, res, next) => {
       for (const lote of lotes) {
         // Restar lo ya reservado localmente en pesaje_lotes_consumo para no sobreescribir
         // consumos que aún no fueron enviados a SAP como InventoryGenExit
-        const reservadoResult = await db.query(
+        const reservadoResult = await client.query(
           `SELECT COALESCE(SUM(cantidad_kg), 0) AS reservado
            FROM pesaje_lotes_consumo
            WHERE item_code = $1 AND batch = $2`,
@@ -1747,7 +1765,7 @@ const sincronizarInventarioMP = async (_req, res, next) => {
         const reservado = parseFloat(reservadoResult.rows[0].reservado);
         const cantidadNeta = Math.max(0, (lote.cantidad_disponible || 0) - reservado);
 
-        await db.query(
+        await client.query(
           `INSERT INTO sap_lotes_mp
              (item_code, item_name, batch, status, admission_date, manufacturing_date, expiration_date, cantidad_disponible, ultimo_sync)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
@@ -1779,7 +1797,7 @@ const sincronizarInventarioMP = async (_req, res, next) => {
     try {
       const articulosPT = await sapService.getArticulosConTipoMasa();
       for (const articulo of articulosPT) {
-        await db.query(
+        await client.query(
           `INSERT INTO sap_articulos
              (item_code, item_name, tipo_masa, sales_qty_per_pack, gramaje, multiplo_divisor, activo, synced_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, $6, true, NOW(), NOW())
@@ -1809,6 +1827,7 @@ const sincronizarInventarioMP = async (_req, res, next) => {
       logger.warn(`Inventario MP: fallo al actualizar sap_articulos (no crítico): ${ptErr.message}`);
     }
 
+    await client.query('COMMIT');
     logger.info(`Inventario MP sincronizado: ${sincronizados} ítems, ${lotesSincronizados} lotes`);
 
     return res.json({
@@ -1817,8 +1836,189 @@ const sincronizarInventarioMP = async (_req, res, next) => {
       data: { sincronizados, lotes_sincronizados: lotesSincronizados, articulos_pt_actualizados: articulosActualizados },
     });
   } catch (error) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* ya cerrada */ }
     logger.error('Error sincronizando inventario MP:', error);
     return next(error);
+  } finally {
+    client.release();
+  }
+};
+
+const sincronizarLotesItem = async (req, res, next) => {
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+
+    const lockResult = await client.query(
+      `SELECT pg_try_advisory_xact_lock($1) AS adquirido`,
+      [LOCK_KEY_INVENTARIO_LOTES]
+    );
+    if (!lockResult.rows[0].adquirido) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        success: false,
+        message: 'Ya hay una sincronización de inventario/lotes en curso. Intenta nuevamente en unos minutos.',
+      });
+    }
+    logger.info(`Advisory lock adquirido para sincronización puntual de lotes (key=${LOCK_KEY_INVENTARIO_LOTES})`);
+
+    const itemsParam = req.body?.items;
+    if (!itemsParam) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        message: 'Debe especificar uno o más item_code (ej: { "items": "MP0029,MP0080" })',
+      });
+    }
+
+    const itemCodesSolicitados = (Array.isArray(itemsParam) ? itemsParam : itemsParam.split(','))
+      .map(c => String(c).trim().toUpperCase())
+      .filter(c => c.length > 0);
+
+    if (itemCodesSolicitados.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        message: 'No se encontraron códigos válidos en el parámetro items',
+      });
+    }
+
+    const validosResult = await client.query(
+      `SELECT DISTINCT item_code_comp AS item_code
+       FROM sap_bom_componentes
+       WHERE item_code_comp = ANY($1)
+       UNION
+       SELECT DISTINCT ingrediente_sap_code AS item_code
+       FROM ingredientes_masa
+       WHERE ingrediente_sap_code = ANY($1)`,
+      [itemCodesSolicitados]
+    );
+    const itemCodesValidos = validosResult.rows.map(r => r.item_code);
+    const itemCodesInvalidos = itemCodesSolicitados.filter(c => !itemCodesValidos.includes(c));
+
+    if (itemCodesValidos.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        message: 'Ninguno de los códigos especificados existe en BOM o ingredientes de masas',
+        data: { itemCodesInvalidos },
+      });
+    }
+
+    const stocks = await sapService.getStockMateriaPrima(itemCodesValidos);
+
+    const itemCodesConBatch = itemCodesValidos.filter(code => {
+      const inv = stocks[code];
+      return inv && inv.manageBatchNumbers === true;
+    });
+    const itemCodesSinBatch = itemCodesValidos.filter(code => !itemCodesConBatch.includes(code));
+
+    if (itemCodesConBatch.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        message: 'Ninguno de los ítems válidos maneja lotes (manage_batch_numbers=false)',
+        data: { itemCodesInvalidos, itemCodesSinBatch },
+      });
+    }
+
+    const lotesMap = await sapService.getLotesMateriaPrima(itemCodesConBatch, stocks);
+
+    for (const code of itemCodesValidos) {
+      const datos = stocks[code];
+      if (!datos) continue;
+      await client.query(
+        `INSERT INTO sap_inventario_mp
+           (item_code, item_name, uom, stock_almp, committed_almp, ordered_almp, costo_promedio, manage_batch_numbers, ultimo_sync)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+         ON CONFLICT (item_code) DO UPDATE SET
+           item_name            = EXCLUDED.item_name,
+           uom                  = EXCLUDED.uom,
+           stock_almp           = EXCLUDED.stock_almp,
+           committed_almp       = EXCLUDED.committed_almp,
+           ordered_almp         = EXCLUDED.ordered_almp,
+           costo_promedio       = EXCLUDED.costo_promedio,
+           manage_batch_numbers = EXCLUDED.manage_batch_numbers,
+           ultimo_sync          = NOW()`,
+        [code, datos.itemName, datos.uom, datos.stockAlmp,
+         datos.committedAlmp, datos.orderedAlmp, datos.costoPromedio,
+         datos.manageBatchNumbers ?? false]
+      );
+    }
+
+    if (Object.keys(lotesMap).length > 0) {
+      await client.query(
+        `DELETE FROM sap_lotes_mp WHERE item_code = ANY($1)`,
+        [Object.keys(lotesMap)]
+      );
+    }
+
+    let lotesSincronizados = 0;
+    const resultadoPorItem = {};
+
+    for (const [itemCode, lotes] of Object.entries(lotesMap)) {
+      resultadoPorItem[itemCode] = lotes.length;
+      for (const lote of lotes) {
+        const reservadoResult = await client.query(
+          `SELECT COALESCE(SUM(cantidad_kg), 0) AS reservado
+           FROM pesaje_lotes_consumo
+           WHERE item_code = $1 AND batch = $2`,
+          [itemCode, lote.batch],
+        );
+        const reservado = parseFloat(reservadoResult.rows[0].reservado);
+        const cantidadNeta = Math.max(0, (lote.cantidad_disponible || 0) - reservado);
+
+        await client.query(
+          `INSERT INTO sap_lotes_mp
+             (item_code, item_name, batch, status, admission_date, manufacturing_date, expiration_date, cantidad_disponible, ultimo_sync)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+           ON CONFLICT (item_code, batch) DO UPDATE SET
+             status              = EXCLUDED.status,
+             admission_date      = EXCLUDED.admission_date,
+             manufacturing_date  = EXCLUDED.manufacturing_date,
+             expiration_date     = EXCLUDED.expiration_date,
+             cantidad_disponible = EXCLUDED.cantidad_disponible,
+             ultimo_sync         = NOW()`,
+          [
+            itemCode,
+            stocks[itemCode]?.itemName || null,
+            lote.batch,
+            lote.status,
+            lote.admissionDate || null,
+            lote.manufacturingDate || null,
+            lote.expirationDate || null,
+            cantidadNeta,
+          ]
+        );
+        lotesSincronizados++;
+      }
+    }
+
+    const itemCodesSinLotesEncontrados = itemCodesConBatch.filter(
+      code => !Object.prototype.hasOwnProperty.call(lotesMap, code)
+    );
+
+    await client.query('COMMIT');
+    logger.info(`Sync lotes puntual: ${itemCodesConBatch.length} ítems solicitados, ${lotesSincronizados} lotes sincronizados`);
+
+    return res.json({
+      success: true,
+      message: 'Sincronización puntual completada',
+      data: {
+        itemCodesProcesados: itemCodesConBatch,
+        lotesSincronizados,
+        detallePorItem: resultadoPorItem,
+        itemCodesSinLotesEncontrados,
+        itemCodesInvalidos,
+        itemCodesSinBatch,
+      },
+    });
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* ya cerrada */ }
+    logger.error('Error en sincronizarLotesItem:', error);
+    return next(error);
+  } finally {
+    client.release();
   }
 };
 
@@ -1869,5 +2069,6 @@ module.exports = {
   getHistorialSync,
   testConexionSAP,
   sincronizarInventarioMP,
+  sincronizarLotesItem,
   getInventarioMP,
 };

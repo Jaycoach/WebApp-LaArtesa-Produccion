@@ -209,6 +209,21 @@ export interface SincronizacionBOMResponse {
   errores?: Array<{ itemCode: string; error: string }>;
 }
 
+export interface SincronizacionInventarioMPResponse {
+  sincronizados: number;
+  lotes_sincronizados: number;
+  articulos_pt_actualizados: number;
+}
+
+export interface SincronizacionLotesItemResponse {
+  itemCodesProcesados: string[];
+  lotesSincronizados: number;
+  detallePorItem: Record<string, number>;
+  itemCodesSinLotesEncontrados: string[];
+  itemCodesInvalidos: string[];
+  itemCodesSinBatch: string[];
+}
+
 // Response de envío de correo
 export interface EnvioCorreoResponse {
   enviado: boolean;
