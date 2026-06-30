@@ -711,6 +711,25 @@ class SAPService {
       return null;
     };
 
+    const retryConBackoff = async (fn, etiqueta, intentos = 3, delayBaseMs = 3000) => {
+      let ultimoError;
+      for (let intento = 1; intento <= intentos; intento++) {
+        try {
+          return await fn();
+        } catch (err) {
+          ultimoError = err;
+          const esUltimoIntento = intento === intentos;
+          if (!esUltimoIntento) {
+            const delay = delayBaseMs * intento; // 3s, 6s — backoff lineal
+            logger.warn(`SAP: [${etiqueta}] intento ${intento}/${intentos} falló (${err.message}). Reintentando en ${delay}ms...`);
+            await new Promise(r => setTimeout(r, delay));
+          } else {
+            logger.error(`SAP: [${etiqueta}] falló tras ${intentos} intentos. Último error: ${err.message}`);
+          }
+        }
+      }
+      throw ultimoError;
+    };
     const obtenerLotesItem = async (itemCode) => {
       const sqlCode = `artlot_${itemCode.replace(/[^a-zA-Z0-9]/g, '_')}`;
       const sqlText = `SELECT "OBTN"."DistNumber", "OBTQ"."Quantity", "OBTN"."ExpDate", "OBTN"."MnfDate", "OBTN"."CreateDate" FROM "OBTN" INNER JOIN "OBTQ" ON "OBTN"."ItemCode" = "OBTQ"."ItemCode" AND "OBTN"."SysNumber" = "OBTQ"."SysNumber" WHERE "OBTN"."ItemCode" = '${itemCode}' AND "OBTQ"."WhsCode" = 'ALMP' AND "OBTQ"."Quantity" > 0`;
@@ -731,7 +750,7 @@ class SAPService {
     logger.info(`SAP: lotes MP — ${itemCodes.length} ítems, concurrencia ${CONCURRENCIA}`);
     for (let i = 0; i < itemCodes.length; i += CONCURRENCIA) {
       const grupo = itemCodes.slice(i, i + CONCURRENCIA);
-      const resultados = await Promise.allSettled(grupo.map(code => obtenerLotesItem(code)));
+      const resultados = await Promise.allSettled(grupo.map(code => retryConBackoff(() => obtenerLotesItem(code), code)));
       for (const res of resultados) {
         if (res.status === 'rejected') {
           logger.warn(`SAP: lotes fallaron para un ítem del grupo: ${res.reason?.message}`);
