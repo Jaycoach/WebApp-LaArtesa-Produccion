@@ -439,10 +439,48 @@ const desbloquearSiguienteFase = async (masaId, faseActual) => {
     HORNEADO: 'EMPAQUE',
   };
 
+  const masaIdNum = Number(masaId);
+
+  // Si viene de DIVISION, verificar si la masa requiere formado
+  // requiere_formado NULL se trata como false (tipos de masa sin configurar)
+  if (faseActual === 'DIVISION') {
+    const reqResult = await db.query(`
+      SELECT ctm.requiere_formado
+      FROM masas_produccion mp
+      LEFT JOIN catalogo_tipos_masa ctm ON mp.tipo_masa = ctm.tipo_masa
+      WHERE mp.id = $1
+    `, [masaIdNum]);
+
+    const requiereFormado = reqResult.rows[0]?.requiere_formado === true;
+
+    if (!requiereFormado) {
+      // Saltar FORMADO: marcarlo COMPLETADA automáticamente y abrir FERMENTACION
+      await db.query(`
+        UPDATE progreso_fases
+        SET estado = 'COMPLETADA', porcentaje_completado = 100, fecha_completado = NOW(), updated_at = NOW()
+        WHERE masa_id = $1 AND fase = 'FORMADO'
+      `, [masaIdNum]);
+
+      const result = await db.query(`
+        UPDATE progreso_fases
+        SET estado = 'EN_PROGRESO', updated_at = NOW()
+        WHERE masa_id = $1 AND fase = 'FERMENTACION'
+        RETURNING *
+      `, [masaIdNum]);
+
+      await db.query(`
+        UPDATE masas_produccion
+        SET fase_actual = 'FERMENTACION', updated_at = NOW()
+        WHERE id = $1
+      `, [masaIdNum]);
+
+      return result.rows[0];
+    }
+    // Si requiere formado: flujo normal → abre FORMADO
+  }
+
   const siguienteFase = fasesOrden[faseActual];
   if (!siguienteFase) return null;
-
-  const masaIdNum = Number(masaId);
 
   // Desbloquear la siguiente fase estableciéndola como EN_PROGRESO
   const result = await db.query(`
