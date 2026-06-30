@@ -1047,6 +1047,7 @@ exports.getResumenVariedad = async (req, res) => {
        JOIN progreso_fases pf  ON pf.masa_id = mp.id AND pf.fase = 'EMPAQUE'
        WHERE mp.fecha_produccion = $1
          AND pf.estado IN ('PENDIENTE', 'EN_PROGRESO')
+         AND mp.estado != 'CANCELADA'
          AND ppm.unidades_programadas > 0
        GROUP BY
          ppm.sap_item_code,
