@@ -120,3 +120,20 @@ export const useUpdateCostoAgua2 = () => {
     },
   });
 };
+export const useCatalogoTiposMasa = () => {
+  return useQuery({
+    queryKey: ['catalogo-tipos-masa'],
+    queryFn: () => configService.getCatalogoTiposMasa(),
+    staleTime: 1000 * 60 * 5,
+  });
+};
+export const useUpdateTipoMasaFormado = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, requiere_formado }: { id: number; requiere_formado: boolean }) =>
+      configService.updateTipoMasaFormado(id, requiere_formado),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['catalogo-tipos-masa'] });
+    },
+  });
+};

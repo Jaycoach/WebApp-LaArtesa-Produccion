@@ -353,7 +353,9 @@ exports.getCatalogoTiposMasa = async (req, res) => {
   try {
     const r = await db.query(
       `SELECT id, codigo_sap, tipo_masa, nombre_masa,
-              unidades_pan_por_paquete, dias_vida_util, activo
+              unidades_pan_por_paquete, dias_vida_util, activo,
+              requiere_formado, requiere_camara_frio,
+              tiempo_fermentacion_estandar_minutos
        FROM catalogo_tipos_masa
        WHERE activo = true
        ORDER BY tipo_masa, nombre_masa`
@@ -368,7 +370,7 @@ exports.getCatalogoTiposMasa = async (req, res) => {
 exports.updateCatalogoTiposMasa = async (req, res) => {
   try {
     const { id } = req.params;
-    const { unidades_pan_por_paquete, dias_vida_util } = req.body;
+    const { unidades_pan_por_paquete, dias_vida_util, requiere_formado } = req.body;
 
     if (unidades_pan_por_paquete !== undefined && Number(unidades_pan_por_paquete) < 1)
       return res.status(400).json({ success: false, message: 'unidades_pan_por_paquete debe ser >= 1' });
@@ -379,11 +381,12 @@ exports.updateCatalogoTiposMasa = async (req, res) => {
       `UPDATE catalogo_tipos_masa
        SET unidades_pan_por_paquete = COALESCE($2, unidades_pan_por_paquete),
            dias_vida_util           = COALESCE($3, dias_vida_util),
+           requiere_formado         = COALESCE($4, requiere_formado),
            fecha_actualizacion      = NOW()
        WHERE id = $1
        RETURNING id, codigo_sap, tipo_masa, nombre_masa,
-                 unidades_pan_por_paquete, dias_vida_util`,
-      [id, unidades_pan_por_paquete ?? null, dias_vida_util ?? null]
+                 unidades_pan_por_paquete, dias_vida_util, requiere_formado`,
+      [id, unidades_pan_por_paquete ?? null, dias_vida_util ?? null, requiere_formado ?? null]
     );
 
     if (!r.rows.length)

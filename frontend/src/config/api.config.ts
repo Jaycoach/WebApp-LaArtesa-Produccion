@@ -63,6 +63,7 @@ export const API_CONFIG = {
       CORREOS: '/config/correos',
       COSTO_AGUA: '/config/costo-agua',
       COSTO_AGUA2: '/config/costo-agua2',
+      CATALOGO_TIPOS_MASA: '/config/catalogo-tipos-masa',
     },
 
     // Fases de producción

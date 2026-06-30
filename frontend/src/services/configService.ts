@@ -101,6 +101,19 @@ export const configService = {
     );
     return handleApiResponse(response);
   },
+  getCatalogoTiposMasa: async (): Promise<any[]> => {
+    const response = await apiClient.get<ApiResponse<any[]>>(
+      API_CONFIG.ENDPOINTS.CONFIG.CATALOGO_TIPOS_MASA
+    );
+    return handleApiResponse(response);
+  },
+  updateTipoMasaFormado: async (id: number, requiere_formado: boolean): Promise<any> => {
+    const response = await apiClient.put<ApiResponse<any>>(
+      `${API_CONFIG.ENDPOINTS.CONFIG.CATALOGO_TIPOS_MASA}/${id}`,
+      { requiere_formado }
+    );
+    return handleApiResponse(response);
+  },
 };
 
 export default configService;

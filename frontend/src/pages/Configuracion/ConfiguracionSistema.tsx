@@ -1,8 +1,96 @@
 import React, { useState, useEffect } from 'react';
 import { Card } from '@/components/common';
-import { useUpdateFactorAbsorcion, useUpdateCorreos, useCorreosEmpaque, useCostoAgua, useUpdateCostoAgua, useCostoAgua2, useUpdateCostoAgua2 } from '@/hooks/useConfig';
+import { useUpdateFactorAbsorcion, useUpdateCorreos, useCorreosEmpaque, useCostoAgua, useUpdateCostoAgua, useCostoAgua2, useUpdateCostoAgua2, useCatalogoTiposMasa, useUpdateTipoMasaFormado } from '@/hooks/useConfig';
+
+const ModalFormado: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const { data: tipos, isLoading } = useCatalogoTiposMasa();
+  const updateMutation = useUpdateTipoMasaFormado();
+  const [saving, setSaving] = useState<number | null>(null);
+  const [localValues, setLocalValues] = useState<Record<number, boolean>>({});
+
+  useEffect(() => {
+    if (tipos) {
+      const initial: Record<number, boolean> = {};
+      tipos.forEach((t: any) => { initial[t.id] = t.requiere_formado === true; });
+      setLocalValues(initial);
+    }
+  }, [tipos]);
+
+  const handleToggle = async (id: number, value: boolean) => {
+    setLocalValues(prev => ({ ...prev, [id]: value }));
+    setSaving(id);
+    try {
+      await updateMutation.mutateAsync({ id, requiere_formado: value });
+    } catch {
+      setLocalValues(prev => ({ ...prev, [id]: !value }));
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between p-6 border-b">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">Configurar Fase Formado</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Define qué tipos de masa requieren formado manual.
+              Si está desactivado, la masa avanza de División directo a Fermentación.
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+        </div>
+        <div className="overflow-y-auto flex-1 p-6">
+          {isLoading ? (
+            <div className="text-center py-8 text-gray-500">Cargando tipos de masa...</div>
+          ) : (
+            <div className="space-y-2">
+              {(tipos || []).map((tipo: any) => (
+                <div key={tipo.id} className="flex items-center justify-between p-3 rounded-lg border border-gray-100 hover:bg-gray-50">
+                  <div>
+                    <p className="font-medium text-gray-800 text-sm">{tipo.nombre_masa}</p>
+                    <p className="text-xs text-gray-400">{tipo.tipo_masa}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {saving === tipo.id && (
+                      <span className="text-xs text-blue-500">Guardando...</span>
+                    )}
+                    <button
+                      onClick={() => handleToggle(tipo.id, !localValues[tipo.id])}
+                      disabled={saving === tipo.id}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none disabled:opacity-50 ${
+                        localValues[tipo.id] ? 'bg-blue-600' : 'bg-gray-300'
+                      }`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        localValues[tipo.id] ? 'translate-x-6' : 'translate-x-1'
+                      }`} />
+                    </button>
+                    <span className={`text-xs font-medium w-12 ${localValues[tipo.id] ? 'text-blue-600' : 'text-gray-400'}`}>
+                      {localValues[tipo.id] ? 'Sí' : 'No'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="p-6 border-t bg-gray-50 rounded-b-xl">
+          <div className="flex justify-between items-center">
+            <p className="text-xs text-gray-500">Los cambios se guardan automáticamente.</p>
+            <button onClick={onClose} className="px-6 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800">
+              Cerrar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export const ConfiguracionSistema: React.FC = () => {
+  const [showModalFormado, setShowModalFormado] = useState(false);
   // State local para formularios
   const [factorAbsorcion, setFactorAbsorcion] = useState<number>(60);
   const [porcentajeMerma, setPorcentajeMerma] = useState<number>(5);
@@ -450,6 +538,32 @@ export const ConfiguracionSistema: React.FC = () => {
             </div>
           </div>
         </Card>
+
+        {/* Tipos de Masa — Fase Formado */}
+        <Card title="Tipos de Masa">
+          <div className="space-y-4">
+            <p className="text-gray-600 text-sm">
+              Configura qué tipos de masa requieren el proceso de formado manual.
+              Los tipos sin configurar se tratan como "no requiere formado".
+            </p>
+            <div className="flex items-center justify-between gap-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex-1">
+                <p className="text-blue-800 text-sm">
+                  ℹ️ Si un tipo de masa <strong>no requiere formado</strong>, al completar División
+                  el sistema avanza automáticamente a Fermentación.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowModalFormado(true)}
+                className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 whitespace-nowrap"
+              >
+                Configurar Fase Formado
+              </button>
+            </div>
+          </div>
+        </Card>
+
+        {showModalFormado && <ModalFormado onClose={() => setShowModalFormado(false)} />}
 
         {/* Información del sistema */}
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
