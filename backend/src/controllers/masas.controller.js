@@ -6,6 +6,7 @@ const db = require('../database/connection');
 const fasesModel = require('../models/fases.model');
 const logger = require('../utils/logger');
 const { sendAprobacionMasaEmail } = require('../services/email.service');
+const { devolverStockMasa } = require('./pesaje.controller');
 
 /**
  * @desc    Obtener masas por fecha
@@ -561,6 +562,63 @@ const marcarPendiente = async (req, res, next) => {
   }
 };
 
+/**
+ * Cancela una masa APROBADA que aún no inició pesaje.
+ * Libera cualquier reserva local de lotes (pesaje_lotes_consumo) que
+ * nunca llegó a confirmarse en SAP — esas filas se eliminan porque
+ * no hay nada que auditar (el consumo real nunca ocurrió).
+ */
+const cancelarMasa = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const masaCheck = await db.query(
+      `SELECT m.id, m.estado, m.sap_doc_entry_pesaje, pf.estado AS estado_pesaje
+       FROM masas_produccion m
+       LEFT JOIN progreso_fases pf ON pf.masa_id = m.id AND pf.fase = 'PESAJE'
+       WHERE m.id = $1`,
+      [id]
+    );
+    if (!masaCheck.rows.length) {
+      return res.status(404).json({ success: false, message: 'Masa no encontrada' });
+    }
+    const masa = masaCheck.rows[0];
+
+    if (masa.estado !== 'APROBADA') {
+      return res.status(403).json({
+        success: false,
+        message: `Solo se pueden cancelar masas en estado APROBADA. Estado actual: ${masa.estado}`,
+        estado: masa.estado,
+      });
+    }
+    if (masa.estado_pesaje === 'COMPLETADA' || masa.sap_doc_entry_pesaje) {
+      return res.status(403).json({
+        success: false,
+        message: 'No se puede cancelar: el pesaje ya fue confirmado en SAP para esta masa.',
+      });
+    }
+
+    const { motivo } = req.body;
+    await devolverStockMasa(id);
+    await db.query(
+      `UPDATE masas_produccion
+       SET estado = 'CANCELADA', cancelado_por = $1, cancelado_en = NOW(),
+           motivo_cancelacion = $2, updated_at = NOW()
+       WHERE id = $3`,
+      [req.user.id, motivo || null, id]
+    );
+    logger.info(`Masa ${id} cancelada por usuario ${req.user.id}. Motivo: ${motivo || 'sin especificar'}`);
+
+    res.json({
+      success: true,
+      message: 'Masa cancelada y stock reservado liberado.',
+      data: { masaId: id, estado: 'CANCELADA' },
+    });
+  } catch (error) {
+    logger.error(`Error cancelando masa ${req.params.id}:`, error);
+    next(error);
+  }
+};
+
 module.exports = {
   getMasasByFecha,
   getMasaById,
@@ -569,4 +627,5 @@ module.exports = {
   updateUnidadesProgramadas,
   aprobarMasa,
   marcarPendiente,
+  cancelarMasa,
 };

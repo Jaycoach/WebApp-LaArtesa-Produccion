@@ -62,4 +62,6 @@ router.patch('/:id/aprobar', checkRole(['admin', 'supervisor']), masasController
  */
 router.patch('/:id/pendiente', checkRole(['admin', 'supervisor']), masasController.marcarPendiente);
 
+router.patch('/:id/cancelar', checkRole(['admin', 'supervisor']), masasController.cancelarMasa);
+
 module.exports = router;

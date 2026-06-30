@@ -808,6 +808,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
          WHERE masa_id IN (
            SELECT id FROM masas_produccion
            WHERE DATE(fecha_produccion) = $1
+             AND estado != 'CANCELADA'
          )
          AND sap_doc_entry = ANY($2::int[])`,
         [fechaProduccion, docEntriesGrupo]
@@ -1759,7 +1760,7 @@ const sincronizarInventarioMP = async (_req, res, next) => {
         const reservadoResult = await client.query(
           `SELECT COALESCE(SUM(cantidad_kg), 0) AS reservado
            FROM pesaje_lotes_consumo
-           WHERE item_code = $1 AND batch = $2`,
+           WHERE item_code = $1 AND batch = $2 AND confirmado_sap = false AND liberado_en IS NULL`,
           [itemCode, lote.batch],
         );
         const reservado = parseFloat(reservadoResult.rows[0].reservado);
@@ -1964,7 +1965,7 @@ const sincronizarLotesItem = async (req, res, next) => {
         const reservadoResult = await client.query(
           `SELECT COALESCE(SUM(cantidad_kg), 0) AS reservado
            FROM pesaje_lotes_consumo
-           WHERE item_code = $1 AND batch = $2`,
+           WHERE item_code = $1 AND batch = $2 AND confirmado_sap = false AND liberado_en IS NULL`,
           [itemCode, lote.batch],
         );
         const reservado = parseFloat(reservadoResult.rows[0].reservado);
