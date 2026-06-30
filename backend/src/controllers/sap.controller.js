@@ -1735,9 +1735,9 @@ const sincronizarInventarioMP = async (_req, res, next) => {
       logger.info(`Sync lotes: omitiendo ${itemCodesSinStock.length} ítems con manage_batch_numbers=true pero stock_almp=0: ${itemCodesSinStock.map(i => i.code).join(', ')}`);
     }
 
-    const lotesMap = itemCodesConLotes.length > 0
+    const { lotes: lotesMap, itemsFallidos: lotesFallidos } = itemCodesConLotes.length > 0
       ? await sapService.getLotesMateriaPrima(itemCodesConLotes, stocks)
-      : {};
+      : { lotes: {}, itemsFallidos: [] };
     let lotesSincronizados = 0;
 
     // Limpiar TODOS los lotes de los ítems que se van a sincronizar antes de insertar.
@@ -1828,12 +1828,14 @@ const sincronizarInventarioMP = async (_req, res, next) => {
     }
 
     await client.query('COMMIT');
-    logger.info(`Inventario MP sincronizado: ${sincronizados} ítems, ${lotesSincronizados} lotes`);
+    logger.info(`Inventario MP sincronizado: ${sincronizados} ítems, ${lotesSincronizados} lotes${lotesFallidos.length > 0 ? `. Fallidos: ${lotesFallidos.join(', ')}` : ''}`);
 
     return res.json({
       success: true,
-      message: `Inventario sincronizado: ${sincronizados} materias primas, ${lotesSincronizados} lotes`,
-      data: { sincronizados, lotes_sincronizados: lotesSincronizados, articulos_pt_actualizados: articulosActualizados },
+      message: lotesFallidos.length > 0
+        ? `Inventario sincronizado con advertencias: ${sincronizados} materias primas, ${lotesSincronizados} lotes. No sincronizados: ${lotesFallidos.join(', ')}`
+        : `Inventario sincronizado: ${sincronizados} materias primas, ${lotesSincronizados} lotes`,
+      data: { sincronizados, lotes_sincronizados: lotesSincronizados, articulos_pt_actualizados: articulosActualizados, items_fallidos: lotesFallidos },
     });
   } catch (error) {
     try { await client.query('ROLLBACK'); } catch (_) { /* ya cerrada */ }
@@ -1922,7 +1924,7 @@ const sincronizarLotesItem = async (req, res, next) => {
       });
     }
 
-    const lotesMap = await sapService.getLotesMateriaPrima(itemCodesConBatch, stocks);
+    const { lotes: lotesMap, itemsFallidos: lotesFallidos } = await sapService.getLotesMateriaPrima(itemCodesConBatch, stocks);
 
     for (const code of itemCodesValidos) {
       const datos = stocks[code];
@@ -1999,15 +2001,18 @@ const sincronizarLotesItem = async (req, res, next) => {
     );
 
     await client.query('COMMIT');
-    logger.info(`Sync lotes puntual: ${itemCodesConBatch.length} ítems solicitados, ${lotesSincronizados} lotes sincronizados`);
+    logger.info(`Sync lotes puntual: ${itemCodesConBatch.length} ítems solicitados, ${lotesSincronizados} lotes sincronizados${lotesFallidos.length > 0 ? `. Fallidos: ${lotesFallidos.join(', ')}` : ''}`);
 
     return res.json({
       success: true,
-      message: 'Sincronización puntual completada',
+      message: lotesFallidos.length > 0
+        ? `Sincronización puntual completada con advertencias. No sincronizados: ${lotesFallidos.join(', ')}`
+        : 'Sincronización puntual completada',
       data: {
         itemCodesProcesados: itemCodesConBatch,
         lotesSincronizados,
         detallePorItem: resultadoPorItem,
+        itemsFallidos: lotesFallidos,
         itemCodesSinLotesEncontrados,
         itemCodesInvalidos,
         itemCodesSinBatch,
