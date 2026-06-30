@@ -7,7 +7,7 @@ export const API_CONFIG = {
   BASE_URL: import.meta.env.VITE_API_URL || 'http://localhost:3000/api',
 
   // Timeouts
-  TIMEOUT: 660000, // 11 minutos - necesario para sincronización BOM (~10 min)
+  TIMEOUT: 1200000, // 20 minutos - necesario para sincronización de inventario/lotes (~15 min observado)
 
   // Endpoints principales
   ENDPOINTS: {
@@ -78,6 +78,8 @@ export const API_CONFIG = {
       SINCRONIZAR: '/sap/sincronizar-ov',
       ORDENES: '/sap/ordenes',
       SINCRONIZAR_BOM: '/sap/sincronizar-bom',
+      SINCRONIZAR_INVENTARIO_MP: '/sap/sincronizar-inventario-mp',
+      SINCRONIZAR_LOTES_ITEM: '/sap/sincronizar-lotes-item',
     },
   },
 

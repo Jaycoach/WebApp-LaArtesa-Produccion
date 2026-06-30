@@ -100,6 +100,46 @@ export const useSincronizarBOM = () => {
     },
   });
 };
+/**
+ * Hook para sincronizar Inventario y Lotes completos desde SAP
+ */
+export const useSincronizarInventarioMP = () => {
+  return useMutation({
+    mutationFn: () => masasService.sincronizarInventarioMP(),
+    onError: (error: any) => {
+      if (error?.response?.status === 409) {
+        return {
+          success: false,
+          message: 'Ya hay una sincronización de inventario/lotes en curso. Intenta nuevamente en unos minutos.',
+        };
+      }
+      return {
+        success: false,
+        message: error.message || 'Error al sincronizar inventario/lotes',
+      };
+    },
+  });
+};
+/**
+ * Hook para sincronizar lotes de ítems puntuales desde SAP
+ */
+export const useSincronizarLotesItem = () => {
+  return useMutation({
+    mutationFn: (items: string) => masasService.sincronizarLotesItem(items),
+    onError: (error: any) => {
+      if (error?.response?.status === 409) {
+        return {
+          success: false,
+          message: 'Ya hay una sincronización de inventario/lotes en curso. Intenta nuevamente en unos minutos.',
+        };
+      }
+      return {
+        success: false,
+        message: error.message || 'Error al sincronizar los códigos especificados',
+      };
+    },
+  });
+};
 
 /**
  * Hook para actualizar unidades programadas
