@@ -442,7 +442,8 @@ exports.completarEmpaque = async (req, res) => {
     await client.query('BEGIN');
 
     const empR = await client.query(
-      `SELECT id, sap_doc_entry_entrada, sap_doc_num_entrada
+      `SELECT id, sap_doc_entry_entrada, sap_doc_num_entrada,
+              sap_doc_entry_salida, sap_doc_num_salida
        FROM registros_empaque WHERE masa_id = $1 AND estado = 'EN_PROGRESO'`, [masaId]
     );
     if (!empR.rows.length) {
@@ -450,17 +451,21 @@ exports.completarEmpaque = async (req, res) => {
       return res.status(400).json({ success: false, message: 'No hay empaque en progreso' });
     }
     const empaqueId = empR.rows[0].id;
+    const yaEntrada = empR.rows[0].sap_doc_entry_entrada;
+    const yaSalida  = empR.rows[0].sap_doc_entry_salida;
 
     // ── GUARDIA IDEMPOTENCIA ──────────────────────────────────────────────────
-    // Si ya existe DocEntry de entrada en SAP → bloquear reenvío
-    if (empR.rows[0].sap_doc_entry_entrada) {
+    // Si AMBOS documentos SAP ya existen → no hay nada más que hacer
+    if (yaEntrada && yaSalida) {
       await client.query('ROLLBACK');
       return res.status(409).json({
         success: false,
         already_sent: true,
-        sap_doc_entry_entrada: empR.rows[0].sap_doc_entry_entrada,
+        sap_doc_entry_entrada: yaEntrada,
         sap_doc_num_entrada: empR.rows[0].sap_doc_num_entrada,
-        message: `Entrada de mercancía ya registrada en SAP (DocNum ${empR.rows[0].sap_doc_num_entrada}). No se puede enviar de nuevo.`,
+        sap_doc_entry_salida: yaSalida,
+        sap_doc_num_salida: empR.rows[0].sap_doc_num_salida,
+        message: `Empaque ya registrado completamente en SAP (Entrada DocNum ${empR.rows[0].sap_doc_num_entrada}, Salida DocNum ${empR.rows[0].sap_doc_num_salida}). No se puede enviar de nuevo.`,
       });
     }
 
@@ -608,191 +613,206 @@ exports.completarEmpaque = async (req, res) => {
     // 9. Marcar empaque y fase completados — SE EJECUTA DESPUÉS de SAP (ver paso 9b más abajo)
     // No se marca COMPLETADA aquí para evitar estado inconsistente si SAP falla
 
-    // 10. Salida de materiales de empaque SAP (InventoryGenExits) — UNA LÍNEA POR PRODUCTO
-    // NO se colapsan materiales iguales de productos distintos: cada producto tiene su propia línea
-    // para que el costo quede discriminado en SAP por producto terminado.
-    let sapResult = null;
-    const docLines = [];  // líneas para SAP — sin colapsar por ItemCode
-    try {
-      const sapService = require('../services/sap.service');
-      await sapService.ensureSession();
+    // 10. Entrada de mercancía SAP (InventoryGenEntries) — PRIMERO. Si esto falla,
+    // no se toca la salida de materiales, evitando descuentos duplicados en ALEMP.
+    let sapEntradaResult = null;
+    if (yaEntrada) {
+      sapEntradaResult = { doc_entry: yaEntrada, lineas: null, ya_existia: true };
+    } else {
+      try {
+        const sapServiceEntrada = require('../services/sap.service');
+        await sapServiceEntrada.ensureSession();
 
-      for (const prod of prodsR.rows) {
-        if (!prod.sap_item_code || !parseInt(prod.uds_empacadas)) continue;
-        const mats = materialesPorProducto[prod.id] || [];
-        for (const mat of mats) {
-          if (mat.cantidad <= 0) continue;
-          // Línea separada por producto — NO buscar existing para colapsar
-          docLines.push({
-            ItemCode:      mat.item_code,
-            Quantity:      mat.cantidad,
-            WarehouseCode: 'ALEMP',
+        const entradaLines = [];
+        for (const prod of prodsR.rows) {
+          if (!prod.sap_item_code || !prod.uds_empacadas || parseInt(prod.uds_empacadas) <= 0) continue;
+          const mpProdEntrada      = parseFloat(prod.costo_mp_total_prod || 0);
+          const empaqueProdEntrada = prod._costo_empaque || 0;
+          const totalKilosPPMEnt   = prodsR.rows.reduce((s, p) => s + parseFloat(p.kilos_programados || 0), 0);
+          const ratioEnt           = totalKilosPPMEnt > 0
+            ? parseFloat(prod.kilos_programados || 0) / totalKilosPPMEnt
+            : 1 / prodsR.rows.length;
+          const moProdEntrada      = costoMOTotal        * ratioEnt;
+          const indProdEntrada     = costoIndirectoTotal * ratioEnt;
+          const totalProdEntrada   = mpProdEntrada + moProdEntrada + empaqueProdEntrada + indProdEntrada;
+          const udsEnt             = parseInt(prod.uds_empacadas);
+          const costoUnitarioProd  = udsEnt > 0 ? totalProdEntrada / udsEnt : 0;
+
+          const linea = {
+            ItemCode:      prod.sap_item_code,
+            Quantity:      udsEnt,
+            UnitPrice:     parseFloat(costoUnitarioProd.toFixed(2)),
+            WarehouseCode: 'PROTERMI',
             AccountCode:   '14100501',
-          });
+            BatchNumbers: [{
+              BatchNumber:       loteProduccion,
+              Quantity:          udsEnt,
+              ExpiryDate:        fechaVencimiento
+                ? new Date(fechaVencimiento).toISOString().split('T')[0]
+                : null,
+              ManufacturingDate: fecha_local || new Date().toISOString().split('T')[0],
+            }],
+            // Bodega PROTERMI exige ubicación en toda transacción (entrada Y salida)
+            DocumentLinesBinAllocations: [{
+              BinAbsEntry: 1,
+              Quantity: udsEnt,
+              SerialAndBatchNumbersBaseLine: 0,
+            }],
+          };
+          entradaLines.push(linea);
         }
-      }
 
-      if (docLines.length) {
-        const sapResp = await sapService.client.post('/InventoryGenExits', {
-          DocDate:       fecha_local || new Date().toISOString().split('T')[0],
-          Comments:      `Consumo empaque masa ${masaId}`,
-          U_JZ_NumMasa:  String(masaId),
-          DocumentLines: docLines,
-        });
-        sapResult = { doc_entry: sapResp.data.DocEntry, lineas: docLines.length };
-        logger.info(`GoodsIssues empaque masa ${masaId}: DocEntry ${sapResp.data.DocEntry} (${docLines.length} líneas)`);
+        if (entradaLines.length) {
+          const sapRespEntrada = await sapServiceEntrada.client.post('/InventoryGenEntries', {
+            DocDate:       fecha_local || new Date().toISOString().split('T')[0],
+            Comments:      `Producción terminada masa ${masaId} - Lote ${loteProduccion}`,
+            U_JZ_NumMasa:  String(masaId),
+            DocumentLines: entradaLines,
+          });
+          sapEntradaResult = { doc_entry: sapRespEntrada.data.DocEntry, lineas: entradaLines.length };
+          logger.info(`InventoryGenEntries masa ${masaId}: DocEntry ${sapRespEntrada.data.DocEntry}`);
+          await client.query(
+            `UPDATE registros_empaque
+               SET sap_doc_entry_entrada = $1, sap_doc_num_entrada = $2, sap_error_entrada = NULL
+             WHERE masa_id = $3`,
+            [sapRespEntrada.data.DocEntry, String(sapRespEntrada.data.DocNum || ''), masaId]
+          );
+
+          await client.query(`
+            UPDATE costos_masa SET
+              costo_mo_total      = $2,
+              costo_cif_total     = $3,
+              costo_total_masa    = $4,
+              costo_por_kilo      = $5,
+              fecha_calculo_final = NOW(),
+              updated_at          = NOW()
+            WHERE masa_id = $1
+          `, [
+            masaId,
+            costoMOTotal,
+            costoIndirectoTotal,
+            costoTotalFinal,
+            totalKgProducidos > 0 ? costoTotalFinal / totalKgProducidos : 0,
+          ]);
+        }
+      } catch (sapErr) {
+        const sapErrDetail = sapErr.response?.data?.error?.message?.value
+          || sapErr.response?.data?.error?.message
+          || sapErr.message;
+        logger.error(`Error InventoryGenEntries masa ${masaId}: ${sapErrDetail}`);
         await client.query(
-          `UPDATE registros_empaque
-             SET sap_doc_entry_salida = $1, sap_doc_num_salida = $2, sap_error_salida = NULL
-           WHERE masa_id = $3`,
-          [sapResp.data.DocEntry, String(sapResp.data.DocNum || ''), masaId]
+          `UPDATE registros_empaque SET sap_error_entrada = $1 WHERE masa_id = $2`,
+          [sapErrDetail, masaId]
         );
+        await client.query('COMMIT');
+        return res.status(502).json({
+          success: false,
+          sap_entrada_error: sapErrDetail,
+          message: `No se pudo registrar la entrada de producto terminado en SAP. La salida de materiales de empaque NO fue creada — sin descuento duplicado. Corrige el problema en SAP e intenta de nuevo. Detalle: ${sapErrDetail}`,
+        });
+      }
+    }
 
-        // Registrar consumo por producto en empaque_consumo_materiales
-        let lineaIdx = 0;
+    // 11. Salida de materiales de empaque SAP (InventoryGenExits) — SOLO si la entrada
+    // fue exitosa (ahora o en un intento anterior). UNA LÍNEA POR PRODUCTO.
+    let sapResult = null;
+    if (yaSalida) {
+      sapResult = { doc_entry: yaSalida, lineas: null, ya_existia: true };
+    } else {
+      const docLines = [];
+      try {
+        const sapService = require('../services/sap.service');
+        await sapService.ensureSession();
+
         for (const prod of prodsR.rows) {
           if (!prod.sap_item_code || !parseInt(prod.uds_empacadas)) continue;
           const mats = materialesPorProducto[prod.id] || [];
           for (const mat of mats) {
             if (mat.cantidad <= 0) continue;
-            await client.query(
-              `INSERT INTO empaque_consumo_materiales
-                 (masa_id, producto_masa_id, item_code_comp, item_name_comp,
-                  cantidad_consumida, uom, costo_unitario_mat, costo_total_mat,
-                  sap_doc_entry_salida, sap_doc_num_salida)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-               ON CONFLICT DO NOTHING`,
-              [masaId, prod.id, mat.item_code, mat.nombre,
-               mat.cantidad, mat.uom, mat.precio, mat.costo_total,
-               sapResp.data.DocEntry, String(sapResp.data.DocNum || '')]
-            );
-            lineaIdx++;
+            docLines.push({
+              ItemCode:      mat.item_code,
+              Quantity:      mat.cantidad,
+              WarehouseCode: 'ALEMP',
+              AccountCode:   '14100501',
+            });
           }
         }
-      }
-    } catch (sapErr) {
-      const sapErrDetail = sapErr.response?.data?.error?.message?.value
-        || sapErr.response?.data?.error?.message
-        || sapErr.message;
-      logger.warn(`SAP HTTP Error: Bad Request`);
-      logger.error(`Error GoodsIssues empaque masa ${masaId}: ${sapErrDetail}`);
 
-      // Identificar el ítem sin stock por número de línea en el error SAP
-      let itemSinStock = null;
-      const matchLinea = sapErrDetail?.match(/\[line:\s*(\d+)\]/i);
-      if (matchLinea) {
-        const lineaIdx = parseInt(matchLinea[1]) - 1;
-        if (docLines[lineaIdx]) {
-          const itemCode = docLines[lineaIdx].ItemCode;
-          const itemR = await db.query(
-            `SELECT item_name FROM sap_inventario_mp WHERE item_code = $1`,
-            [itemCode]
+        if (docLines.length) {
+          const sapResp = await sapService.client.post('/InventoryGenExits', {
+            DocDate:       fecha_local || new Date().toISOString().split('T')[0],
+            Comments:      `Consumo empaque masa ${masaId}`,
+            U_JZ_NumMasa:  String(masaId),
+            DocumentLines: docLines,
+          });
+          sapResult = { doc_entry: sapResp.data.DocEntry, lineas: docLines.length };
+          logger.info(`GoodsIssues empaque masa ${masaId}: DocEntry ${sapResp.data.DocEntry} (${docLines.length} líneas)`);
+          await client.query(
+            `UPDATE registros_empaque
+               SET sap_doc_entry_salida = $1, sap_doc_num_salida = $2, sap_error_salida = NULL
+             WHERE masa_id = $3`,
+            [sapResp.data.DocEntry, String(sapResp.data.DocNum || ''), masaId]
           );
-          const nombre = itemR.rows[0]?.item_name || itemCode;
-          itemSinStock = { codigo: itemCode, nombre };
+
+          let lineaIdx = 0;
+          for (const prod of prodsR.rows) {
+            if (!prod.sap_item_code || !parseInt(prod.uds_empacadas)) continue;
+            const mats = materialesPorProducto[prod.id] || [];
+            for (const mat of mats) {
+              if (mat.cantidad <= 0) continue;
+              await client.query(
+                `INSERT INTO empaque_consumo_materiales
+                   (masa_id, producto_masa_id, item_code_comp, item_name_comp,
+                    cantidad_consumida, uom, costo_unitario_mat, costo_total_mat,
+                    sap_doc_entry_salida, sap_doc_num_salida)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                 ON CONFLICT DO NOTHING`,
+                [masaId, prod.id, mat.item_code, mat.nombre,
+                 mat.cantidad, mat.uom, mat.precio, mat.costo_total,
+                 sapResp.data.DocEntry, String(sapResp.data.DocNum || '')]
+              );
+              lineaIdx++;
+            }
+          }
         }
-      }
+      } catch (sapErr) {
+        const sapErrDetail = sapErr.response?.data?.error?.message?.value
+          || sapErr.response?.data?.error?.message
+          || sapErr.message;
+        logger.warn(`SAP HTTP Error: Bad Request`);
+        logger.error(`Error GoodsIssues empaque masa ${masaId}: ${sapErrDetail}`);
 
-      const mensajeUsuario = itemSinStock
-        ? `No hay suficiente stock de "${itemSinStock.nombre}" (${itemSinStock.codigo}) en SAP — almacén ALEMP. Informa a compras para que verifiquen el saldo antes de reintentar. La entrada de producto terminado NO fue creada.`
-        : `No se pudo registrar la salida de materiales de empaque en SAP. Verifica los saldos en el almacén ALEMP e intenta de nuevo. La entrada de producto terminado NO fue creada.`;
+        let itemSinStock = null;
+        const matchLinea = sapErrDetail?.match(/\[line:\s*(\d+)\]/i);
+        if (matchLinea) {
+          const lineaIdx = parseInt(matchLinea[1]) - 1;
+          if (docLines[lineaIdx]) {
+            const itemCode = docLines[lineaIdx].ItemCode;
+            const itemR = await db.query(
+              `SELECT item_name FROM sap_inventario_mp WHERE item_code = $1`,
+              [itemCode]
+            );
+            const nombre = itemR.rows[0]?.item_name || itemCode;
+            itemSinStock = { codigo: itemCode, nombre };
+          }
+        }
 
-      await client.query(
-        `UPDATE registros_empaque SET sap_error_salida = $1 WHERE masa_id = $2`,
-        [sapErrDetail, masaId]
-      );
-      await client.query('COMMIT');
-      return res.status(502).json({
-        success: false,
-        sap_salida_error: sapErrDetail,
-        item_sin_stock: itemSinStock,
-        message: mensajeUsuario,
-      });
-    }
+        const mensajeUsuario = itemSinStock
+          ? `La entrada de producto terminado YA fue registrada en SAP. No hay suficiente stock de "${itemSinStock.nombre}" (${itemSinStock.codigo}) en SAP — almacén ALEMP. Informa a compras para que verifiquen el saldo antes de reintentar la salida.`
+          : `La entrada de producto terminado YA fue registrada en SAP. No se pudo registrar la salida de materiales de empaque. Verifica los saldos en ALEMP e intenta de nuevo.`;
 
-    // 11. Entrada de mercancía SAP (InventoryGenEntries) — solo si salida fue exitosa
-    let sapEntradaResult = null;
-    try {
-      const sapServiceEntrada = require('../services/sap.service');
-      await sapServiceEntrada.ensureSession();
-
-      const entradaLines = [];
-      for (const prod of prodsR.rows) {
-        if (!prod.sap_item_code || !prod.uds_empacadas || parseInt(prod.uds_empacadas) <= 0) continue;
-        // Costo unitario REAL de este producto específico (no promedio de la masa)
-        const mpProdEntrada      = parseFloat(prod.costo_mp_total_prod || 0);
-        const empaqueProdEntrada = prod._costo_empaque || 0;
-        const totalKilosPPMEnt   = prodsR.rows.reduce((s, p) => s + parseFloat(p.kilos_programados || 0), 0);
-        const ratioEnt           = totalKilosPPMEnt > 0
-          ? parseFloat(prod.kilos_programados || 0) / totalKilosPPMEnt
-          : 1 / prodsR.rows.length;
-        const moProdEntrada      = costoMOTotal        * ratioEnt;
-        const indProdEntrada     = costoIndirectoTotal * ratioEnt;
-        const totalProdEntrada   = mpProdEntrada + moProdEntrada + empaqueProdEntrada + indProdEntrada;
-        const udsEnt             = parseInt(prod.uds_empacadas);
-        const costoUnitarioProd  = udsEnt > 0 ? totalProdEntrada / udsEnt : 0;
-
-        const linea = {
-          ItemCode:      prod.sap_item_code,
-          Quantity:      udsEnt,
-          UnitPrice:     parseFloat(costoUnitarioProd.toFixed(2)),
-          WarehouseCode: 'PROTERMI',
-          AccountCode:   '14100501',
-          BatchNumbers: [{
-            BatchNumber:       loteProduccion,
-            Quantity:          udsEnt,
-            ExpiryDate:        fechaVencimiento
-              ? new Date(fechaVencimiento).toISOString().split('T')[0]
-              : null,
-            ManufacturingDate: fecha_local || new Date().toISOString().split('T')[0],
-          }],
-        };
-        entradaLines.push(linea);
-      }
-
-      if (entradaLines.length) {
-        const sapRespEntrada = await sapServiceEntrada.client.post('/InventoryGenEntries', {
-          DocDate:       fecha_local || new Date().toISOString().split('T')[0],
-          Comments:      `Producción terminada masa ${masaId} - Lote ${loteProduccion}`,
-          U_JZ_NumMasa:  String(masaId),
-          DocumentLines: entradaLines,
-        });
-        sapEntradaResult = { doc_entry: sapRespEntrada.data.DocEntry, lineas: entradaLines.length };
-        logger.info(`InventoryGenEntries masa ${masaId}: DocEntry ${sapRespEntrada.data.DocEntry}`);
         await client.query(
-          `UPDATE registros_empaque
-             SET sap_doc_entry_entrada = $1, sap_doc_num_entrada = $2, sap_error_entrada = NULL
-           WHERE masa_id = $3`,
-          [sapRespEntrada.data.DocEntry, String(sapRespEntrada.data.DocNum || ''), masaId]
+          `UPDATE registros_empaque SET sap_error_salida = $1 WHERE masa_id = $2`,
+          [sapErrDetail, masaId]
         );
-
-        await client.query(`
-          UPDATE costos_masa SET
-            costo_mo_total      = $2,
-            costo_cif_total     = $3,
-            costo_total_masa    = $4,
-            costo_por_kilo      = $5,
-            fecha_calculo_final = NOW(),
-            updated_at          = NOW()
-          WHERE masa_id = $1
-        `, [
-          masaId,
-          costoMOTotal,
-          costoIndirectoTotal,
-          costoTotalFinal,
-          totalKgProducidos > 0 ? costoTotalFinal / totalKgProducidos : 0,
-        ]);
+        await client.query('COMMIT');
+        return res.status(502).json({
+          success: false,
+          sap_salida_error: sapErrDetail,
+          item_sin_stock: itemSinStock,
+          message: mensajeUsuario,
+        });
       }
-    } catch (sapErr) {
-      const sapErrDetail = sapErr.response?.data?.error?.message?.value
-        || sapErr.response?.data?.error?.message
-        || sapErr.message;
-      logger.error(`Error InventoryGenEntries masa ${masaId}: ${sapErrDetail}`);
-      sapEntradaResult = { error: sapErrDetail };
-      await client.query(
-        `UPDATE registros_empaque SET sap_error_entrada = $1 WHERE masa_id = $2`,
-        [sapErrDetail, masaId]
-      );
     }
 
 
