@@ -209,8 +209,10 @@ const sendPasswordResetEmail = async ({ to, nombre, token }) => {
  * Se envía a correos_empaque al confirmar pesaje exitosamente
  */
 const sendPesajeCompletadoEmail = async ({ to, masa }) => {
-  const fecha = new Date(masa.fecha_produccion).toLocaleDateString('es-CO', {
-    timeZone: 'America/Bogota',
+  const fechaStr = typeof masa.fecha_produccion === 'string'
+    ? masa.fecha_produccion.slice(0, 10)
+    : masa.fecha_produccion.toISOString().slice(0, 10);
+  const fecha = new Date(`${fechaStr}T12:00:00`).toLocaleDateString('es-CO', {
     day: '2-digit', month: 'long', year: 'numeric',
   });
 
@@ -303,8 +305,10 @@ const sendPesajeCompletadoEmail = async ({ to, masa }) => {
  * Se envía a correos_empaque inmediatamente al aprobar la masa
  */
 const sendAprobacionMasaEmail = async ({ to, masa, productosEmpaque }) => {
-  const fecha = new Date(masa.fecha_produccion).toLocaleDateString('es-CO', {
-    timeZone: 'America/Bogota',
+  const fechaStr = typeof masa.fecha_produccion === 'string'
+    ? masa.fecha_produccion.slice(0, 10)
+    : masa.fecha_produccion.toISOString().slice(0, 10);
+  const fecha = new Date(`${fechaStr}T12:00:00`).toLocaleDateString('es-CO', {
     day: '2-digit', month: 'long', year: 'numeric',
   });
 
