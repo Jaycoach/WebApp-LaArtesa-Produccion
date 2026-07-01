@@ -46,6 +46,7 @@ pm2 status
 
 echo "[3/4] Frontend..."
 cd ~/LaArtesa/frontend
+unset NODE_ENV
 echo "VITE_API_URL=$FRONTEND_URL/api" > .env.production
 npm install
 npx vite build
