@@ -218,3 +218,17 @@ export const useMarcarPendiente = () => {
     },
   });
 };
+
+/**
+ * Hook para cancelar una masa (ADMIN/SUPERVISOR)
+ */
+export const useCancelarMasa = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ masaId, motivo }: { masaId: number; motivo: string }) =>
+      masasService.cancelarMasa(masaId, motivo),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: MASAS_QUERY_KEYS.all });
+    },
+  });
+};

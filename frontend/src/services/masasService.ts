@@ -132,6 +132,11 @@ export const masasService = {
     const response = await apiService.patch<any>(`/masas/${masaId}/pendiente`, { motivo });
     return response.data!;
   },
+
+  cancelarMasa: async (masaId: number, motivo: string): Promise<any> => {
+    const response = await apiService.patch<any>(`/masas/${masaId}/cancelar`, { motivo });
+    return response.data!;
+  },
 };
 
 export default masasService;
