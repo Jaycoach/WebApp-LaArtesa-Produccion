@@ -598,15 +598,21 @@ const cancelarMasa = async (req, res, next) => {
     }
 
     const { motivo } = req.body;
+    if (!motivo || !motivo.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'El motivo de cancelación es obligatorio.',
+      });
+    }
     await devolverStockMasa(id);
     await db.query(
       `UPDATE masas_produccion
        SET estado = 'CANCELADA', cancelado_por = $1, cancelado_en = NOW(),
            motivo_cancelacion = $2, updated_at = NOW()
        WHERE id = $3`,
-      [req.user.id, motivo || null, id]
+      [req.user.id, motivo.trim(), id]
     );
-    logger.info(`Masa ${id} cancelada por usuario ${req.user.id}. Motivo: ${motivo || 'sin especificar'}`);
+    logger.info(`Masa ${id} cancelada por usuario ${req.user.id}. Motivo: ${motivo.trim()}`);
 
     res.json({
       success: true,
