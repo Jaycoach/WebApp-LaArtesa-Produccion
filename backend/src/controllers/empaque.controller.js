@@ -243,7 +243,10 @@ exports.getEmpaqueInfo = async (req, res) => {
     }));
 
     const registroR = await db.query(
-      `SELECT id, fecha_vencimiento, estado FROM registros_empaque WHERE masa_id = $1 LIMIT 1`,
+      `SELECT id, fecha_vencimiento, estado,
+              sap_doc_entry_entrada, sap_doc_num_entrada, sap_error_entrada,
+              sap_doc_entry_salida, sap_doc_num_salida, sap_error_salida
+       FROM registros_empaque WHERE masa_id = $1 LIMIT 1`,
       [masaId]
     );
 

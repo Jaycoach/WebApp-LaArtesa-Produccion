@@ -527,8 +527,11 @@ const PanelEmpaqueMasa: React.FC<{
     masaActualData?.data?.registro_empaque != null || masa.empaque_iniciado;
   const lote_produccion: string | null =
     masa.lote_produccion || masaActualData?.data?.masa?.lote_produccion || null;
-  const yaEnviadoSAP: boolean =
+  const entradaLista: boolean =
     !!(masaActualData?.data?.registro_empaque?.sap_doc_entry_entrada ?? masa.sap_doc_entry_entrada);
+  const salidaLista: boolean =
+    !!(masaActualData?.data?.registro_empaque?.sap_doc_entry_salida ?? masa.sap_doc_entry_salida);
+  const yaEnviadoSAP: boolean = entradaLista && salidaLista;
   // El formulario activo solo cuando EMPAQUE está EN_PROGRESO (horneado terminado)
   // Si está PENDIENTE → solo consulta, sin iniciar ni guardar
   const puedeOperar = estadoEmpaqueActual === 'EN_PROGRESO';
@@ -1133,7 +1136,13 @@ const PanelEmpaqueMasa: React.FC<{
             disabled={saving || yaEnviadoSAP}
             className="bg-green-600 text-white px-6 py-2.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium"
           >
-            {saving ? 'Completando...' : yaEnviadoSAP ? 'Empaque enviado a SAP ✓' : 'Completar empaque'}
+            {saving
+              ? 'Completando...'
+              : yaEnviadoSAP
+                ? 'Empaque enviado a SAP ✓'
+                : entradaLista
+                  ? 'Reintentar salida de materiales'
+                  : 'Completar empaque'}
           </button>
         </div>
       )}
