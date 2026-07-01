@@ -382,11 +382,14 @@ exports.updateCatalogoTiposMasa = async (req, res) => {
        SET unidades_pan_por_paquete = COALESCE($2, unidades_pan_por_paquete),
            dias_vida_util           = COALESCE($3, dias_vida_util),
            requiere_formado         = COALESCE($4, requiere_formado),
+           usuario_id               = $5,
+           usuario_nombre           = $6,
            fecha_actualizacion      = NOW()
        WHERE id = $1
        RETURNING id, codigo_sap, tipo_masa, nombre_masa,
                  unidades_pan_por_paquete, dias_vida_util, requiere_formado`,
-      [id, unidades_pan_por_paquete ?? null, dias_vida_util ?? null, requiere_formado ?? null]
+      [id, unidades_pan_por_paquete ?? null, dias_vida_util ?? null, requiere_formado ?? null,
+       req.user.id, req.user.nombreCompleto]
     );
 
     if (!r.rows.length)
