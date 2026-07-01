@@ -282,7 +282,7 @@ const aprobarMasa = async (req, res, next) => {
     const { ejecutarSubdivision } = require('./fases.controller');
 
     const masa = await db.query(
-      `SELECT id, estado, fase_actual, tipo_masa, total_kilos_con_merma
+      `SELECT id, codigo_masa, estado, fase_actual, tipo_masa, fecha_produccion, total_kilos_con_merma
        FROM masas_produccion WHERE id = $1`,
       [id]
     );
