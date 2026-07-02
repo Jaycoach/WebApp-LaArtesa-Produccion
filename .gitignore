@@ -131,3 +131,4 @@ deployment/aws-staging/DB_PASSWORD_TEMP.txt
 deployment/aws-staging/aws-deployment-config.env
 backend/.env
 frontend/.env.production
+docs/schema/
