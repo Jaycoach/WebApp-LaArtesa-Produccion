@@ -97,7 +97,7 @@ const getChecklist = async (req, res, next) => {
          FROM sap_lotes_mp
          WHERE item_code = ANY($1)
            AND cantidad_disponible > 0
-         ORDER BY item_code, admission_date ASC NULLS LAST`,
+         ORDER BY item_code, expiration_date ASC NULLS LAST`,
         [itemCodes]
       );
       for (const lote of lotesResult.rows) {
@@ -138,7 +138,7 @@ const getChecklist = async (req, res, next) => {
       const costoUnitario = esExcluido
         ? (ing.ingrediente_sap_code === 'MP0008' ? costoAgua2 : costoAgua)
         : (inv ? parseFloat(inv.costo_promedio) : null);
-      // Lotes ordenados por admission_date ASC → el primero es el sugerido
+      // Lotes ordenados por expiration_date ASC (FEFO) → el primero es el sugerido
       const lotes = lotesMap[ing.ingrediente_sap_code] || [];
       return {
         ...ing,
@@ -151,6 +151,19 @@ const getChecklist = async (req, res, next) => {
         excluido_stock:      esExcluido,
         lote_sugerido:       lotes.length > 0 ? lotes[0].batch : null,
         lotes,
+        lotes_consumo_sugerido: (() => {
+          let restante = cantidadRequerida;
+          const sugerido = [];
+          for (const l of lotes) {
+            if (restante <= 0) break;
+            const aTomar = Math.min(parseFloat(l.cantidad_disponible), restante);
+            if (aTomar > 0) {
+              sugerido.push({ batch: l.batch, cantidad_kg: Number(aTomar.toFixed(3)) });
+              restante -= aTomar;
+            }
+          }
+          return sugerido;
+        })(),
       };
     });
 
