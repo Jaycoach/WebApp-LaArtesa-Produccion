@@ -108,27 +108,45 @@ export const PesajeMasa: React.FC = () => {
   const handleEditar = (ingrediente: any) => {
     setEditando(ingrediente.id);
 
-    // Pre-seleccionar lote sugerido (el más antiguo con stock) si no hay lote ya registrado
+    // Auto-llenado FEFO: si el backend calculó el reparto automático (lotes_consumo_sugerido)
+    // y el ingrediente aún no fue pesado, se usa completo — el operario solo revisa y da "Guardar".
+    const yaPesado = ingrediente.pesado && ingrediente.peso_real;
+    const sugeridoAuto = (!yaPesado && ingrediente.lotes_consumo_sugerido?.length > 0)
+      ? ingrediente.lotes_consumo_sugerido.map((l: any) => {
+          const loteInfo = ingrediente.lotes?.find((x: any) => x.batch === l.batch);
+          return {
+            batch: l.batch,
+            cantidad_kg: String(Math.round(l.cantidad_kg * 1000)),
+            fecha_vencimiento: loteInfo?.expiration_date ? loteInfo.expiration_date.substring(0, 10) : '',
+          };
+        })
+      : null;
+
+    // Fallback: comportamiento anterior si no hay sugerido automático
     const lotePreseleccionado = ingrediente.lote ||
       ingrediente.lote_sugerido ||
       (ingrediente.lotes && ingrediente.lotes.length > 0 ? ingrediente.lotes[0].batch : '');
-
-    // Si el lote preseleccionado existe en la lista, traer su fecha de vencimiento automáticamente
     const loteObj = ingrediente.lotes?.find((l: any) => l.batch === lotePreseleccionado);
     const vencimientoPreseleccionado = ingrediente.fecha_vencimiento ||
       (loteObj?.expiration_date ? loteObj.expiration_date.substring(0, 10) : '');
+
+    const pesoAutoLleno = sugeridoAuto
+      ? sugeridoAuto.reduce((s: number, l: any) => s + Number(l.cantidad_kg), 0)
+      : null;
 
     setStockError(null);
     setFormData({
       peso_real: ingrediente.peso_real != null
         ? String(ingrediente.peso_real)
-        : (ingrediente.cantidad_gramos != null ? String(ingrediente.cantidad_gramos) : ''),
-      lote: lotePreseleccionado,
-      fecha_vencimiento: vencimientoPreseleccionado,
+        : (pesoAutoLleno != null
+            ? String(pesoAutoLleno)
+            : (ingrediente.cantidad_gramos != null ? String(ingrediente.cantidad_gramos) : '')),
+      lote: sugeridoAuto ? sugeridoAuto[0].batch : lotePreseleccionado,
+      fecha_vencimiento: sugeridoAuto ? sugeridoAuto[0].fecha_vencimiento : vencimientoPreseleccionado,
       fecha_vencimiento_display: undefined,
-      lotes_consumo: lotePreseleccionado
+      lotes_consumo: sugeridoAuto || (lotePreseleccionado
         ? [{ batch: lotePreseleccionado, cantidad_kg: ingrediente.pesado && ingrediente.peso_real ? String(ingrediente.peso_real) : '', fecha_vencimiento: vencimientoPreseleccionado }]
-        : [],
+        : []),
     });
   };
 

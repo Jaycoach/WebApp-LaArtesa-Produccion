@@ -62,13 +62,13 @@ export const ListaMasas: React.FC = () => {
     navigate(`/planificacion/masas/${masaId}`);
   };
 
-  const [aprobarModal, setAprobarModal] = useState<{ masaId: number; fecha: string } | null>(null);
+  const [aprobarModal, setAprobarModal] = useState<{ masaId: number; fecha: string; prioridad: boolean; hora_entrega: string } | null>(null);
 
   const handleAprobar = (e: React.MouseEvent, masaId: number) => {
     e.stopPropagation();
     const sugerida = new Date();
     sugerida.setDate(sugerida.getDate() + 4);
-    setAprobarModal({ masaId, fecha: sugerida.toISOString().slice(0, 10) });
+    setAprobarModal({ masaId, fecha: sugerida.toISOString().slice(0, 10), prioridad: false, hora_entrega: '' });
   };
 
   const confirmarAprobar = async () => {
@@ -77,6 +77,8 @@ export const ListaMasas: React.FC = () => {
       const result = await aprobarMutation.mutateAsync({
         masaId: aprobarModal.masaId,
         fecha_vencimiento_sugerida: aprobarModal.fecha || undefined,
+        prioridad: aprobarModal.prioridad || undefined,
+        hora_entrega: aprobarModal.hora_entrega || undefined,
       });
       setAprobarModal(null);
       if (result?.subdivision?.realizada) {
@@ -548,6 +550,25 @@ export const ListaMasas: React.FC = () => {
               type="date"
               value={aprobarModal.fecha}
               onChange={e => setAprobarModal(prev => prev ? { ...prev, fecha: e.target.value } : null)}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm mb-3 focus:ring-2 focus:ring-green-400"
+            />
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-3">
+              <input
+                type="checkbox"
+                checked={aprobarModal.prioridad}
+                onChange={e => setAprobarModal(prev => prev ? { ...prev, prioridad: e.target.checked } : null)}
+                className="w-4 h-4 accent-red-600"
+              />
+              Marcar como prioritaria / repetición
+            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Hora de entrega
+              <span className="text-gray-400 font-normal ml-1">(opcional)</span>
+            </label>
+            <input
+              type="time"
+              value={aprobarModal.hora_entrega}
+              onChange={e => setAprobarModal(prev => prev ? { ...prev, hora_entrega: e.target.value } : null)}
               className="w-full border border-gray-300 rounded px-3 py-2 text-sm mb-4 focus:ring-2 focus:ring-green-400"
             />
             <div className="flex gap-2">
