@@ -97,7 +97,7 @@ const getChecklist = async (req, res, next) => {
          FROM sap_lotes_mp
          WHERE item_code = ANY($1)
            AND cantidad_disponible > 0
-         ORDER BY item_code, expiration_date ASC NULLS LAST`,
+         ORDER BY item_code, expiration_date ASC NULLS LAST, admission_date ASC NULLS LAST`,
         [itemCodes]
       );
       for (const lote of lotesResult.rows) {
@@ -554,7 +554,7 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
              AND sl.batch != $2
              AND sl.cantidad_disponible > 0
              AND (sl.status IS NULL OR sl.status = 'released')
-           ORDER BY sl.expiration_date ASC NULLS LAST
+           ORDER BY sl.expiration_date ASC NULLS LAST, sl.admission_date ASC NULLS LAST
            LIMIT 5`,
           [itemFallido, batchFallido]
         );
