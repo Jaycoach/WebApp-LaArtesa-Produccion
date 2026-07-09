@@ -117,10 +117,14 @@ export const masasService = {
   /**
    * Aprobar una masa (ADMIN/SUPERVISOR)
    */
-  aprobarMasa: async (masaId: number, fecha_vencimiento_sugerida?: string): Promise<any> => {
+  aprobarMasa: async (masaId: number, fecha_vencimiento_sugerida?: string, prioridad?: boolean, hora_entrega?: string): Promise<any> => {
+    const body: Record<string, any> = {};
+    if (fecha_vencimiento_sugerida) body.fecha_vencimiento_sugerida = fecha_vencimiento_sugerida;
+    if (prioridad !== undefined) body.prioridad = prioridad;
+    if (hora_entrega) body.hora_entrega = hora_entrega;
     const response = await apiService.patch<any>(
       `/masas/${masaId}/aprobar`,
-      fecha_vencimiento_sugerida ? { fecha_vencimiento_sugerida } : {}
+      body
     );
     return response.data!;
   },

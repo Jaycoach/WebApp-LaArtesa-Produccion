@@ -197,8 +197,8 @@ export const useMasasHoy = () => {
 export const useAprobarMasa = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ masaId, fecha_vencimiento_sugerida }: { masaId: number; fecha_vencimiento_sugerida?: string }) =>
-      masasService.aprobarMasa(masaId, fecha_vencimiento_sugerida),
+    mutationFn: ({ masaId, fecha_vencimiento_sugerida, prioridad, hora_entrega }: { masaId: number; fecha_vencimiento_sugerida?: string; prioridad?: boolean; hora_entrega?: string }) =>
+      masasService.aprobarMasa(masaId, fecha_vencimiento_sugerida, prioridad, hora_entrega),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: MASAS_QUERY_KEYS.all });
     },
