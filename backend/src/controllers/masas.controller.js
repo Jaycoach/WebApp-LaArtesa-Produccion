@@ -299,16 +299,18 @@ const aprobarMasa = async (req, res, next) => {
     }
 
     // Marcar masa como APROBADA
-    const { fecha_vencimiento_sugerida } = req.body;
+    const { fecha_vencimiento_sugerida, prioridad, hora_entrega } = req.body;
 
     await db.query(
       `UPDATE masas_produccion
        SET estado = 'APROBADA',
            aprobado_por = $2,
            aprobado_en = NOW(),
+           prioridad = COALESCE($3, prioridad),
+           hora_entrega = $4,
            updated_at = NOW()
        WHERE id = $1`,
-      [id, req.user.id]
+      [id, req.user.id, prioridad ?? null, hora_entrega || null]
     );
     if (fecha_vencimiento_sugerida) {
       await db.query(
