@@ -54,6 +54,7 @@ interface Masa {
   total_productos: number;
   total_unidades_programadas: number;
   es_repeticion?: boolean;
+  es_adicional?: boolean;
 }
 
 const MasaCard = ({
@@ -77,6 +78,14 @@ const MasaCard = ({
             {masa.es_repeticion && (
               <span className="px-1.5 py-0.5 rounded text-xs font-bold bg-red-200 text-red-800">
                 REPETICIÓN
+              </span>
+            )}
+            {masa.es_adicional && (
+              <span
+                className="px-1.5 py-0.5 rounded text-xs font-bold text-white uppercase tracking-wide"
+                style={{ backgroundColor: '#f97316' }}
+              >
+                ADICIONAL
               </span>
             )}
           </div>
@@ -137,7 +146,12 @@ const FaseListado = () => {
     enabled: !!faseKey && !!cfg,
   });
 
-  const masas: Masa[] = (data as any)?.data ?? (data as any) ?? [];
+  const masasSinOrdenar: Masa[] = (data as any)?.data ?? (data as any) ?? [];
+  const masas: Masa[] = [...masasSinOrdenar].sort((a, b) => {
+    const prioridadA = Number(a.es_repeticion) + Number(a.es_adicional);
+    const prioridadB = Number(b.es_repeticion) + Number(b.es_adicional);
+    return prioridadB - prioridadA;
+  });
 
   const handleNavigate = (masaId: number, fase: string) => {
     sessionStorage.setItem('artesa_masa_activa', String(masaId));
