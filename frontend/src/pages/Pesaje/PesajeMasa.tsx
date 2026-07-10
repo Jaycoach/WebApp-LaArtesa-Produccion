@@ -476,7 +476,12 @@ export const PesajeMasa: React.FC = () => {
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <h3 className="font-semibold text-gray-900">{ing.ingrediente_nombre}</h3>
+                      <h3 className="font-semibold text-gray-900">
+                        {ing.ingrediente_nombre}
+                        {ing.ingrediente_sap_code && (
+                          <span className="ml-2 text-xs font-mono font-normal text-gray-400">{ing.ingrediente_sap_code}</span>
+                        )}
+                      </h3>
                       {ing.sin_stock && (
                         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-800 border border-red-300">
                           ⚠ SIN STOCK
@@ -677,7 +682,7 @@ export const PesajeMasa: React.FC = () => {
                                   </div>
                                   <div className="text-xs text-green-700">
                                     {(Number(l.cantidad_disponible) * 1000).toFixed(0)}g disponibles
-                                    {l.expiration_date && ` · vence ${new Date(l.expiration_date + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })}`}
+                                    {l.expiration_date && ` · vence ${new Date(l.expiration_date instanceof Date ? l.expiration_date : `${l.expiration_date}T12:00:00`).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })}`}
                                   </div>
                                 </div>
                                 {seleccionado && (
