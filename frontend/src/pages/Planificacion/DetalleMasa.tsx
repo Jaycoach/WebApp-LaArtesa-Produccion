@@ -213,7 +213,22 @@ export const DetalleMasa: React.FC = () => {
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex justify-between items-start">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">{masa.tipo_masa}</h1>
+              <div className="flex items-center gap-2 flex-wrap mb-1">
+                {masa.es_repeticion && (
+                  <span className="inline-flex items-center gap-1 text-xs font-bold bg-red-600 text-white rounded px-2 py-0.5">
+                    🔴 REPETICIÓN — PRIORIDAD
+                  </span>
+                )}
+                {masa.es_adicional && (
+                  <span
+                    className="text-xs font-bold text-white uppercase tracking-wide rounded px-2 py-0.5"
+                    style={{ backgroundColor: '#f97316' }}
+                  >
+                    ADICIONAL
+                  </span>
+                )}
+              </div>
+              <h1 className={`text-3xl font-bold ${masa.es_repeticion ? 'text-red-600' : 'text-gray-900'}`}>{masa.tipo_masa}</h1>
               <p className="text-gray-600 mt-1">{masa.nombre_masa}</p>
               <p className="text-sm text-gray-500 mt-1">Código: {masa.codigo_masa}</p>
               {masa.lote_produccion && (
