@@ -890,6 +890,7 @@ exports.getMasasPendientesEmpaque = async (req, res) => {
              mp.total_kilos_con_merma, mp.fecha_produccion,
              mp.es_subdivision, mp.masa_padre_id,
              mp.lote_produccion,
+             mp.es_repeticion, mp.es_adicional,
              pf_e.estado AS estado_empaque,
              COALESCE(pf_h.estado, 'BLOQUEADA') AS estado_horneado
       FROM masas_produccion mp

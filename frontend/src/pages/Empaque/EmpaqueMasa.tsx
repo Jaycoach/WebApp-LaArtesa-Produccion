@@ -65,6 +65,8 @@ interface MasaPendiente {
   total_kilos_con_merma: number;
   fecha_produccion: string;
   es_subdivision: boolean;
+  es_repeticion?: boolean;
+  es_adicional?: boolean;
   estado_empaque: string;
   estado_horneado: string;
   horneado_completo: boolean;
@@ -385,9 +387,14 @@ const PanelPendientes: React.FC<{
         No hay masas pendientes de empaque en este momento.
       </div>
     );
+  const masasOrdenadas = [...masas].sort((a, b) => {
+    const prioridadA = Number(a.es_repeticion) + Number(a.es_adicional);
+    const prioridadB = Number(b.es_repeticion) + Number(b.es_adicional);
+    return prioridadB - prioridadA;
+  });
   return (
     <div className="space-y-3">
-      {masas.map(masa => {
+      {masasOrdenadas.map(masa => {
         const totalOVs = masa.ovs.filter(o => o.doc_num !== 'SIN_OV').length;
         const totalProductos = masa.ovs.reduce((s, o) => s + o.productos.length, 0);
         return (
@@ -410,6 +417,19 @@ const PanelPendientes: React.FC<{
                   <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-mono">
                     {masa.codigo_masa}
                   </span>
+                  {masa.es_repeticion && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-red-200 text-red-800 font-bold">
+                      🔴 REPETICIÓN — PRIORIDAD
+                    </span>
+                  )}
+                  {masa.es_adicional && (
+                    <span
+                      className="text-xs px-2 py-0.5 rounded-full font-bold text-white uppercase"
+                      style={{ backgroundColor: '#f97316' }}
+                    >
+                      ADICIONAL
+                    </span>
+                  )}
                   {masa.horneado_completo
                     ? <span className="text-xs px-2 py-0.5 rounded-full bg-green-200 text-green-800 font-medium">✅ Listo para empacar</span>
                     : <span className="text-xs px-2 py-0.5 rounded-full bg-amber-200 text-amber-800 font-medium">🕐 En producción — alistamiento</span>
