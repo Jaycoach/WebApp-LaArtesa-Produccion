@@ -649,24 +649,33 @@ export const PesajeMasa: React.FC = () => {
                                   type="checkbox"
                                   checked={seleccionado}
                                   onChange={(e) => {
-                                    if (e.target.checked) {
-                                      const venc = l.expiration_date ? l.expiration_date.substring(0, 10) : '';
-                                      const nuevos = [...formData.lotes_consumo, { batch: l.batch, cantidad_kg: '', fecha_vencimiento: venc }];
-                                      setFormData({
-                                        ...formData,
-                                        lote: nuevos[0]?.batch || '',
-                                        fecha_vencimiento: nuevos[0]?.fecha_vencimiento || '',
-                                        lotes_consumo: nuevos,
+                                    const batchesSeleccionados = e.target.checked
+                                      ? [...formData.lotes_consumo.map(lc => lc.batch), l.batch]
+                                      : formData.lotes_consumo.filter(lc => lc.batch !== l.batch).map(lc => lc.batch);
+
+                                    // Redistribuir en orden FEFO (mismo orden de ing.lotes) llenando cada
+                                    // lote hasta su cantidad_disponible y pasando el remanente al siguiente.
+                                    let restanteG = Number(formData.peso_real) || 0;
+                                    const nuevos = ing.lotes
+                                      .filter((lo: any) => batchesSeleccionados.includes(lo.batch))
+                                      .map((lo: any) => {
+                                        const venc = lo.expiration_date ? lo.expiration_date.substring(0, 10) : '';
+                                        const disponibleG = Number(lo.cantidad_disponible) * 1000;
+                                        const aTomar = Math.max(0, Math.min(disponibleG, restanteG));
+                                        restanteG -= aTomar;
+                                        return {
+                                          batch: lo.batch,
+                                          cantidad_kg: aTomar > 0 ? String(aTomar) : '',
+                                          fecha_vencimiento: venc,
+                                        };
                                       });
-                                    } else {
-                                      const nuevos = formData.lotes_consumo.filter(lc => lc.batch !== l.batch);
-                                      setFormData({
-                                        ...formData,
-                                        lote: nuevos[0]?.batch || '',
-                                        fecha_vencimiento: nuevos[0]?.fecha_vencimiento || '',
-                                        lotes_consumo: nuevos,
-                                      });
-                                    }
+
+                                    setFormData({
+                                      ...formData,
+                                      lote: nuevos[0]?.batch || '',
+                                      fecha_vencimiento: nuevos[0]?.fecha_vencimiento || '',
+                                      lotes_consumo: nuevos,
+                                    });
                                     setStockError(null);
                                   }}
                                   className="w-4 h-4 accent-purple-600 flex-shrink-0"
