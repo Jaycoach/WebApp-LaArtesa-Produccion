@@ -765,13 +765,19 @@ const sincronizarDesdeOV = async (req, res, next) => {
     );
     const factorAbsorcion = parseFloat(factorResult.rows[0]?.valor || 60);
 
-    // 4. Agrupar productos por tipoMasa
+    // 4. Agrupar productos por tipoMasa + categoría (repetición Series=89 nunca se mezcla con OV normales)
     const masasAgrupadas = {};
     for (const prod of productos) {
-      if (!masasAgrupadas[prod.tipoMasa]) {
-        masasAgrupadas[prod.tipoMasa] = { tipo_masa: prod.tipoMasa, productos: [] };
+      const esRepeticionLinea = prod.series === 89;
+      const claveGrupo = `${prod.tipoMasa}__${esRepeticionLinea ? 'REP' : 'NORMAL'}`;
+      if (!masasAgrupadas[claveGrupo]) {
+        masasAgrupadas[claveGrupo] = {
+          tipo_masa: prod.tipoMasa,
+          es_repeticion_grupo: esRepeticionLinea,
+          productos: [],
+        };
       }
-      masasAgrupadas[prod.tipoMasa].productos.push(prod);
+      masasAgrupadas[claveGrupo].productos.push(prod);
     }
 
     // 5. Crear masas de producción
@@ -794,8 +800,10 @@ const sincronizarDesdeOV = async (req, res, next) => {
     );
     let ordenCounter = (maxCorrelativoResult.rows[0]?.max_correlativo || 0) + 1;
 
-    for (const tipoMasa in masasAgrupadas) {
-      const grupo = masasAgrupadas[tipoMasa];
+    for (const claveGrupo in masasAgrupadas) {
+      const grupo = masasAgrupadas[claveGrupo];
+      const tipoMasa = grupo.tipo_masa;
+      const esRepeticionGrupo = grupo.es_repeticion_grupo;
 
       // ── CONTROL ANTI-DUPLICACIÓN ─────────────────────────────────────
       // Verificar qué pares docEntry+itemCode ya están importados para esta fecha
@@ -835,12 +843,13 @@ const sincronizarDesdeOV = async (req, res, next) => {
          FROM masas_produccion
          WHERE DATE(fecha_produccion) = $1
            AND tipo_masa = $2
+           AND es_repeticion = $3
            AND es_subdivision = false
            AND es_adicional = false
            AND masa_padre_id IS NULL
          ORDER BY id DESC
          LIMIT 1`,
-        [fechaProduccion, tipoMasa]
+        [fechaProduccion, tipoMasa, esRepeticionGrupo]
       );
 
       const masaExistente = masaExistenteResult.rows[0] || null;
@@ -1038,11 +1047,12 @@ const sincronizarDesdeOV = async (req, res, next) => {
             `SELECT id, uuid, codigo_masa FROM masas_produccion
              WHERE DATE(fecha_produccion) = $1
                AND tipo_masa = $2
+               AND es_repeticion = $3
                AND es_subdivision = false
                AND es_adicional = false
                AND masa_padre_id IS NULL
              ORDER BY id DESC LIMIT 1`,
-            [fechaProduccion, tipoMasa]
+            [fechaProduccion, tipoMasa, esRepeticionGrupo]
           );
           if (masaRecuperadaResult.rows.length === 0) throw insertErr;
           masaResult = masaRecuperadaResult;
