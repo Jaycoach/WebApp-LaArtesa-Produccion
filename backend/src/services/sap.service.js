@@ -696,6 +696,11 @@ class SAPService {
    */
   async getLotesMateriaPrima(itemCodes, stockPorItem = {}) {
     if (!itemCodes || itemCodes.length === 0) return {};
+
+    if (process.env.SAP_READ_MODE === 'hana') {
+      return this._getLotesMateriaPrimaHANA(itemCodes);
+    }
+
     await this.ensureSession();
 
     // Estrategia: artlot_ individual por ítem via SQLQuery (OBTN+OBTQ filtrado por ItemCode+ALMP).
@@ -781,6 +786,44 @@ class SAPService {
 
     logger.info(`SAP: lotes obtenidos para ${Object.keys(resultado).length} ítems via artlot_ individual`);
     return { lotes: resultado, itemsFallidos };
+  }
+
+  /**
+   * Extrae lotes de materia prima directo de HANA vía script Python (hdbcli).
+   * Reemplaza las 19 llamadas artlot_{ITEM_CODE} por una sola consulta consolidada.
+   * Mismo shape de retorno que getLotesMateriaPrima (Service Layer).
+   */
+  async _getLotesMateriaPrimaHANA(itemCodes) {
+    const { execFile } = require('child_process');
+    const path = require('path');
+
+    return new Promise((resolve) => {
+      const scriptPath = path.join(__dirname, '../../scripts/hana_lotes_mp.py');
+      const child = execFile('python3', [scriptPath], {
+        timeout: 30000,
+        env: process.env,
+      }, (error, stdout, stderr) => {
+        if (error) {
+          logger.error(`HANA lotes: error ejecutando script Python: ${error.message}. stderr: ${stderr}`);
+          // Fallback: todos los ítems marcados como fallidos, igual que un timeout de Service Layer
+          return resolve({ lotes: {}, itemsFallidos: itemCodes });
+        }
+        try {
+          const parsed = JSON.parse(stdout);
+          if (parsed.error) {
+            logger.error(`HANA lotes: error reportado por script: ${parsed.error}`);
+            return resolve({ lotes: {}, itemsFallidos: itemCodes });
+          }
+          logger.info(`HANA lotes: obtenidos para ${Object.keys(parsed.lotes).length}/${itemCodes.length} ítems vía HANA directo`);
+          resolve(parsed);
+        } catch (parseErr) {
+          logger.error(`HANA lotes: respuesta no parseable: ${parseErr.message}. stdout: ${stdout}`);
+          resolve({ lotes: {}, itemsFallidos: itemCodes });
+        }
+      });
+      child.stdin.write(JSON.stringify(itemCodes));
+      child.stdin.end();
+    });
   }
 }
 
