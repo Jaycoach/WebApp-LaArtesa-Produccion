@@ -982,6 +982,65 @@ const completarFase = async (req, res, next) => {
       });
     }
 
+    // ── Caso especial: AMASADO ─────────────────────────────────────
+    if (fase.toUpperCase() === 'AMASADO') {
+      const datosAmasado = datos.datos || datos;
+      const {
+        amasadora_id,
+        velocidad_1_minutos,
+        velocidad_2_minutos,
+        temperatura_masa_final,
+        temperatura_agua,
+        observaciones,
+      } = datosAmasado;
+
+      await db.query(`
+        INSERT INTO registros_amasado
+          (masa_id, amasadora_id, amasadora_nombre,
+           velocidad_1_minutos, velocidad_2_minutos,
+           temperatura_masa_final, temperatura_agua,
+           usuario_id, observaciones)
+        VALUES (
+          $1, $2, (SELECT nombre FROM amasadoras WHERE id = $2),
+          $3, $4, $5, $6, $7, $8
+        )
+        ON CONFLICT (masa_id) DO UPDATE SET
+          amasadora_id           = EXCLUDED.amasadora_id,
+          amasadora_nombre       = EXCLUDED.amasadora_nombre,
+          velocidad_1_minutos    = EXCLUDED.velocidad_1_minutos,
+          velocidad_2_minutos    = EXCLUDED.velocidad_2_minutos,
+          temperatura_masa_final = EXCLUDED.temperatura_masa_final,
+          temperatura_agua       = EXCLUDED.temperatura_agua,
+          usuario_id             = EXCLUDED.usuario_id,
+          observaciones          = EXCLUDED.observaciones,
+          updated_at              = NOW()
+      `, [
+        masaId,
+        amasadora_id ? Number(amasadora_id) : null,
+        velocidad_1_minutos ? Number(velocidad_1_minutos) : null,
+        velocidad_2_minutos ? Number(velocidad_2_minutos) : null,
+        temperatura_masa_final ? Number(temperatura_masa_final) : null,
+        temperatura_agua ? Number(temperatura_agua) : null,
+        req.user.id,
+        observaciones || null,
+      ]);
+
+      logger.info(`Masa ${masaId}: registro de amasado guardado (amasadora_id=${amasadora_id})`);
+
+      const faseActualizada = await fasesModel.updateEstadoFase(
+        masaId, 'AMASADO', 'COMPLETADA', 100, req.user.id, datos
+      );
+      const siguienteFase = await fasesModel.desbloquearSiguienteFase(masaId, 'AMASADO');
+
+      return res.json({
+        success: true,
+        data: faseActualizada,
+        siguiente_fase: siguienteFase,
+        message: 'Amasado completado exitosamente',
+        subdivision: null,
+      });
+    }
+
     // ── Flujo estándar (otras fases) ───────────────────────────────
     const faseActualizada = await fasesModel.updateEstadoFase(
       masaId, fase.toUpperCase(), 'COMPLETADA', 100, req.user.id, datos
