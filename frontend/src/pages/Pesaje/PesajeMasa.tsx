@@ -285,7 +285,7 @@ export const PesajeMasa: React.FC = () => {
             textoError += `\n\nLotes alternativos disponibles:`;
             alternativas.forEach((a: any) => {
               textoError += `\n  • Lote ${a.batch}: ${Number(a.cantidad_disponible).toFixed(3)} kg`;
-              if (a.expiration_date) textoError += ` (vence ${formatDate(a.expiration_date)})`;
+              if (a.expiration_date) textoError += ` (vence ${formatDate(a.expiration_date.slice(0, 10))})`;
             });
             textoError += `\n\nCambia el lote en el pesaje y vuelve a confirmar.`;
           } else if (loteFallido) {
@@ -534,7 +534,7 @@ export const PesajeMasa: React.FC = () => {
                                 </span>
                                 {l.expiration_date && (
                                   <span className="text-gray-400">
-                                    vence {formatDate(l.expiration_date)}
+                                    vence {formatDate(l.expiration_date.slice(0, 10))}
                                   </span>
                                 )}
                               </span>
@@ -619,7 +619,7 @@ export const PesajeMasa: React.FC = () => {
                                 {stockError.lotes_actuales.map(la => (
                                   <span key={la.batch} className="px-2 py-0.5 bg-white border border-red-200 rounded text-xs text-gray-700">
                                     <span className="font-mono font-bold">{la.batch}</span>: {(Number(la.cantidad_disponible) * 1000).toFixed(0)}g
-                                    {la.expiration_date && ` · vence ${formatDate(la.expiration_date)}`}
+                                    {la.expiration_date && ` · vence ${formatDate(la.expiration_date.slice(0, 10))}`}
                                   </span>
                                 ))}
                               </div>
@@ -683,7 +683,7 @@ export const PesajeMasa: React.FC = () => {
                                   </div>
                                   <div className="text-xs text-green-700">
                                     {(Number(l.cantidad_disponible) * 1000).toFixed(0)}g disponibles
-                                    {l.expiration_date && ` · vence ${formatDate(l.expiration_date)}`}
+                                    {l.expiration_date && ` · vence ${formatDate(l.expiration_date.slice(0, 10))}`}
                                   </div>
                                 </div>
                                 {seleccionado && (
@@ -850,7 +850,7 @@ export const PesajeMasa: React.FC = () => {
                     </div>
                     <div>
                       <span className="text-gray-600">Vence:</span>
-                      <span className="font-semibold ml-2">{ing.fecha_vencimiento ? formatDate(ing.fecha_vencimiento) : '—'}</span>
+                      <span className="font-semibold ml-2">{ing.fecha_vencimiento ? formatDate(ing.fecha_vencimiento.slice(0, 10)) : '—'}</span>
                     </div>
                   </div>
                 )}
