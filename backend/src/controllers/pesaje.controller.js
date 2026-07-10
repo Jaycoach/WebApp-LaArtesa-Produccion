@@ -540,6 +540,39 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
     let lote_fallido = null;
     let alternativas = [];
     const matchStock = sapMsg.match(/10001153 - Insufficient quantity for item (\S+) with batch (\S+)/i);
+    // Parsear error de batch inexistente en SAP (lote no existe en esta compañía/BD de SAP)
+    const matchBatchNoExiste = sapMsg.match(/Batch\/serial number (\S+) selected in row (\d+) does not exist/i);
+    if (matchBatchNoExiste) {
+      const batchFallido = matchBatchNoExiste[1];
+      const filaFallida = parseInt(matchBatchNoExiste[2], 10);
+      const itemFallido = requestPayload?.DocumentLines?.[filaFallida - 1]?.ItemCode || null;
+      if (itemFallido) {
+        lote_fallido = { item_code: itemFallido, batch: batchFallido };
+        try {
+          const alt = await db.query(
+            `SELECT sl.batch, sl.cantidad_disponible, sl.expiration_date,
+                    si.item_name
+             FROM sap_lotes_mp sl
+             LEFT JOIN sap_inventario_mp si ON si.item_code = sl.item_code
+             WHERE sl.item_code = $1
+               AND sl.batch != $2
+               AND sl.cantidad_disponible > 0
+               AND (sl.status IS NULL OR sl.status = 'released')
+             ORDER BY sl.expiration_date ASC NULLS LAST, sl.admission_date ASC NULLS LAST
+             LIMIT 5`,
+            [itemFallido, batchFallido]
+          );
+          alternativas = alt.rows;
+          const nombreRes = await db.query(
+            `SELECT item_name FROM sap_inventario_mp WHERE item_code = $1 LIMIT 1`,
+            [itemFallido]
+          );
+          lote_fallido.item_name = nombreRes.rows[0]?.item_name || itemFallido;
+        } catch (altErr) {
+          logger.warn(`Error consultando alternativas de lote para ${itemFallido}:`, altErr.message);
+        }
+      }
+    }
     if (matchStock) {
       const itemFallido = matchStock[1];
       const batchFallido = matchStock[2];
