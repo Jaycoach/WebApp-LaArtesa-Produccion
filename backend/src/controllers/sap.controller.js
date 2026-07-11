@@ -987,9 +987,9 @@ const sincronizarDesdeOV = async (req, res, next) => {
 
           await client.query(
             `UPDATE productos_por_masa
-             SET unidades_pedidas     = $1,
-                 unidades_programadas = $1,
-                 cantidad_paquetes    = $1,
+             SET unidades_pedidas     = $1::integer,
+                 unidades_programadas = $1::integer,
+                 cantidad_paquetes    = $1::numeric,
                  kilos_pedidos        = $2,
                  kilos_programados    = $2,
                  unidades_ajustadas   = $3,
