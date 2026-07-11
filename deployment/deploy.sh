@@ -38,7 +38,7 @@ pm2 flush $PM2_NAME
 if pm2 list | grep -q "$PM2_NAME"; then
   pm2 restart $PM2_NAME --update-env
 else
-  pm2 start ~/LaArtesa/backend/ecosystem.config.js
+  pm2 start ~/LaArtesa/backend/ecosystem.config.js --only $PM2_NAME
 fi
 pm2 save
 sleep 3
