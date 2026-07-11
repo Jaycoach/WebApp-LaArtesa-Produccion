@@ -412,6 +412,10 @@ class SAPService {
    * @returns {Array} productos agrupables por tipoMasa
    */
   async getDatosParaSincronizacion(fecha) {
+    if (process.env.SAP_READ_MODE === 'hana') {
+      return this._getDatosParaSincronizacionHANA(fecha);
+    }
+
     await this.ensureSession();
 
     const lineas = await this.getOrdenesVenta(fecha);
@@ -822,6 +826,50 @@ class SAPService {
         }
       });
       child.stdin.write(JSON.stringify(itemCodes));
+      child.stdin.end();
+    });
+  }
+
+  /**
+   * Obtiene OV abiertas + info de artículos directo de HANA vía script Python (hdbcli).
+   * Reemplaza getOrdenesVenta() + getArticulosInfo() (Service Layer) por una sola
+   * consulta consolidada ORDR/RDR1/OITM. Mismo shape de retorno que getDatosParaSincronizacion.
+   * A diferencia de _getLotesMateriaPrimaHANA, un fallo aquí SÍ debe propagarse como error
+   * (no hay fallback silencioso: una sincronización de OV fallida no puede reportarse
+   * como "0 OV encontradas", sería un falso negativo peligroso para producción).
+   */
+  async _getDatosParaSincronizacionHANA(fecha) {
+    const { execFile } = require('child_process');
+    const path = require('path');
+
+    return new Promise((resolve, reject) => {
+      const scriptPath = path.join(__dirname, '../../scripts/hana_ov_sync.py');
+      const child = execFile('python3', [scriptPath], {
+        timeout: 30000,
+        env: process.env,
+      }, (error, stdout, stderr) => {
+        if (error) {
+          logger.error(`HANA OV sync: error ejecutando script Python: ${error.message}. stderr: ${stderr}`);
+          return reject(new Error(`Fallo en sincronización OV vía HANA: ${error.message}`));
+        }
+        try {
+          const parsed = JSON.parse(stdout);
+          if (parsed && parsed.error) {
+            logger.error(`HANA OV sync: error reportado por script: ${parsed.error}`);
+            return reject(new Error(`Fallo en sincronización OV vía HANA: ${parsed.error}`));
+          }
+          const resumen = parsed.reduce((acc, p) => {
+            acc[p.tipoMasa] = (acc[p.tipoMasa] || 0) + p.cantidadPaquetes;
+            return acc;
+          }, {});
+          logger.info(`HANA OV sync: ${parsed.length} líneas obtenidas para ${fecha} - Resumen por masa:`, resumen);
+          resolve(parsed);
+        } catch (parseErr) {
+          logger.error(`HANA OV sync: respuesta no parseable: ${parseErr.message}. stdout: ${stdout}`);
+          reject(new Error(`Fallo en sincronización OV vía HANA: respuesta no parseable`));
+        }
+      });
+      child.stdin.write(JSON.stringify({ fecha }));
       child.stdin.end();
     });
   }
