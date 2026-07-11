@@ -837,6 +837,39 @@ const sincronizarDesdeOV = async (req, res, next) => {
       grupo.productos = productosNuevos;
       // ─────────────────────────────────────────────────────────────────
 
+      // Calcular kilos por producto desde BOM local (grupo_sap=181, excluyendo empaque)
+      // Movido aquí (antes de cualquier branch) para estar disponible tanto en el camino
+      // de "masa existente en planificación" como en el de "crear masa nueva" — evita
+      // ReferenceError por temporal dead zone cuando solo corre el primer camino.
+      const kiloPorItemCode = {};
+      const itemCodesGrupoCalc = [...new Set(grupo.productos.map(p => p.itemCode))];
+      for (const itemCode of itemCodesGrupoCalc) {
+        const bomResult = await client.query(
+          `SELECT COALESCE(SUM(cantidad), 0) as kg_por_unidad
+           FROM sap_bom_componentes
+           WHERE item_code_padre = $1 AND grupo_sap = 181`,
+          [itemCode]
+        );
+        const kgBOM = parseFloat(bomResult.rows[0].kg_por_unidad || 0);
+        if (kgBOM > 0) {
+          kiloPorItemCode[itemCode] = kgBOM;
+        } else {
+          const artResult = await client.query(
+            `SELECT gramaje, sales_qty_per_pack FROM sap_articulos WHERE item_code = $1`,
+            [itemCode]
+          );
+          const gramaje = parseFloat(artResult.rows[0]?.gramaje || 0);
+          const qtyPerPack = parseFloat(artResult.rows[0]?.sales_qty_per_pack || 1);
+          if (gramaje > 0) {
+            kiloPorItemCode[itemCode] = (gramaje * qtyPerPack) / 1000;
+            logger.warn(`BOM vacío para ${itemCode} — usando fallback gramaje: ${gramaje}g × ${qtyPerPack} = ${kiloPorItemCode[itemCode].toFixed(4)} kg/paquete`);
+          } else {
+            kiloPorItemCode[itemCode] = 0;
+            logger.warn(`BOM vacío y gramaje=0 para ${itemCode}. Kilos quedarán en 0. Sincroniza BOM.`);
+          }
+        }
+      }
+
       // Verificar si ya existe una masa de este tipo para esta fecha
       const masaExistenteResult = await client.query(
         `SELECT id, codigo_masa, estado, fase_actual
@@ -1062,39 +1095,6 @@ const sincronizarDesdeOV = async (req, res, next) => {
       }
 
       const masaId = masaResult.rows[0].id;
-
-      // Calcular kilos por producto desde BOM local (grupo_sap=181, excluyendo empaque)
-      const kiloPorItemCode = {};
-      const itemCodes = [...new Set(grupo.productos.map(p => p.itemCode))];
-      for (const itemCode of itemCodes) {
-        const bomResult = await client.query(
-          `SELECT COALESCE(SUM(cantidad), 0) as kg_por_unidad
-           FROM sap_bom_componentes
-           WHERE item_code_padre = $1 AND grupo_sap = 181`,
-          [itemCode]
-        );
-        const kgBOM = parseFloat(bomResult.rows[0].kg_por_unidad || 0);
-
-        if (kgBOM > 0) {
-          kiloPorItemCode[itemCode] = kgBOM;
-        } else {
-          // Fallback: calcular desde gramaje del artículo en sap_articulos
-          const artResult = await client.query(
-            `SELECT gramaje, sales_qty_per_pack FROM sap_articulos WHERE item_code = $1`,
-            [itemCode]
-          );
-          const gramaje = parseFloat(artResult.rows[0]?.gramaje || 0);
-          const qtyPerPack = parseFloat(artResult.rows[0]?.sales_qty_per_pack || 1);
-          if (gramaje > 0) {
-            // gramaje está en gramos, qty_per_pack es unidades por paquete
-            kiloPorItemCode[itemCode] = (gramaje * qtyPerPack) / 1000;
-            logger.warn(`BOM vacío para ${itemCode} — usando fallback gramaje: ${gramaje}g × ${qtyPerPack} = ${kiloPorItemCode[itemCode].toFixed(4)} kg/paquete`);
-          } else {
-            kiloPorItemCode[itemCode] = 0;
-            logger.warn(`BOM vacío y gramaje=0 para ${itemCode}. Kilos quedarán en 0. Sincroniza BOM.`);
-          }
-        }
-      }
 
       // Insertar productos; ON CONFLICT acumula si el mismo ItemCode aparece en varias OV
       for (const prod of grupo.productos) {
