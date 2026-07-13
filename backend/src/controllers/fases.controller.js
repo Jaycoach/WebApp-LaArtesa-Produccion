@@ -59,9 +59,19 @@ function clasificarComponente(uom, grupoSap) {
 
 /**
  * Devuelve el límite en kg según el tipo de masa.
+ * Prioridad: catalogo_tipos_masa.peso_maximo_division (configurado por Kevin en SAP)
+ * > fallback 130kg si es TOSCANO y aún no está cargado > fallback genérico 90kg.
  */
-function getLimiteKg(tipo_masa) {
+async function getLimiteKg(queryable, tipo_masa) {
   if (!tipo_masa) return LIMITE_KG_DEFAULT;
+
+  const result = await queryable.query(
+    `SELECT peso_maximo_division FROM catalogo_tipos_masa WHERE tipo_masa = $1 AND activo = TRUE LIMIT 1`,
+    [tipo_masa]
+  );
+  const pesoConfigurado = result.rows[0]?.peso_maximo_division;
+  if (pesoConfigurado != null) return parseFloat(pesoConfigurado);
+
   return tipo_masa.toUpperCase() === 'TOSCANO' ? LIMITE_KG_TOSCANO : LIMITE_KG_DEFAULT;
 }
 
@@ -411,7 +421,7 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false)
     [masaId]
   );
   const totalKgIngredientes = parseFloat(ingResult.rows[0].total_kg || 0);
-  const limiteKg = getLimiteKg(masa.tipo_masa);
+  const limiteKg = await getLimiteKg(client, masa.tipo_masa);
 
   if (totalKgIngredientes <= limiteKg) {
     logger.info(`Masa ${masaId}: ${totalKgIngredientes.toFixed(2)} kg ≤ ${limiteKg} kg, sin subdivisión.`);
@@ -837,7 +847,7 @@ const completarFase = async (req, res, next) => {
       logger.info(`Masa ${masaId}: ${componentesPeso.length} ingredientes de masa + ${componentesEmpaque.length} materiales de empaque consolidados`);
 
       const totalKgIngredientes = componentesPeso.reduce((sum, [, comp]) => sum + comp.cantidad, 0);
-      const limiteKg = getLimiteKg(masa.tipo_masa);
+      const limiteKg = await getLimiteKg(db, masa.tipo_masa);
 
       logger.info(`Masa ${masaId} (${masa.tipo_masa}): ${totalKgIngredientes.toFixed(2)} kg de masa | Límite: ${limiteKg} kg`);
 
