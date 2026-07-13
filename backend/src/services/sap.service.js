@@ -500,6 +500,10 @@ class SAPService {
    * @returns {Array} [{ code, name }]
    */
   async getTiposMasa() {
+    if (process.env.SAP_READ_MODE === 'hana') {
+      return this._getTiposMasaHANA();
+    }
+
     await this.ensureSession();
 
     const todos = [];
@@ -855,6 +859,40 @@ class SAPService {
       });
       child.stdin.write(JSON.stringify(itemCodes));
       child.stdin.end();
+    });
+  }
+
+  /**
+   * Extrae tipos de masa directo de HANA vía script Python (hdbcli).
+   * Reemplaza la llamada Service Layer a /U_JZ_TIPOMASA. Mismo shape de retorno.
+   */
+  async _getTiposMasaHANA() {
+    const { execFile } = require('child_process');
+    const path = require('path');
+
+    return new Promise((resolve, reject) => {
+      const scriptPath = path.join(__dirname, '../../scripts/hana_tipos_masa.py');
+      execFile('python3', [scriptPath], {
+        timeout: 15000,
+        env: process.env,
+      }, (error, stdout, stderr) => {
+        if (error) {
+          logger.error(`HANA tipos de masa: error ejecutando script Python: ${error.message}. stderr: ${stderr}`);
+          return reject(error);
+        }
+        try {
+          const parsed = JSON.parse(stdout);
+          if (parsed.error) {
+            logger.error(`HANA tipos de masa: error reportado por script: ${parsed.error}`);
+            return reject(new Error(parsed.error));
+          }
+          logger.info(`HANA tipos de masa: ${parsed.tipos.length} tipos obtenidos vía HANA directo`);
+          resolve(parsed.tipos);
+        } catch (parseErr) {
+          logger.error(`HANA tipos de masa: respuesta no parseable: ${parseErr.message}. stdout: ${stdout}`);
+          reject(parseErr);
+        }
+      });
     });
   }
 

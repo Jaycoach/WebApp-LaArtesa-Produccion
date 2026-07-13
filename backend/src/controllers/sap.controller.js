@@ -1403,55 +1403,64 @@ const getOrdenesVenta = async (req, res, next) => {
 };
 
 /**
+ * Núcleo de sincronización de tipos de masa (@JZ_TIPOMASA → catalogo_tipos_masa).
+ * Compartido entre el endpoint manual /sincronizar-tipos-masa y el paso automático
+ * al inicio de /sincronizar-bom.
+ */
+const syncTiposMasaCore = async () => {
+  const tiposSAP = await sapService.getTiposMasa();
+
+  if (tiposSAP.length === 0) {
+    return { totalSap: 0, insertados: 0, yaExistian: 0 };
+  }
+
+  let insertados = 0;
+  let yaExistian = 0;
+
+  for (const tipo of tiposSAP) {
+    if (!tipo.code || !tipo.name) continue;
+    const pesoMaxDiv = tipo.maxDiv; // NULL si Kevin no lo ha cargado aún en SAP
+    const result = await db.query(
+      `INSERT INTO catalogo_tipos_masa (codigo_sap, tipo_masa, nombre_masa, peso_maximo_division)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (codigo_sap) DO UPDATE SET
+         peso_maximo_division = EXCLUDED.peso_maximo_division`,
+      [tipo.code, tipo.code, tipo.name, pesoMaxDiv]
+    );
+    if (result.rowCount > 0) {
+      insertados++;
+      logger.info(`Tipo de masa insertado: ${tipo.code} - ${tipo.name}`);
+    } else {
+      yaExistian++;
+    }
+  }
+
+  return { totalSap: tiposSAP.length, insertados, yaExistian };
+};
+
+/**
  * @desc    Sincronizar tipos de masa desde SAP (@JZ_TIPOMASA → catalogo_tipos_masa)
- *          Solo inserta registros nuevos (upsert por codigo_sap). No elimina existentes.
+ *          Acción manual — el mismo core corre automáticamente al inicio de /sincronizar-bom.
  * @route   POST /api/sap/sincronizar-tipos-masa
  * @access  Private (Admin/Supervisor)
  */
 const sincronizarTiposMasa = async (req, res, next) => {
   try {
     logger.info('Iniciando sincronización de tipos de masa desde SAP...');
-
-    const tiposSAP = await sapService.getTiposMasa();
-
-    if (tiposSAP.length === 0) {
+    const { totalSap, insertados, yaExistian } = await syncTiposMasaCore();
+    if (totalSap === 0) {
       return res.json({
         success: true,
         message: 'SAP no retornó tipos de masa',
         data: { total_sap: 0, insertados: 0, ya_existian: 0 },
       });
     }
-
-    let insertados = 0;
-    let yaExistian = 0;
-
-    for (const tipo of tiposSAP) {
-      if (!tipo.code || !tipo.name) continue;
-
-      const pesoMaxDiv = tipo.maxDiv; // NULL si Kevin no lo ha cargado aún en SAP
-
-      const result = await db.query(
-        `INSERT INTO catalogo_tipos_masa (codigo_sap, tipo_masa, nombre_masa, peso_maximo_division)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (codigo_sap) DO UPDATE SET
-           peso_maximo_division = EXCLUDED.peso_maximo_division`,
-        [tipo.code, tipo.code, tipo.name, pesoMaxDiv]
-      );
-
-      if (result.rowCount > 0) {
-        insertados++;
-        logger.info(`Tipo de masa insertado: ${tipo.code} - ${tipo.name}`);
-      } else {
-        yaExistian++;
-      }
-    }
-
     await db.query(
       `INSERT INTO sap_sync_log (tipo_operacion, estado, request_payload, response_payload)
        VALUES ('TIPOS_MASA', 'SUCCESS', $1, $2)`,
       [
         JSON.stringify({}),
-        JSON.stringify({ total_sap: tiposSAP.length, insertados, ya_existian: yaExistian }),
+        JSON.stringify({ total_sap: totalSap, insertados, ya_existian: yaExistian }),
       ]
     );
 
@@ -1460,7 +1469,7 @@ const sincronizarTiposMasa = async (req, res, next) => {
     return res.json({
       success: true,
       message: `Sincronización completada: ${insertados} tipos nuevos, ${yaExistian} ya existían`,
-      data: { total_sap: tiposSAP.length, insertados, ya_existian: yaExistian },
+      data: { total_sap: totalSap, insertados, ya_existian: yaExistian },
     });
   } catch (error) {
     logger.error('Error sincronizando tipos de masa:', error);
@@ -1490,6 +1499,15 @@ const sincronizarTiposMasa = async (req, res, next) => {
 const sincronizarBOM = async (req, res, next) => {
   try {
     logger.info('Iniciando sincronización de BOM desde SAP...');
+
+    // 0. Sincronizar tipos de masa primero (peso_maximo_division) — no crítico,
+    //    si falla no debe tumbar el resto de la sincronización de BOM.
+    try {
+      const tiposMasaResult = await syncTiposMasaCore();
+      logger.info(`Tipos de masa (dentro de BOM sync): ${tiposMasaResult.insertados} nuevos, ${tiposMasaResult.yaExistian} actualizados/ya existían`);
+    } catch (tiposMasaErr) {
+      logger.warn(`Sincronización de tipos de masa falló dentro de BOM sync (no crítico): ${tiposMasaErr.message}`);
+    }
 
     // 1. Traer todos los artículos con tipo de masa desde SAP
     const articulos = await sapService.getArticulosConTipoMasa();
