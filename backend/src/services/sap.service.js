@@ -897,6 +897,42 @@ class SAPService {
   }
 
   /**
+   * Extrae artículos con tipo de masa + su BOM completo (componentes con UoM/grupo/decoración)
+   * directo de HANA vía script Python. Reemplaza getArticulosConTipoMasa() + getBOM() +
+   * getItemsUoM() (Service Layer, secuencial por artículo) por una sola consulta consolidada.
+   */
+  async getArticulosConTipoMasaConBOMHANA() {
+    const { execFile } = require('child_process');
+    const path = require('path');
+
+    return new Promise((resolve, reject) => {
+      const scriptPath = path.join(__dirname, '../../scripts/hana_bom_completo.py');
+      execFile('python3', [scriptPath], {
+        timeout: 30000,
+        maxBuffer: 1024 * 1024 * 20, // 20MB — el dataset completo puede ser grande
+        env: process.env,
+      }, (error, stdout, stderr) => {
+        if (error) {
+          logger.error(`HANA BOM completo: error ejecutando script Python: ${error.message}. stderr: ${stderr}`);
+          return reject(error);
+        }
+        try {
+          const parsed = JSON.parse(stdout);
+          if (parsed.error) {
+            logger.error(`HANA BOM completo: error reportado por script: ${parsed.error}`);
+            return reject(new Error(parsed.error));
+          }
+          logger.info(`HANA BOM completo: ${parsed.articulos.length} artículos obtenidos vía HANA directo`);
+          resolve(parsed.articulos);
+        } catch (parseErr) {
+          logger.error(`HANA BOM completo: respuesta no parseable: ${parseErr.message}`);
+          reject(parseErr);
+        }
+      });
+    });
+  }
+
+  /**
    * Obtiene OV abiertas + info de artículos directo de HANA vía script Python (hdbcli).
    * Reemplaza getOrdenesVenta() + getArticulosInfo() (Service Layer) por una sola
    * consulta consolidada ORDR/RDR1/OITM. Mismo shape de retorno que getDatosParaSincronizacion.

@@ -1510,7 +1510,10 @@ const sincronizarBOM = async (req, res, next) => {
     }
 
     // 1. Traer todos los artículos con tipo de masa desde SAP
-    const articulos = await sapService.getArticulosConTipoMasa();
+    const usarHana = process.env.SAP_READ_MODE === 'hana';
+    const articulos = usarHana
+      ? await sapService.getArticulosConTipoMasaConBOMHANA()
+      : await sapService.getArticulosConTipoMasa();
 
     if (articulos.length === 0) {
       return res.json({
@@ -1556,17 +1559,26 @@ const sincronizarBOM = async (req, res, next) => {
         );
         articulosUpserted++;
 
-        // 3. Obtener BOM del artículo desde SAP
-        const bomLines = await sapService.getBOM(articulo.itemCode);
+        // 3. Obtener BOM del artículo — ya viene incluido si usamos HANA
+        const bomLines = usarHana
+          ? (articulo.bom || []).map(c => ({
+              ItemCode: c.itemCode, ItemName: c.itemName, Quantity: c.quantity,
+              Warehouse: c.warehouse, IssueMethod: c.issueMethod, VisualOrder: c.visualOrder,
+            }))
+          : await sapService.getBOM(articulo.itemCode);
 
         if (!bomLines || bomLines.length === 0) {
           sinBOM++;
           continue;
         }
 
-        // 4. Obtener UoM e ItemsGroupCode de todos los componentes en lote
+        // 4. Obtener UoM e ItemsGroupCode de todos los componentes — ya viene incluido si usamos HANA
         const itemCodeComp = bomLines.map(l => l.ItemCode);
-        const uomMap       = await sapService.getItemsUoM(itemCodeComp);
+        const uomMap       = usarHana
+          ? Object.fromEntries((articulo.bom || []).map(c => [
+              c.itemCode, { uom: c.uom, grupoSap: c.grupoSap, esDecoracion: c.esDecoracion },
+            ]))
+          : await sapService.getItemsUoM(itemCodeComp);
 
         // 4b. Eliminar componentes que ya no existen en el BOM de SAP
         //     Esto garantiza que la DB quede idéntica a lo que dice SAP.
