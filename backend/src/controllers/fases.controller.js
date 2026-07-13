@@ -154,26 +154,20 @@ async function inicializarFasesMasaConPesaje(masaId, userId, qr = db) {
  * @param {number[]} subMasaIds       - IDs de las sub-masas [A, B, C, ...]
  * @param {boolean}  copiarPesaje     - Si true copia los campos de pesaje real proporcionalmente
  */
-async function distribuirIngredientes(ingredientes, subMasaIds, copiarPesaje = false, qr = db) {
+async function distribuirIngredientes(ingredientes, subMasaIds, fraccionesTanda, copiarPesaje = false, qr = db) {
   const n = subMasaIds.length;
 
   for (const ing of ingredientes) {
     const kgTotal = parseFloat(ing.cantidad_kilos);
     const gTotal  = parseFloat(ing.cantidad_gramos);
-    const kgBase  = parseFloat((kgTotal / n).toFixed(3));
-    const gBase   = parseFloat((gTotal  / n).toFixed(2));
-
-    // Si hay peso real registrado, distribuirlo también
     const pesoRealTotal = ing.peso_real != null ? parseFloat(ing.peso_real) : null;
-    const pesoRealBase  = pesoRealTotal != null
-      ? parseFloat((pesoRealTotal / n).toFixed(3))
-      : null;
 
     let kgAcum       = 0;
     let gAcum        = 0;
     let pesoRealAcum = 0;
 
     for (let i = 0; i < n; i++) {
+      const frac = fraccionesTanda[i];
       let kgTanda, gTanda, pesoRealTanda;
 
       if (i === n - 1) {
@@ -183,9 +177,11 @@ async function distribuirIngredientes(ingredientes, subMasaIds, copiarPesaje = f
           ? parseFloat((pesoRealTotal - pesoRealAcum).toFixed(3))
           : null;
       } else {
-        kgTanda = kgBase;
-        gTanda  = gBase;
-        pesoRealTanda = pesoRealBase;
+        kgTanda = parseFloat((kgTotal * frac).toFixed(3));
+        gTanda  = parseFloat((gTotal  * frac).toFixed(2));
+        pesoRealTanda = pesoRealTotal != null
+          ? parseFloat((pesoRealTotal * frac).toFixed(3))
+          : null;
       }
 
       kgAcum       = parseFloat((kgAcum + kgTanda).toFixed(3));
@@ -277,56 +273,147 @@ async function distribuirEmpaque(empaques, subMasaIds, qr = db) {
 }
 
 /**
- * Distribuye productos entre N sub-masas proporcionalmente.
- * Cada sub-masa recibe 1/N de cada producto (distribución uniforme por tanda).
- * La última tanda absorbe los residuos de redondeo.
+ * Clave de agrupación de un producto para el empaquetado por tandas.
+ * Con tamaño+forma resueltos (SAP o fallback por nombre) → agrupa por esa
+ * combinación. Sin ambos atributos → cae en el grupo base del tipo_masa
+ * (no es una categoría aparte, es el mismo criterio que existía antes de
+ * tener tamaño/forma: todo lo no diferenciado va junto).
  */
-async function distribuirProductos(productos, limiteKg, subMasaIds, qr = db) {
-  const n = subMasaIds.length;
+function clasificarClaveAgrupacion(producto, tipoMasa) {
+  let tamanio = producto.tamanio || null;
+  let forma   = producto.forma   || null;
+  const nombre = (producto.producto_nombre || '').toUpperCase();
+
+  if (!tamanio) {
+    if (/\bGRANDE\b/.test(nombre))             tamanio = 'GRANDE';
+    else if (/\bMEDIAN[OA]\b/.test(nombre))    tamanio = 'MEDIANO';
+    else if (/\bPEQUE[ÑN]O?A?\b/.test(nombre)) tamanio = 'PEQUEÑO';
+    else if (/\bJUNIOR\b|\bJR\b/.test(nombre)) tamanio = 'JUNIOR';
+  }
+
+  if (!forma) {
+    if (/\bCUADRAD[OA]\b/.test(nombre))       forma = 'CUADRADO';
+    else if (/\bREDOND[OA]\b/.test(nombre))   forma = 'REDONDO';
+    else if (/\bTRIANGULAR\b/.test(nombre))   forma = 'TRIANGULAR';
+    else if (/\bRECTANGULAR\b/.test(nombre))  forma = 'RECTANGULAR';
+    else if (/\bOVALAD[OA]\b/.test(nombre))   forma = 'OVALADO';
+    else if (/\bALARGAD[OA]\b/.test(nombre))  forma = 'ALARGADO';
+  }
+
+  if (!tamanio || !forma) return `TIPOMASA:${tipoMasa}`;
+  return `${tamanio}|${forma}`;
+}
+
+/**
+ * Agrupa productos en tandas respetando limiteKg (kg de PRODUCTO, no de
+ * ingrediente). Se llena cada tanda con clusters completos antes de abrir
+ * la siguiente — nunca se reparte 50/50 ni proporcional parejo. Solo se
+ * parte un cluster cuando no cabe completo y aún queda espacio disponible.
+ * Aplica igual al grupo por tamaño+forma que al grupo base por tipo_masa.
+ */
+function agruparProductosEnTandas(productos, limiteKg, tipoMasa) {
+  const grupos = new Map();
   for (const prod of productos) {
-    const totalUnidadesProg = parseInt(prod.unidades_programadas);
-    const totalUnidadesPed  = parseInt(prod.unidades_pedidas);
-    const totalKgPed        = parseFloat(prod.kilos_pedidos);
-    const totalKgProg       = parseFloat(prod.kilos_programados);
+    const clave = clasificarClaveAgrupacion(prod, tipoMasa);
+    if (!grupos.has(clave)) grupos.set(clave, { clave, productos: [], kgTotal: 0 });
+    const g = grupos.get(clave);
+    g.productos.push(prod);
+    g.kgTotal += parseFloat(prod.kilos_programados || 0);
+  }
 
-    let unidadesProgRestantes = totalUnidadesProg;
-    let unidadesPedRestantes  = totalUnidadesPed;
-    let kgPedRestantes        = totalKgPed;
-    let kgProgRestantes       = totalKgProg;
+  // Clusters más grandes primero — minimiza cuántos quedan partidos entre tandas
+  const clusters = Array.from(grupos.values()).sort((a, b) => b.kgTotal - a.kgTotal);
 
-    // Unidades base por tanda (piso) — la última absorbe el residuo
-    const unidadesProgBase = Math.floor(totalUnidadesProg / n);
-    const unidadesPedBase  = Math.floor(totalUnidadesPed  / n);
+  const tandas = [{ kg: 0, items: [] }];
+  let actual = tandas[0];
 
-    for (let i = 0; i < n; i++) {
-      const esUltima = (i === n - 1);
+  for (const cluster of clusters) {
+    let kgRestante = cluster.kgTotal;
 
-      const unidadesProg = esUltima ? unidadesProgRestantes : unidadesProgBase;
-      const unidadesPed  = esUltima ? unidadesPedRestantes  : unidadesPedBase;
+    while (kgRestante > 0.0001) {
+      const espacio = limiteKg - actual.kg;
 
-      // Kg proporcional a las unidades de esta tanda
-      const frac = unidadesProg / totalUnidadesProg;
-      const kgPed  = esUltima
-        ? parseFloat(kgPedRestantes.toFixed(3))
-        : parseFloat((totalKgPed  * frac).toFixed(3));
-      const kgProg = esUltima
-        ? parseFloat(kgProgRestantes.toFixed(3))
-        : parseFloat((totalKgProg * frac).toFixed(3));
-
-      // Solo insertar si hay al menos 1 unidad para esta tanda
-      if (unidadesProg > 0) {
-        await insertarProductoEnMasa(
-          subMasaIds[i], prod,
-          unidadesProg, unidadesPed,
-          kgPed, kgProg,
-          qr
-        );
+      if (espacio <= 0.0001) {
+        tandas.push({ kg: 0, items: [] });
+        actual = tandas[tandas.length - 1];
+        continue;
       }
 
-      unidadesProgRestantes -= unidadesProg;
-      unidadesPedRestantes  -= unidadesPed;
-      kgPedRestantes         = parseFloat((kgPedRestantes  - kgPed).toFixed(3));
-      kgProgRestantes        = parseFloat((kgProgRestantes - kgProg).toFixed(3));
+      const kgAAsignar    = Math.min(espacio, kgRestante);
+      const fraccionParte = kgAAsignar / cluster.kgTotal;
+
+      for (const prod of cluster.productos) {
+        actual.items.push({ producto: prod, fraccion: fraccionParte });
+      }
+
+      actual.kg  += kgAAsignar;
+      kgRestante -= kgAAsignar;
+
+      if (kgRestante > 0.0001) {
+        tandas.push({ kg: 0, items: [] });
+        actual = tandas[tandas.length - 1];
+      }
+    }
+  }
+
+  // Consolidar si un mismo producto quedó con más de una fracción en la misma tanda
+  for (const tanda of tandas) {
+    const consolidado = new Map();
+    for (const { producto, fraccion } of tanda.items) {
+      const prev = consolidado.get(producto.id) || { producto, fraccion: 0 };
+      prev.fraccion += fraccion;
+      consolidado.set(producto.id, prev);
+    }
+    tanda.items = Array.from(consolidado.values());
+  }
+
+  return tandas;
+}
+
+/**
+ * Inserta los productos en cada sub-masa según el plan de tandas del
+ * empaquetado. Cuando un producto quedó partido entre dos tandas
+ * consecutivas (cluster que no cupo completo), reparte con piso en todas
+ * las ocurrencias menos la última, que absorbe el residuo exacto.
+ */
+async function distribuirProductosPorTandas(tandas, subMasaIds, qr = db) {
+  const ocurrenciasPorProducto = new Map();
+  tandas.forEach((tanda, tandaIdx) => {
+    for (const { producto, fraccion } of tanda.items) {
+      if (!ocurrenciasPorProducto.has(producto.id)) ocurrenciasPorProducto.set(producto.id, []);
+      ocurrenciasPorProducto.get(producto.id).push({ tandaIdx, fraccion, producto });
+    }
+  });
+
+  for (const [, ocurrencias] of ocurrenciasPorProducto) {
+    const prod = ocurrencias[0].producto;
+    const totalProg   = parseInt(prod.unidades_programadas);
+    const totalPed    = parseInt(prod.unidades_pedidas);
+    const totalKgPed  = parseFloat(prod.kilos_pedidos);
+    const totalKgProg = parseFloat(prod.kilos_programados);
+
+    let progRestante  = totalProg;
+    let pedRestante   = totalPed;
+    let kgPedRestante  = totalKgPed;
+    let kgProgRestante = totalKgProg;
+
+    for (let idx = 0; idx < ocurrencias.length; idx++) {
+      const oc = ocurrencias[idx];
+      const esUltima = idx === ocurrencias.length - 1;
+
+      const prog = esUltima ? progRestante : Math.floor(totalProg * oc.fraccion);
+      const ped  = esUltima ? pedRestante  : Math.floor(totalPed  * oc.fraccion);
+      const kgPed  = esUltima ? parseFloat(kgPedRestante.toFixed(3))  : parseFloat((totalKgPed  * oc.fraccion).toFixed(3));
+      const kgProg = esUltima ? parseFloat(kgProgRestante.toFixed(3)) : parseFloat((totalKgProg * oc.fraccion).toFixed(3));
+
+      progRestante -= prog;
+      pedRestante  -= ped;
+      kgPedRestante  = parseFloat((kgPedRestante  - kgPed).toFixed(3));
+      kgProgRestante = parseFloat((kgProgRestante - kgProg).toFixed(3));
+
+      if (prog > 0) {
+        await insertarProductoEnMasa(subMasaIds[oc.tandaIdx], prod, prog, ped, kgPed, kgProg, qr);
+      }
     }
   }
 }
@@ -428,10 +515,31 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false)
     return null;
   }
 
-  const nTandas      = calcularNTandas(totalKgIngredientes, limiteKg);
-  const LETRAS_TANDA = generarLetrasTanda(nTandas);
+  const todosProductosParaAgrupar = await client.query(
+    `SELECT * FROM productos_por_masa WHERE masa_id = $1`,
+    [masaId]
+  );
+  const totalKgProductos = todosProductosParaAgrupar.rows.reduce(
+    (acc, p) => acc + parseFloat(p.kilos_programados || 0), 0
+  );
 
-  logger.info(`Masa ${masaId} supera el límite (${totalKgIngredientes.toFixed(2)} kg > ${limiteKg} kg). Subdividiendo en ${nTandas} tandas.`);
+  const tandas       = agruparProductosEnTandas(todosProductosParaAgrupar.rows, limiteKg, masa.tipo_masa);
+  const nTandas       = tandas.length;
+  const LETRAS_TANDA  = generarLetrasTanda(nTandas);
+
+  const fraccionesTanda = [];
+  let fraccionAcumulada = 0;
+  for (let i = 0; i < nTandas; i++) {
+    if (i === nTandas - 1) {
+      fraccionesTanda.push(parseFloat((1 - fraccionAcumulada).toFixed(6)));
+    } else {
+      const frac = totalKgProductos > 0 ? tandas[i].kg / totalKgProductos : 1 / nTandas;
+      fraccionesTanda.push(parseFloat(frac.toFixed(6)));
+      fraccionAcumulada += fraccionesTanda[i];
+    }
+  }
+
+  logger.info(`Masa ${masaId} supera el límite (${totalKgIngredientes.toFixed(2)} kg > ${limiteKg} kg). Subdividiendo en ${nTandas} tandas agrupadas por tamaño+forma / tipo_masa.`);
 
   // Marcar masa original como subdividida
   await client.query(`
@@ -441,8 +549,24 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false)
   `, [masaId]);
 
   const kgPorTanda     = parseFloat((totalKgIngredientes / nTandas).toFixed(3));
-  const baseKilosBase  = parseFloat((parseFloat(masa.total_kilos_base)      / nTandas).toFixed(3));
-  const baseKilosMerma = parseFloat((parseFloat(masa.total_kilos_con_merma) / nTandas).toFixed(3));
+  const totalKilosBaseNum  = parseFloat(masa.total_kilos_base);
+  const totalKilosMermaNum = parseFloat(masa.total_kilos_con_merma);
+  const baseKilosBaseArr   = [];
+  const baseKilosMermaArr  = [];
+  let acumBase = 0, acumMerma = 0;
+  for (let i = 0; i < nTandas; i++) {
+    if (i === nTandas - 1) {
+      baseKilosBaseArr.push(parseFloat((totalKilosBaseNum   - acumBase).toFixed(3)));
+      baseKilosMermaArr.push(parseFloat((totalKilosMermaNum - acumMerma).toFixed(3)));
+    } else {
+      const b = parseFloat((totalKilosBaseNum  * fraccionesTanda[i]).toFixed(3));
+      const m = parseFloat((totalKilosMermaNum * fraccionesTanda[i]).toFixed(3));
+      baseKilosBaseArr.push(b);
+      baseKilosMermaArr.push(m);
+      acumBase  += b;
+      acumMerma += m;
+    }
+  }
   const fechaStr       = masa.fecha_produccion instanceof Date
     ? masa.fecha_produccion.toISOString().split('T')[0]
     : masa.fecha_produccion;
@@ -473,8 +597,8 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false)
       masa.tipo_masa,
       `${masa.nombre_masa} (Tanda ${letra})`,
       fechaStr,
-      baseKilosBase,
-      baseKilosMerma,
+      baseKilosBaseArr[i],
+      baseKilosMermaArr[i],
       masa.porcentaje_merma,
       masa.factor_absorcion_usado,
       estadoSubMasa,
@@ -506,14 +630,9 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false)
     `SELECT * FROM ingredientes_masa WHERE masa_id = $1 AND es_empaque = false ORDER BY orden_visualizacion`,
     [masaId]
   );
-  await distribuirIngredientes(ingredientesResult.rows, subMasaIds, conPesaje, client);
+  await distribuirIngredientes(ingredientesResult.rows, subMasaIds, fraccionesTanda, conPesaje, client);
 
-  // Distribuir productos primero — necesario para que productos_por_masa de sub-masas exista
-  const todosProductos = await client.query(
-    `SELECT * FROM productos_por_masa WHERE masa_id = $1`,
-    [masaId]
-  );
-  await distribuirProductos(todosProductos.rows, limiteKg, subMasaIds, client);
+  await distribuirProductosPorTandas(tandas, subMasaIds, client);
 
   // Distribuir empaque proporcional a unidades_programadas de cada sub-masa
   // Cada sub-masa puede tener distinto número de paquetes (ej: 151/151/150/150)
