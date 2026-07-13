@@ -1424,10 +1424,11 @@ const syncTiposMasaCore = async () => {
       `INSERT INTO catalogo_tipos_masa (codigo_sap, tipo_masa, nombre_masa, peso_maximo_division)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (codigo_sap) DO UPDATE SET
-         peso_maximo_division = EXCLUDED.peso_maximo_division`,
+         peso_maximo_division = EXCLUDED.peso_maximo_division
+       RETURNING (xmax = 0) AS es_insercion`,
       [tipo.code, tipo.code, tipo.name, pesoMaxDiv]
     );
-    if (result.rowCount > 0) {
+    if (result.rows[0]?.es_insercion) {
       insertados++;
       logger.info(`Tipo de masa insertado: ${tipo.code} - ${tipo.name}`);
     } else {
