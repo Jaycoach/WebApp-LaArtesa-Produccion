@@ -922,8 +922,17 @@ class SAPService {
             logger.error(`HANA BOM completo: error reportado por script: ${parsed.error}`);
             return reject(new Error(parsed.error));
           }
-          logger.info(`HANA BOM completo: ${parsed.articulos.length} artículos obtenidos vía HANA directo`);
-          resolve(parsed.articulos);
+          const articulosConFallback = parsed.articulos.map(art => {
+            if (art.tamanio && art.forma) return art;
+            const fallbackAtributos = inferirTamanioForma(art.itemName);
+            return {
+              ...art,
+              tamanio: art.tamanio || fallbackAtributos.tamanio,
+              forma: art.forma || fallbackAtributos.forma,
+            };
+          });
+          logger.info(`HANA BOM completo: ${articulosConFallback.length} artículos obtenidos vía HANA directo`);
+          resolve(articulosConFallback);
         } catch (parseErr) {
           logger.error(`HANA BOM completo: respuesta no parseable: ${parseErr.message}`);
           reject(parseErr);
