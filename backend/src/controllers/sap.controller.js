@@ -934,8 +934,9 @@ const sincronizarDesdeOV = async (req, res, next) => {
                  kilos_pedidos, kilos_programados,
                  sap_item_code, unidades_por_paquete, cantidad_paquetes,
                  sap_doc_entry, sap_doc_num,
-                 multiplo_divisor, unidades_ajustadas, unidades_excedente
-               ) VALUES ($1,$2,$3,'Por definir',$4,0,0,0,0,$5,$6,$7,$8,$9,$10,0,0)
+                 multiplo_divisor, unidades_ajustadas, unidades_excedente,
+                 tamanio, forma
+               ) VALUES ($1,$2,$3,'Por definir',$4,0,0,0,0,$5,$6,$7,$8,$9,$10,0,0,$11,$12)
                RETURNING id`,
               [
                 masaIdExistente,
@@ -946,6 +947,8 @@ const sincronizarDesdeOV = async (req, res, next) => {
                 0,
                 prod.docEntry, String(prod.docNum),
                 multiploDivisor,
+                prod.tamanio || null,
+                prod.forma || null,
               ]
             );
             productoMasaId = insertPPM.rows[0].id;
@@ -1117,9 +1120,12 @@ const sincronizarDesdeOV = async (req, res, next) => {
              gramaje_unitario,
              unidades_pedidas, unidades_programadas, kilos_pedidos, kilos_programados,
              sap_item_code, unidades_por_paquete, cantidad_paquetes, sap_doc_entry, sap_doc_num,
-             multiplo_divisor, unidades_ajustadas, unidades_excedente
-           ) VALUES ($1, $2, $3, 'Por definir', $4, $5, $5, $6, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+             multiplo_divisor, unidades_ajustadas, unidades_excedente,
+             tamanio, forma
+           ) VALUES ($1, $2, $3, 'Por definir', $4, $5, $5, $6, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
            ON CONFLICT (masa_id, sap_item_code) DO UPDATE SET
+             tamanio               = COALESCE(EXCLUDED.tamanio, productos_por_masa.tamanio),
+             forma                 = COALESCE(EXCLUDED.forma, productos_por_masa.forma),
              unidades_pedidas     = productos_por_masa.unidades_pedidas     + EXCLUDED.unidades_pedidas,
              unidades_programadas = productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas,
              cantidad_paquetes    = productos_por_masa.cantidad_paquetes    + EXCLUDED.cantidad_paquetes,
@@ -1158,6 +1164,8 @@ const sincronizarDesdeOV = async (req, res, next) => {
             multiploDivisor,                                        // $12
             unidadesAjustadas,                                      // $13
             unidadesExcedente,                                      // $14
+            prod.tamanio || null,                                   // $15
+            prod.forma || null,                                     // $16
           ]
         );
       }
@@ -1207,7 +1215,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
 
         const bomIngResult = await client.query(
           `SELECT item_code_comp, item_name_comp, cantidad, uom, es_empaque,
-                  grupo_sap
+                  grupo_sap, es_decoracion
              FROM sap_bom_componentes
              WHERE item_code_padre = $1
              AND (grupo_sap = 181 OR grupo_sap = 182)`,
@@ -1227,6 +1235,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
               cantidad_kilos: cantidadTotal,
               uom:            ing.uom,
               es_empaque:     ing.es_empaque,
+              es_decoracion:  ing.es_decoracion || false,
             };
           }
         }
@@ -1243,8 +1252,8 @@ const sincronizarDesdeOV = async (req, res, next) => {
              masa_id, ingrediente_sap_code, ingrediente_nombre,
              orden_visualizacion, porcentaje_panadero,
              cantidad_gramos, cantidad_kilos, uom,
-             es_harina, es_agua, es_prefermento, es_empaque
-           ) VALUES ($1, $2, $3, $4, 0, $5, $6, $7, false, false, false, $8)`,
+             es_harina, es_agua, es_prefermento, es_empaque, es_decoracion
+           ) VALUES ($1, $2, $3, $4, 0, $5, $6, $7, false, false, false, $8, $9)`,
           [
             masaId,
             ing.item_code_comp,
@@ -1254,6 +1263,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
             ing.cantidad_kilos,
             ing.uom || 'Kg',
             ing.es_empaque || false,
+            ing.es_decoracion || false,
           ]
         );
       }
@@ -1418,11 +1428,14 @@ const sincronizarTiposMasa = async (req, res, next) => {
     for (const tipo of tiposSAP) {
       if (!tipo.code || !tipo.name) continue;
 
+      const pesoMaxDiv = tipo.maxDiv; // NULL si Kevin no lo ha cargado aún en SAP
+
       const result = await db.query(
-        `INSERT INTO catalogo_tipos_masa (codigo_sap, tipo_masa, nombre_masa)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (codigo_sap) DO NOTHING`,
-        [tipo.code, tipo.code, tipo.name]
+        `INSERT INTO catalogo_tipos_masa (codigo_sap, tipo_masa, nombre_masa, peso_maximo_division)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (codigo_sap) DO UPDATE SET
+           peso_maximo_division = EXCLUDED.peso_maximo_division`,
+        [tipo.code, tipo.code, tipo.name, pesoMaxDiv]
       );
 
       if (result.rowCount > 0) {
@@ -1499,14 +1512,16 @@ const sincronizarBOM = async (req, res, next) => {
         // 2. Upsert en sap_articulos
         await db.query(
           `INSERT INTO sap_articulos
-             (item_code, item_name, tipo_masa, sales_qty_per_pack, gramaje, multiplo_divisor, activo, synced_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+             (item_code, item_name, tipo_masa, sales_qty_per_pack, gramaje, multiplo_divisor, tamanio, forma, activo, synced_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
            ON CONFLICT (item_code) DO UPDATE SET
              item_name          = EXCLUDED.item_name,
              tipo_masa          = EXCLUDED.tipo_masa,
              sales_qty_per_pack = EXCLUDED.sales_qty_per_pack,
              gramaje            = EXCLUDED.gramaje,
              multiplo_divisor   = EXCLUDED.multiplo_divisor,
+             tamanio            = EXCLUDED.tamanio,
+             forma              = EXCLUDED.forma,
              activo             = true,
              synced_at          = CURRENT_TIMESTAMP,
              updated_at         = CURRENT_TIMESTAMP`,
@@ -1517,6 +1532,8 @@ const sincronizarBOM = async (req, res, next) => {
             articulo.salesQtyPerPack,
             articulo.gramaje,
             articulo.multiploDivisor || 0,
+            articulo.tamanio,
+            articulo.forma,
           ]
         );
         articulosUpserted++;
@@ -1549,16 +1566,16 @@ const sincronizarBOM = async (req, res, next) => {
 
         // 5. Upsert de cada componente con uom y grupo_sap
         for (const line of bomLines) {
-          const uomInfo  = uomMap[line.ItemCode] || { uom: null, grupoSap: null };
+          const uomInfo  = uomMap[line.ItemCode] || { uom: null, grupoSap: null, esDecoracion: false };
           const esEmpaque = uomInfo.grupoSap === 182;
 
           await db.query(
             `INSERT INTO sap_bom_componentes
                (item_code_padre, item_code_comp, item_name_comp,
                 cantidad, warehouse, issue_method, visual_order,
-                uom, grupo_sap, es_empaque,
+                uom, grupo_sap, es_empaque, es_decoracion,
                 synced_at)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,CURRENT_TIMESTAMP)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,CURRENT_TIMESTAMP)
              ON CONFLICT (item_code_padre, item_code_comp) DO UPDATE SET
                item_name_comp = EXCLUDED.item_name_comp,
                cantidad       = EXCLUDED.cantidad,
@@ -1568,6 +1585,7 @@ const sincronizarBOM = async (req, res, next) => {
                uom            = EXCLUDED.uom,
                grupo_sap      = EXCLUDED.grupo_sap,
                es_empaque     = EXCLUDED.es_empaque,
+               es_decoracion  = EXCLUDED.es_decoracion,
                synced_at      = CURRENT_TIMESTAMP`,
             [
               articulo.itemCode,
@@ -1580,6 +1598,7 @@ const sincronizarBOM = async (req, res, next) => {
               uomInfo.uom,
               uomInfo.grupoSap,
               esEmpaque,
+              uomInfo.esDecoracion,
             ]
           );
         }

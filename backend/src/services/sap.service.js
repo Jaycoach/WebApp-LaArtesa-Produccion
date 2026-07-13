@@ -8,6 +8,18 @@ const https = require('https');
 const logger = require('../utils/logger');
 const config = require('../config');
 
+// Fallback: infiere tamaño/forma desde el nombre del producto cuando el UDF viene null en SAP.
+// Mismo patrón que el fallback de unidades_por_paquete (regex sobre el nombre).
+const TAMANIOS_CONOCIDOS = ['GRANDE', 'MEDIANO', 'MEDIANA', 'PEQUEÑO', 'PEQUEÑA', 'JUNIOR', 'JR'];
+const FORMAS_CONOCIDAS = ['CUADRADO', 'CUADRADA', 'REDONDO', 'REDONDA', 'TRIANGULAR', 'RECTANGULAR', 'OVALADO', 'ALARGADO'];
+
+function inferirTamanioForma(itemName) {
+  const nombre = (itemName || '').toUpperCase();
+  const tamanio = TAMANIOS_CONOCIDOS.find(t => nombre.includes(t)) || null;
+  const forma = FORMAS_CONOCIDAS.find(f => nombre.includes(f)) || null;
+  return { tamanio, forma };
+}
+
 class SAPService {
   constructor() {
     this.baseURL = config.sap.url;
@@ -381,7 +393,7 @@ class SAPService {
       const response = await this.client.get('/Items', {
         params: {
           $filter: filterParts,
-          $select: 'ItemCode,ItemName,SalesQtyPerPackUnit,U_JZ_Tipos_Masa,SalesUnitWeight1,U_JZ_MultiploDivisor,Valid,Frozen',
+          $select: 'ItemCode,ItemName,SalesQtyPerPackUnit,U_JZ_Tipos_Masa,SalesUnitWeight1,U_JZ_MultiploDivisor,U_JZ_Tamanio,U_JZ_Forma,Valid,Frozen',
           $top: BATCH,
         },
       });
@@ -391,12 +403,15 @@ class SAPService {
           logger.warn(`SAP OV: artículo inactivo/congelado omitido: ${item.ItemCode} (Valid=${item.Valid}, Frozen=${item.Frozen})`);
           continue;
         }
+        const fallbackAtributos = inferirTamanioForma(item.ItemName);
         resultado[item.ItemCode] = {
           itemName:            item.ItemName,
           salesQtyPerPackUnit: item.SalesQtyPerPackUnit || 1,
           tipoMasa:            item.U_JZ_Tipos_Masa || 'SIN_CLASIFICAR',
           gramaje:             item.SalesUnitWeight1 || 0,
           multiploDivisor:     item.U_JZ_MultiploDivisor != null ? Math.round(item.U_JZ_MultiploDivisor) : 0,
+          tamanio:             item.U_JZ_Tamanio || fallbackAtributos.tamanio,
+          forma:               item.U_JZ_Forma || fallbackAtributos.forma,
         };
       }
     }
@@ -463,6 +478,8 @@ class SAPService {
         gramaje,
         kilosPedidos,
         multiploDivisor: art.multiploDivisor || 0,
+        tamanio: art.tamanio || null,
+        forma: art.forma || null,
       };
     });
 
@@ -502,7 +519,12 @@ class SAPService {
     }
 
     logger.info(`SAP: ${todos.length} tipos de masa obtenidos de U_JZ_TIPOMASA`);
-    return todos.map(item => ({ code: item.Code, name: item.Name }));
+    return todos.map(item => ({
+      code: item.Code,
+      name: item.Name,
+      // TOSCANO mantiene fallback de 130kg si el UDF viene null; el resto cae a 90kg (ver fases.controller.js)
+      maxDiv: item.U_JZ_MaxDiv != null ? Number(item.U_JZ_MaxDiv) : null,
+    }));
   }
 
   // ─── BOM ──────────────────────────────────────────────────────────
@@ -522,7 +544,7 @@ class SAPService {
       const response = await this.client.get('/Items', {
         params: {
           $filter: "U_JZ_Tipos_Masa ne null and U_JZ_Tipos_Masa ne '' and Valid eq 'tYES' and Frozen eq 'tNO'",
-          $select: 'ItemCode,ItemName,U_JZ_Tipos_Masa,SalesQtyPerPackUnit,SalesUnitWeight1,U_JZ_MultiploDivisor,Valid,Frozen',
+          $select: 'ItemCode,ItemName,U_JZ_Tipos_Masa,SalesQtyPerPackUnit,SalesUnitWeight1,U_JZ_MultiploDivisor,U_JZ_Tamanio,U_JZ_Forma,Valid,Frozen',
           $top: top,
           $skip: skip,
         },
@@ -536,14 +558,19 @@ class SAPService {
 
     logger.info(`SAP BOM: ${todos.length} artículos con tipo de masa encontrados`);
 
-    return todos.map(item => ({
-      itemCode:        item.ItemCode,
-      itemName:        item.ItemName,
-      tipoMasa:        item.U_JZ_Tipos_Masa,
-      salesQtyPerPack: item.SalesQtyPerPackUnit || 1,
-      gramaje:         item.SalesUnitWeight1 || 0,
-      multiploDivisor: item.U_JZ_MultiploDivisor != null ? Math.round(item.U_JZ_MultiploDivisor) : 0,
-    }));
+    return todos.map(item => {
+      const fallbackAtributos = inferirTamanioForma(item.ItemName);
+      return {
+        itemCode:        item.ItemCode,
+        itemName:        item.ItemName,
+        tipoMasa:        item.U_JZ_Tipos_Masa,
+        salesQtyPerPack: item.SalesQtyPerPackUnit || 1,
+        gramaje:         item.SalesUnitWeight1 || 0,
+        multiploDivisor: item.U_JZ_MultiploDivisor != null ? Math.round(item.U_JZ_MultiploDivisor) : 0,
+        tamanio:         item.U_JZ_Tamanio || fallbackAtributos.tamanio,
+        forma:           item.U_JZ_Forma || fallbackAtributos.forma,
+      };
+    });
   }
 
   /**
@@ -599,16 +626,17 @@ class SAPService {
       for (const itemCode of lote) {
         try {
           const response = await this.client.get(
-            `/Items('${itemCode}')?$select=ItemCode,InventoryUOM,ItemsGroupCode`
+            `/Items('${itemCode}')?$select=ItemCode,InventoryUOM,ItemsGroupCode,U_JZ_Decoracion`
           );
           resultado[itemCode] = {
-            uom:      response.data.InventoryUOM || null,
-            grupoSap: response.data.ItemsGroupCode || null,
+            uom:          response.data.InventoryUOM || null,
+            grupoSap:     response.data.ItemsGroupCode || null,
+            esDecoracion: String(response.data.U_JZ_Decoracion || '').trim().toUpperCase() === 'SI',
           };
         } catch (error) {
           // Si el artículo no existe en SAP, lo marcamos sin uom
           logger.warn(`getItemsUoM: no se encontró ${itemCode} en SAP`);
-          resultado[itemCode] = { uom: null, grupoSap: null };
+          resultado[itemCode] = { uom: null, grupoSap: null, esDecoracion: false };
         }
       }
     }
