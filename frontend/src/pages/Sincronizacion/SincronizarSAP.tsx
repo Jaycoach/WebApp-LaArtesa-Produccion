@@ -172,7 +172,7 @@ export const SincronizarSAP: React.FC = () => {
             <br />
             <span className="text-amber-700 font-medium">
               Ejecútalo cada mañana, después del paso 1, antes de empezar a producir.
-              Puede tardar entre 10 y 15 minutos — no cierres esta pestaña mientras corre.
+              Tarda un par de minutos — no cierres esta pestaña mientras corre.
             </span>
           </p>
 
