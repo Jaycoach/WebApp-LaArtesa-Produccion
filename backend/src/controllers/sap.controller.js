@@ -1655,6 +1655,38 @@ const sincronizarBOM = async (req, res, next) => {
         logger.info(`BOM sync: ${inactivadosResult.rowCount} artículos marcados inactivos (ya no están en SAP)`);
     }
 
+    // 5b. Propagar es_decoracion recién sincronizado a masas en PESAJE activo.
+    //     Solo masas que aún no confirmaron ese ingrediente (pesado != true) — nunca
+    //     se toca histórico ya pesado/confirmado. Aplica también hacia futuro porque
+    //     cada sync de BOM vuelve a correr esta cascada.
+    let ingredientesActualizados = 0;
+    try {
+      const cascadaResult = await db.query(
+        `UPDATE ingredientes_masa im
+         SET es_decoracion = sub.es_decoracion,
+             updated_at = NOW()
+         FROM (
+           SELECT item_code_comp, bool_or(es_decoracion) AS es_decoracion
+           FROM sap_bom_componentes
+           GROUP BY item_code_comp
+         ) sub, masas_produccion mp
+         WHERE im.masa_id = mp.id
+           AND im.ingrediente_sap_code = sub.item_code_comp
+           AND mp.fase_actual = 'PESAJE'
+           AND mp.estado NOT IN ('CANCELADA')
+           AND im.pesado IS DISTINCT FROM true
+           AND im.es_decoracion IS DISTINCT FROM sub.es_decoracion`
+      );
+      ingredientesActualizados = cascadaResult.rowCount;
+      if (ingredientesActualizados > 0) {
+        logger.info(`BOM sync: es_decoracion actualizado en ${ingredientesActualizados} ingrediente(s) de masas activas en PESAJE`);
+      }
+    } catch (cascadaErr) {
+      // No crítico: si falla, el catálogo (sap_bom_componentes) igual quedó correcto
+      // y aplicará a las próximas masas que se consoliden.
+      logger.warn(`BOM sync: cascada a ingredientes_masa falló (no crítico): ${cascadaErr.message}`);
+    }
+
     // 6. Registrar en log de sincronización
     await db.query(
       `INSERT INTO sap_sync_log (tipo_operacion, estado, request_payload, response_payload)
@@ -1666,11 +1698,12 @@ const sincronizarBOM = async (req, res, next) => {
           bom_sincronizados:    bomSincronizados,
           sin_bom:              sinBOM,
           errores:              errores.length,
+          ingredientes_actualizados: ingredientesActualizados,
         }),
       ]
     );
 
-    logger.info(`Sync BOM completada: ${articulosUpserted} artículos, ${bomSincronizados} con BOM, ${sinBOM} sin BOM`);
+    logger.info(`Sync BOM completada: ${articulosUpserted} artículos, ${bomSincronizados} con BOM, ${sinBOM} sin BOM, ${ingredientesActualizados} ingredientes actualizados en masas activas`);
 
     return res.json({
       success: true,
@@ -1679,6 +1712,7 @@ const sincronizarBOM = async (req, res, next) => {
         articulos_procesados: articulosUpserted,
         bom_sincronizados:    bomSincronizados,
         sin_bom:              sinBOM,
+        ingredientes_actualizados: ingredientesActualizados,
         errores:              errores.length > 0 ? errores : undefined,
       },
     });
