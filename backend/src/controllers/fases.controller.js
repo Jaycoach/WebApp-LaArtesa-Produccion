@@ -274,10 +274,8 @@ async function distribuirEmpaque(empaques, subMasaIds, qr = db) {
 
 /**
  * Clave de agrupación de un producto para el empaquetado por tandas.
- * Con tamaño+forma resueltos (SAP o fallback por nombre) → agrupa por esa
- * combinación. Sin ambos atributos → cae en el grupo base del tipo_masa
- * (no es una categoría aparte, es el mismo criterio que existía antes de
- * tener tamaño/forma: todo lo no diferenciado va junto).
+ * Jerárquico: tipo_masa → +forma → +tamaño (cada nivel exige el anterior).
+ * SAP o fallback por nombre resuelven tamaño/forma indistintamente.
  */
 function clasificarClaveAgrupacion(producto, tipoMasa) {
   let tamanio = producto.tamanio || null;
@@ -300,8 +298,19 @@ function clasificarClaveAgrupacion(producto, tipoMasa) {
     else if (/\bALARGAD[OA]\b/.test(nombre))  forma = 'ALARGADO';
   }
 
-  if (!tamanio || !forma) return `TIPOMASA:${tipoMasa}`;
-  return `${tamanio}|${forma}`;
+  // Jerárquico, de lo general a lo específico: tipo_masa es la base siempre.
+  // forma refina dentro del tipo_masa. tamaño solo refina más si YA hay forma
+  // (no existe el nivel "tipo_masa + tamaño" sin forma) — un tamaño sin forma
+  // conocida no es suficiente para separar el grupo, se queda en el nivel de
+  // tipo_masa hasta que se sepa también la forma.
+  let clave = `TIPOMASA:${tipoMasa}`;
+  if (forma) {
+    clave += `|FORMA:${forma}`;
+    if (tamanio) {
+      clave += `|TAM:${tamanio}`;
+    }
+  }
+  return clave;
 }
 
 /**
