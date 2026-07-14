@@ -54,7 +54,9 @@ const getMasasByFecha = async (fecha, fase = null) => {
 
   if (fase) {
     params.push(fase.toUpperCase());
-    whereExtra = `AND m.fase_actual = $2`;
+    // La masa madre SUBDIVIDIDA solo se excluye cuando se filtra por fase
+    // (Pesaje, Amasado, etc.) — en Planificación (fase=null) sí debe verse.
+    whereExtra = `AND m.fase_actual = $2 AND m.estado != 'SUBDIVIDIDA'`;
   }
 
   const result = await db.query(`
@@ -77,7 +79,6 @@ const getMasasByFecha = async (fecha, fase = null) => {
     FROM masas_produccion m
     LEFT JOIN productos_por_masa pm ON m.id = pm.masa_id
     WHERE m.fecha_produccion = $1
-      AND m.estado != 'SUBDIVIDIDA'
     ${whereExtra}
     GROUP BY m.id
     ORDER BY m.tipo_masa
