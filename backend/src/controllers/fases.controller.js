@@ -441,8 +441,9 @@ async function insertarProductoEnMasa(masaId, prod, unidadesProg, unidadesPedida
       (masa_id, producto_codigo, producto_nombre, presentacion, gramaje_unitario,
        unidades_pedidas, unidades_programadas, unidades_producidas,
        kilos_pedidos, kilos_programados, kilos_producidos,
-       sap_item_code, unidades_por_paquete, cantidad_paquetes, delta_ajuste)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,0,$8,$9,0,$10,$11,$12,$13)
+       sap_item_code, unidades_por_paquete, cantidad_paquetes, delta_ajuste,
+       tamanio, forma)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,0,$8,$9,0,$10,$11,$12,$13,$14,$15)
   `, [
     masaId,
     prod.producto_codigo,
@@ -457,6 +458,8 @@ async function insertarProductoEnMasa(masaId, prod, unidadesProg, unidadesPedida
     upq,
     cantPaquetes,
     unidadesProg > unidadesPedidas ? unidadesProg - unidadesPedidas : 0,
+    prod.tamanio || null,
+    prod.forma || null,
   ]);
 }
 
