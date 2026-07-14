@@ -1501,28 +1501,57 @@ const sincronizarTiposMasa = async (req, res, next) => {
  */
 const sincronizarBOM = async (req, res, next) => {
   try {
-    logger.info('Iniciando sincronización de BOM desde SAP...');
+    // Filtro puntual opcional: { "items": "MP0029,MP0080" } sincroniza solo esos
+    // artículos con TODOS los atributos (tamaño, forma, decoración, tipo de masa),
+    // no solo lotes/inventario como hacía antes sincronizar-lotes-item.
+    const itemsParam = req.body?.items;
+    const itemCodesFiltro = itemsParam
+      ? (Array.isArray(itemsParam) ? itemsParam : itemsParam.split(','))
+          .map(c => String(c).trim().toUpperCase())
+          .filter(c => c.length > 0)
+      : null;
+    const esSyncPuntual = !!(itemCodesFiltro && itemCodesFiltro.length > 0);
+
+    logger.info(
+      esSyncPuntual
+        ? `Iniciando sincronización puntual de BOM para: ${itemCodesFiltro.join(', ')}`
+        : 'Iniciando sincronización de BOM desde SAP...'
+    );
 
     // 0. Sincronizar tipos de masa primero (peso_maximo_division) — no crítico,
     //    si falla no debe tumbar el resto de la sincronización de BOM.
-    try {
-      const tiposMasaResult = await syncTiposMasaCore();
-      logger.info(`Tipos de masa (dentro de BOM sync): ${tiposMasaResult.insertados} nuevos, ${tiposMasaResult.yaExistian} actualizados/ya existían`);
-    } catch (tiposMasaErr) {
-      logger.warn(`Sincronización de tipos de masa falló dentro de BOM sync (no crítico): ${tiposMasaErr.message}`);
+    //    Se omite en sync puntual: no aplica a un ítem específico.
+    if (!esSyncPuntual) {
+      try {
+        const tiposMasaResult = await syncTiposMasaCore();
+        logger.info(`Tipos de masa (dentro de BOM sync): ${tiposMasaResult.insertados} nuevos, ${tiposMasaResult.yaExistian} actualizados/ya existían`);
+      } catch (tiposMasaErr) {
+        logger.warn(`Sincronización de tipos de masa falló dentro de BOM sync (no crítico): ${tiposMasaErr.message}`);
+      }
     }
 
-    // 1. Traer todos los artículos con tipo de masa desde SAP
+    // 1. Traer artículos con tipo de masa desde SAP (todos, o solo el filtro puntual)
     const usarHana = process.env.SAP_READ_MODE === 'hana';
-    const articulos = usarHana
-      ? await sapService.getArticulosConTipoMasaConBOMHANA()
+    let articulos = usarHana
+      ? await sapService.getArticulosConTipoMasaConBOMHANA(itemCodesFiltro)
       : await sapService.getArticulosConTipoMasa();
+
+    if (!usarHana && esSyncPuntual) {
+      // Service Layer no soporta filtro nativo aquí: se filtra en memoria tras traer todo.
+      articulos = articulos.filter(a => itemCodesFiltro.includes(String(a.itemCode).toUpperCase()));
+    }
+
+    const itemCodesNoEncontrados = esSyncPuntual
+      ? itemCodesFiltro.filter(c => !articulos.some(a => String(a.itemCode).toUpperCase() === c))
+      : [];
 
     if (articulos.length === 0) {
       return res.json({
         success: true,
-        message: 'SAP no retornó artículos con tipo de masa configurado',
-        data: { articulos_procesados: 0, bom_sincronizados: 0, sin_bom: 0 },
+        message: esSyncPuntual
+          ? 'Ninguno de los códigos indicados tiene tipo de masa configurado en SAP'
+          : 'SAP no retornó artículos con tipo de masa configurado',
+        data: { articulos_procesados: 0, bom_sincronizados: 0, sin_bom: 0, item_codes_no_encontrados: itemCodesNoEncontrados },
       });
     }
 
@@ -1643,16 +1672,19 @@ const sincronizarBOM = async (req, res, next) => {
       }
     }
 
-    // Marcar como inactivos los artículos que ya no vienen de SAP (cancelados/eliminados)
-    const itemCodesActivos = articulos.map(a => a.itemCode);
-    if (itemCodesActivos.length > 0) {
-      const inactivadosResult = await db.query(
-        `UPDATE sap_articulos SET activo = false, updated_at = CURRENT_TIMESTAMP
-         WHERE item_code != ALL($1::varchar[]) AND activo = true`,
-        [itemCodesActivos]
-      );
-      if (inactivadosResult.rowCount > 0)
-        logger.info(`BOM sync: ${inactivadosResult.rowCount} artículos marcados inactivos (ya no están en SAP)`);
+    // Marcar como inactivos los artículos que ya no vienen de SAP — solo aplica
+    // a la corrida completa; en sync puntual no se puede saber qué más existe en SAP.
+    if (!esSyncPuntual) {
+      const itemCodesActivos = articulos.map(a => a.itemCode);
+      if (itemCodesActivos.length > 0) {
+        const inactivadosResult = await db.query(
+          `UPDATE sap_articulos SET activo = false, updated_at = CURRENT_TIMESTAMP
+           WHERE item_code != ALL($1::varchar[]) AND activo = true`,
+          [itemCodesActivos]
+        );
+        if (inactivadosResult.rowCount > 0)
+          logger.info(`BOM sync: ${inactivadosResult.rowCount} artículos marcados inactivos (ya no están en SAP)`);
+      }
     }
 
     // 5b. Propagar es_decoracion recién sincronizado a masas en PESAJE activo.
@@ -1699,20 +1731,24 @@ const sincronizarBOM = async (req, res, next) => {
           sin_bom:              sinBOM,
           errores:              errores.length,
           ingredientes_actualizados: ingredientesActualizados,
+          sync_puntual:         esSyncPuntual,
         }),
       ]
     );
 
-    logger.info(`Sync BOM completada: ${articulosUpserted} artículos, ${bomSincronizados} con BOM, ${sinBOM} sin BOM, ${ingredientesActualizados} ingredientes actualizados en masas activas`);
+    logger.info(`Sync BOM completada${esSyncPuntual ? ' (puntual)' : ''}: ${articulosUpserted} artículos, ${bomSincronizados} con BOM, ${sinBOM} sin BOM, ${ingredientesActualizados} ingredientes actualizados en masas activas`);
 
     return res.json({
       success: true,
-      message: `BOM sincronizado: ${bomSincronizados} artículos con lista de materiales`,
+      message: esSyncPuntual
+        ? `Sincronización puntual completada: ${bomSincronizados} de ${itemCodesFiltro.length} código(s)`
+        : `BOM sincronizado: ${bomSincronizados} artículos con lista de materiales`,
       data: {
         articulos_procesados: articulosUpserted,
         bom_sincronizados:    bomSincronizados,
         sin_bom:              sinBOM,
         ingredientes_actualizados: ingredientesActualizados,
+        item_codes_no_encontrados: itemCodesNoEncontrados,
         errores:              errores.length > 0 ? errores : undefined,
       },
     });

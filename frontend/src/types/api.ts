@@ -207,6 +207,7 @@ export interface SincronizacionBOMResponse {
   bom_sincronizados: number;
   sin_bom: number;
   errores?: Array<{ itemCode: string; error: string }>;
+  item_codes_no_encontrados?: string[];
 }
 
 export interface SincronizacionInventarioMPResponse {

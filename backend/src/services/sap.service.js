@@ -901,13 +901,17 @@ class SAPService {
    * directo de HANA vía script Python. Reemplaza getArticulosConTipoMasa() + getBOM() +
    * getItemsUoM() (Service Layer, secuencial por artículo) por una sola consulta consolidada.
    */
-  async getArticulosConTipoMasaConBOMHANA() {
+  async getArticulosConTipoMasaConBOMHANA(itemCodesFiltro = null) {
     const { execFile } = require('child_process');
     const path = require('path');
 
     return new Promise((resolve, reject) => {
       const scriptPath = path.join(__dirname, '../../scripts/hana_bom_completo.py');
-      execFile('python3', [scriptPath], {
+      const args = [scriptPath];
+      if (itemCodesFiltro && itemCodesFiltro.length > 0) {
+        args.push(itemCodesFiltro.join(','));
+      }
+      execFile('python3', args, {
         timeout: 30000,
         maxBuffer: 1024 * 1024 * 20, // 20MB — el dataset completo puede ser grande
         env: process.env,

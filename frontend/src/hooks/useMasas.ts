@@ -91,7 +91,7 @@ export const useSincronizarSAP = () => {
  */
 export const useSincronizarBOM = () => {
   return useMutation({
-    mutationFn: () => masasService.sincronizarBOM(),
+    mutationFn: (items?: string) => masasService.sincronizarBOM(items),
     onError: (error: any) => {
       return {
         success: false,

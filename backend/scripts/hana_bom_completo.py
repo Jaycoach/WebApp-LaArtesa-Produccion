@@ -23,6 +23,13 @@ def main():
         print(json.dumps({"error": "HANA_SCHEMA no configurado"}), file=sys.stderr)
         sys.exit(1)
 
+    # Filtro opcional: python3 hana_bom_completo.py MP0029,MP0080
+    # Sincroniza solo esos artículos (con todos sus atributos: tamaño, forma,
+    # decoración, etc.) en vez de correr el catálogo completo.
+    item_codes_filtro = None
+    if len(sys.argv) > 1 and sys.argv[1].strip():
+        item_codes_filtro = [c.strip().upper() for c in sys.argv[1].split(',') if c.strip()]
+
     try:
         conn = dbapi.connect(
             address=os.environ['HANA_HOST'],
@@ -33,6 +40,14 @@ def main():
             sslValidateCertificate=False,
         )
         cursor = conn.cursor()
+
+        filtro_sql = ''
+        params = []
+        if item_codes_filtro:
+            placeholders = ', '.join(['?'] * len(item_codes_filtro))
+            filtro_sql = f' AND P."ItemCode" IN ({placeholders})'
+            params = item_codes_filtro
+
         cursor.execute(f'''
             SELECT
               P."ItemCode", P."ItemName", P."U_JZ_Tipos_Masa",
@@ -46,7 +61,8 @@ def main():
             LEFT JOIN "{schema}"."OITM" C ON C."ItemCode" = L."Code"
             WHERE P."U_JZ_Tipos_Masa" IS NOT NULL AND P."U_JZ_Tipos_Masa" <> ''
               AND P."validFor" = 'Y' AND P."frozenFor" = 'N'
-        ''')
+              {filtro_sql}
+        ''', params)
 
         articulos = {}
         for row in cursor.fetchall():
