@@ -969,12 +969,20 @@ class SAPService {
             logger.error(`HANA OV sync: error reportado por script: ${parsed.error}`);
             return reject(new Error(`Fallo en sincronización OV vía HANA: ${parsed.error}`));
           }
-          const resumen = parsed.reduce((acc, p) => {
+          const conAtributos = parsed.map(p => {
+            const fallback = inferirTamanioForma(p.descripcion || '');
+            return {
+              ...p,
+              tamanio: p.tamanio || fallback.tamanio,
+              forma: p.forma || fallback.forma,
+            };
+          });
+          const resumen = conAtributos.reduce((acc, p) => {
             acc[p.tipoMasa] = (acc[p.tipoMasa] || 0) + p.cantidadPaquetes;
             return acc;
           }, {});
-          logger.info(`HANA OV sync: ${parsed.length} líneas obtenidas para ${fecha} - Resumen por masa:`, resumen);
-          resolve(parsed);
+          logger.info(`HANA OV sync: ${conAtributos.length} líneas obtenidas para ${fecha} - Resumen por masa:`, resumen);
+          resolve(conAtributos);
         } catch (parseErr) {
           logger.error(`HANA OV sync: respuesta no parseable: ${parseErr.message}. stdout: ${stdout}`);
           reject(new Error(`Fallo en sincronización OV vía HANA: respuesta no parseable`));
