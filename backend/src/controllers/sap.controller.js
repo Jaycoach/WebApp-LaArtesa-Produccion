@@ -880,6 +880,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
            AND es_subdivision = false
            AND es_adicional = false
            AND masa_padre_id IS NULL
+           AND estado != 'CANCELADA'
          ORDER BY id DESC
          LIMIT 1`,
         [fechaProduccion, tipoMasa, esRepeticionGrupo]
@@ -1087,6 +1088,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
                AND es_subdivision = false
                AND es_adicional = false
                AND masa_padre_id IS NULL
+               AND estado != 'CANCELADA'
              ORDER BY id DESC LIMIT 1`,
             [fechaProduccion, tipoMasa, esRepeticionGrupo]
           );
