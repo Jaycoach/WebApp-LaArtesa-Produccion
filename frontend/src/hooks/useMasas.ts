@@ -225,8 +225,8 @@ export const useMarcarPendiente = () => {
 export const useCancelarMasa = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ masaId, motivo }: { masaId: number; motivo: string }) =>
-      masasService.cancelarMasa(masaId, motivo),
+    mutationFn: ({ masaId, motivo, confirmarParcial }: { masaId: number; motivo: string; confirmarParcial?: boolean }) =>
+      masasService.cancelarMasa(masaId, motivo, confirmarParcial),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: MASAS_QUERY_KEYS.all });
     },

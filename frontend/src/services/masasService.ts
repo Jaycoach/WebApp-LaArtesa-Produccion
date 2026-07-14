@@ -137,8 +137,11 @@ export const masasService = {
     return response.data!;
   },
 
-  cancelarMasa: async (masaId: number, motivo: string): Promise<any> => {
-    const response = await apiService.patch<any>(`/masas/${masaId}/cancelar`, { motivo });
+  cancelarMasa: async (masaId: number, motivo: string, confirmarParcial?: boolean): Promise<any> => {
+    const response = await apiService.patch<any>(`/masas/${masaId}/cancelar`, {
+      motivo,
+      ...(confirmarParcial ? { confirmar_parcial: true } : {}),
+    });
     return response.data!;
   },
 };
