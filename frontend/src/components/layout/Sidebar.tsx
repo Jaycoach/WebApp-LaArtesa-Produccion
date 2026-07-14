@@ -2,6 +2,7 @@ import React from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { useAuthStore } from '@/store';
+import { useMasaDetail } from '@/hooks/useMasas';
 
 interface NavItem {
   name: string;
@@ -76,15 +77,27 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
     }
   }, [params.masaId]);
 
-  const handleNavClick = (targetPath?: string) => {
+  // Consulta la masa activa para saber en qué fase está REALMENTE hoy.
+  // Solo se activa si ya hay una masa en contexto (nunca inserta contexto por sí sola).
+  const { data: masaActivaData } = useMasaDetail(masaActiva ? Number(masaActiva) : 0);
+  const faseVigenteMasaActiva = masaActivaData?.fase_actual?.toUpperCase() || null;
+  const masaActivaVigente =
+    !!masaActiva &&
+    !!masaActivaData &&
+    !['SUBDIVIDIDA', 'CANCELADA', 'COMPLETADA'].includes(masaActivaData.estado);
+
+  const handleNavClick = (targetPath?: string, esFaseVigente?: boolean) => {
     if (onClose) onClose();
-    if (targetPath === '/planificacion') {
+    if (targetPath === '/planificacion' || esFaseVigente === false) {
       sessionStorage.removeItem('artesa_masa_activa');
     }
   };
 
+  const esVigenteEnFase = (key: string): boolean =>
+    masaActivaVigente && faseVigenteMasaActiva === key.toUpperCase();
+
   const getFaseLink = (key: string, defaultPath: string): string => {
-    if (!masaActiva) return defaultPath;
+    if (!esVigenteEnFase(key)) return defaultPath;
     const rutas: Record<string, string> = {
       pesaje:       `/pesaje/${masaActiva}`,
       amasado:      `/amasado/${masaActiva}`,
@@ -176,14 +189,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
             { key: 'horneado',     label: 'Horneado',     color: 'bg-red-500',    path: '/fase/horneado'     },
             { key: 'empaque',      label: 'Empaque',      color: 'bg-amber-500',  path: '/empaque'           },
           ].map(({ key, label, color, path }) => {
+            const vigente = esVigenteEnFase(key);
             const resolvedPath = getFaseLink(key, path);
             const isActive = location.pathname.startsWith(path) ||
-              (masaActiva !== null && location.pathname === resolvedPath);
+              (vigente && location.pathname === resolvedPath);
             return (
               <li key={key}>
                 <Link
                   to={resolvedPath}
-                  onClick={() => handleNavClick(resolvedPath)}
+                  onClick={() => handleNavClick(resolvedPath, vigente)}
                   className={clsx(
                     'flex items-center gap-3 px-4 py-2 text-sm rounded-lg transition-colors',
                     isActive
@@ -193,7 +207,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
                 >
                   <span className={`w-2 h-2 rounded-full ${color} shrink-0`} />
                   <span className="flex-1">{label}</span>
-                  {masaActiva && key !== 'empaque' && (
+                  {vigente && key !== 'empaque' && (
                     <span className="text-xs text-gray-400 font-mono">#{masaActiva}</span>
                   )}
                 </Link>

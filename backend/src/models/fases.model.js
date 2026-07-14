@@ -77,6 +77,7 @@ const getMasasByFecha = async (fecha, fase = null) => {
     FROM masas_produccion m
     LEFT JOIN productos_por_masa pm ON m.id = pm.masa_id
     WHERE m.fecha_produccion = $1
+      AND m.estado != 'SUBDIVIDIDA'
     ${whereExtra}
     GROUP BY m.id
     ORDER BY m.tipo_masa
