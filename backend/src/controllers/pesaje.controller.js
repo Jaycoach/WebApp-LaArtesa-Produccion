@@ -170,10 +170,14 @@ const getChecklist = async (req, res, next) => {
     const progresoFases = await fasesModel.getProgresoFases(masaId);
     const fasePesaje    = progresoFases.find(f => f.fase === 'PESAJE');
 
-    const total          = ingredientes.length;
-    const disponibles    = ingredientes.filter(i => i.disponible).length;
-    const verificados    = ingredientes.filter(i => i.verificado).length;
-    const pesados        = ingredientes.filter(i => i.pesado).length;
+    // Decoración no exige los 3 checks manuales — se excluye del cálculo de progreso
+    // para que la barra no quede atascada esperando algo que nunca se marca a mano.
+    const ingredientesRequierenCheck = ingredientes.filter(i => !i.es_decoracion);
+
+    const total          = ingredientesRequierenCheck.length;
+    const disponibles    = ingredientesRequierenCheck.filter(i => i.disponible).length;
+    const verificados    = ingredientesRequierenCheck.filter(i => i.verificado).length;
+    const pesados        = ingredientesRequierenCheck.filter(i => i.pesado).length;
 
     const todosDisponibles = disponibles === total;
     const todosVerificados = verificados === total;
@@ -182,7 +186,7 @@ const getChecklist = async (req, res, next) => {
 
     const progreso = total > 0
       ? Math.round(((disponibles + verificados + pesados) / (total * 3)) * 100)
-      : 0;
+      : 100;
 
     // Consultar productos con excedente por ajuste de divisor
     const productosAjusteResult = await db.query(
@@ -669,6 +673,22 @@ const confirmarPesaje = async (req, res, next) => {
         },
       });
     }
+
+    // Auto-completar ingredientes de decoración: nadie los pesa a mano, pero sí se
+    // descuentan del inventario con la cantidad teórica del BOM al confirmar pesaje.
+    await db.query(
+      `UPDATE ingredientes_masa
+       SET disponible = true,
+           verificado = true,
+           pesado = true,
+           peso_real = COALESCE(peso_real, cantidad_gramos),
+           updated_at = NOW()
+       WHERE masa_id = $1
+         AND es_decoracion = true
+         AND es_empaque = false
+         AND pesado IS DISTINCT FROM true`,
+      [masaId]
+    );
 
     // Validar stock suficiente para todos los ingredientes
     const ingResult = await db.query(

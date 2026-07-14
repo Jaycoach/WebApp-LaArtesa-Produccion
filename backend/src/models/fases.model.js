@@ -337,16 +337,18 @@ const checkTodosPesados = async (masaId) => {
   // Asegurar que masaId sea un número
   const masaIdNum = Number(masaId);
 
+  // Los ingredientes de decoración se consumen automático (Kevin, reunión: "no lo pesen,
+  // pero mándenlo en el consumo") — no exigen los 3 checks manuales del operario.
   const result = await db.query(`
     SELECT
       COUNT(*) as total,
-      SUM(CASE WHEN disponible AND verificado AND pesado THEN 1 ELSE 0 END) as completados,
+      SUM(CASE WHEN es_decoracion OR (disponible AND verificado AND pesado) THEN 1 ELSE 0 END) as completados,
       ARRAY_AGG(
         CASE
-          WHEN NOT (disponible AND verificado AND pesado)
+          WHEN NOT (es_decoracion OR (disponible AND verificado AND pesado))
           THEN ingrediente_nombre
         END
-      ) FILTER (WHERE NOT (disponible AND verificado AND pesado)) as faltantes
+      ) FILTER (WHERE NOT (es_decoracion OR (disponible AND verificado AND pesado))) as faltantes
     FROM ingredientes_masa
     WHERE masa_id = $1 AND es_empaque = false
   `, [masaIdNum]);
