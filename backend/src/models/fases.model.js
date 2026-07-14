@@ -333,6 +333,80 @@ const updateIngredienteChecklist = async (ingredienteId, data) => {
   }
 };
 
+/**
+ * Auto-completa ingredientes de decoración al confirmar pesaje: asigna lote(s)
+ * FEFO (mismo criterio que lotes_consumo_sugerido: expiration_date ASC NULLS LAST),
+ * descuenta sap_lotes_mp, y marca disponible/verificado/pesado=true con peso teórico.
+ * Si no hay stock suficiente, NO bloquea — marca pesado igual, sin lote asignado
+ * (o parcial), para que el consumo a SAP se siga enviando con lo disponible.
+ */
+const autoCompletarDecoracion = async (masaId, usuarioId) => {
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+
+    const decoResult = await client.query(
+      `SELECT id, ingrediente_sap_code, cantidad_gramos, cantidad_kilos
+       FROM ingredientes_masa
+       WHERE masa_id = $1 AND es_decoracion = true AND es_empaque = false AND pesado IS DISTINCT FROM true`,
+      [masaId]
+    );
+
+    for (const ing of decoResult.rows) {
+      const cantidadKgRequerida = parseFloat(ing.cantidad_kilos) || (parseFloat(ing.cantidad_gramos) / 1000) || 0;
+      let loteAsignado = null;
+
+      if (ing.ingrediente_sap_code && cantidadKgRequerida > 0) {
+        const lotesResult = await client.query(
+          `SELECT batch, cantidad_disponible FROM sap_lotes_mp
+           WHERE item_code = $1 AND cantidad_disponible > 0
+           ORDER BY expiration_date ASC NULLS LAST, admission_date ASC NULLS LAST
+           FOR UPDATE`,
+          [ing.ingrediente_sap_code]
+        );
+
+        let restante = cantidadKgRequerida;
+        for (const lote of lotesResult.rows) {
+          if (restante <= 0) break;
+          const disponibleLote = parseFloat(lote.cantidad_disponible);
+          const aTomar = Math.min(disponibleLote, restante);
+          if (aTomar <= 0) continue;
+
+          await client.query(
+            `UPDATE sap_lotes_mp SET cantidad_disponible = cantidad_disponible - $1, ultimo_sync = NOW()
+             WHERE item_code = $2 AND batch = $3`,
+            [aTomar, ing.ingrediente_sap_code, lote.batch]
+          );
+          await client.query(
+            `INSERT INTO pesaje_lotes_consumo (ingrediente_id, masa_id, item_code, batch, cantidad_kg, usuario_id)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [ing.id, masaId, ing.ingrediente_sap_code, lote.batch, aTomar, usuarioId]
+          );
+          if (!loteAsignado) loteAsignado = lote.batch;
+          restante -= aTomar;
+        }
+      }
+
+      await client.query(
+        `UPDATE ingredientes_masa
+         SET disponible = true, verificado = true, pesado = true,
+             peso_real = COALESCE(peso_real, cantidad_gramos),
+             lote = COALESCE($2, lote),
+             updated_at = NOW()
+         WHERE id = $1`,
+        [ing.id, loteAsignado]
+      );
+    }
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 const checkTodosPesados = async (masaId) => {
   // Asegurar que masaId sea un número
   const masaIdNum = Number(masaId);
@@ -541,6 +615,7 @@ module.exports = {
   // Ingredientes
   getIngredientesByMasa,
   updateIngredienteChecklist,
+  autoCompletarDecoracion,
   checkTodosPesados,
   // Progreso
   getProgresoFases,

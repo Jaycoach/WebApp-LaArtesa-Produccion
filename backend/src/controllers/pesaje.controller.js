@@ -675,20 +675,8 @@ const confirmarPesaje = async (req, res, next) => {
     }
 
     // Auto-completar ingredientes de decoración: nadie los pesa a mano, pero sí se
-    // descuentan del inventario con la cantidad teórica del BOM al confirmar pesaje.
-    await db.query(
-      `UPDATE ingredientes_masa
-       SET disponible = true,
-           verificado = true,
-           pesado = true,
-           peso_real = COALESCE(peso_real, cantidad_gramos),
-           updated_at = NOW()
-       WHERE masa_id = $1
-         AND es_decoracion = true
-         AND es_empaque = false
-         AND pesado IS DISTINCT FROM true`,
-      [masaId]
-    );
+    // descuentan del inventario asignando lote FEFO (mismo criterio que el resto del sistema).
+    await fasesModel.autoCompletarDecoracion(masaId, req.user.id);
 
     // Validar stock suficiente para todos los ingredientes
     const ingResult = await db.query(
