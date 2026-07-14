@@ -70,6 +70,21 @@ exports.getFermentacionInfo = async (req, res) => {
 
     const registroResult = await db.query(registroQuery, [masaId]);
 
+    // Kevin (reunión, 1:00:03): solo código + nombre + cantidad de panes,
+    // sin gramaje ni paquetes pedidos — solo lo esencial para identificar el producto.
+    const productosQuery = `
+      SELECT
+        pm.id,
+        pm.producto_codigo,
+        pm.producto_nombre,
+        pm.sap_item_code,
+        COALESCE(pm.cantidad_divisiones, pm.unidades_ajustadas, pm.unidades_pedidas, 0) AS cantidad_panes
+      FROM productos_por_masa pm
+      WHERE pm.masa_id = $1
+      ORDER BY pm.producto_nombre
+    `;
+    const productosResult = await db.query(productosQuery, [masaId]);
+
     res.json({
       success: true,
       data: {
@@ -84,7 +99,8 @@ exports.getFermentacionInfo = async (req, res) => {
           requiere_camara_frio: masa.requiere_camara_frio,
           tiempo_fermentacion_estandar_minutos: masa.tiempo_fermentacion_estandar_minutos
         },
-        registro_actual: registroResult.rows[0] || null
+        registro_actual: registroResult.rows[0] || null,
+        productos: productosResult.rows
       }
     });
   } catch (error) {

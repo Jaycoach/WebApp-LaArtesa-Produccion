@@ -111,6 +111,7 @@ export const FermentacionMasa: React.FC = () => {
 
   const masa = data?.masa || {};
   const registro = data?.registro_actual;
+  const productos = data?.productos || [];
   // Columna real del controller: hora_salida_camara_sugerida
   const horaSalidaSugerida = registro?.hora_salida_camara_sugerida;
   // requiere_camara_frio viene dentro de data.masa (no en data directamente)
@@ -172,6 +173,24 @@ export const FermentacionMasa: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Productos entrando a fermentación — Kevin: solo nombre, código y cantidad de panes */}
+        {productos.length > 0 && subEtapa !== 'completada' && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+            <h3 className="text-sm font-semibold text-gray-700 mb-3">Productos en esta masa</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {productos.map((p: any) => (
+                <div key={p.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2 text-sm">
+                  <div>
+                    <span className="font-medium text-gray-800">{p.producto_nombre}</span>
+                    <span className="text-xs text-gray-400 font-mono ml-2">{p.producto_codigo || p.sap_item_code}</span>
+                  </div>
+                  <span className="font-semibold text-gray-900">{p.cantidad_panes}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Barra de progreso de sub-etapas */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
@@ -349,6 +368,21 @@ export const FermentacionMasa: React.FC = () => {
                   <p className="text-green-600 text-sm">La fase de fermentación ha sido registrada.</p>
                 </div>
               </div>
+
+              {/* Confirmación de salida: mismos productos y cantidad de panes fermentados (Kevin: 1:02:02) */}
+              {productos.length > 0 && (
+                <div className="bg-white rounded-lg p-3 border border-green-100">
+                  <div className="text-xs text-gray-500 mb-2">Panes fermentados que salen del cuarto</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {productos.map((p: any) => (
+                      <div key={p.id} className="flex items-center justify-between text-sm">
+                        <span className="text-gray-700">{p.producto_nombre}</span>
+                        <span className="font-semibold text-gray-900">{p.cantidad_panes}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {registro && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
                   {registro.hora_entrada_camara && (

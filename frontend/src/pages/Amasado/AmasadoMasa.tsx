@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card } from '@/components/common';
-import { useMasaDetail } from '../../hooks/useMasas';
+import { useMasaDetail, useComposicion } from '../../hooks/useMasas';
 import { useCompletarFase } from '../../hooks/useFases';
 import { ModalMO } from '../../components/common/ModalMO';
 
@@ -11,7 +11,13 @@ export const AmasadoMasa: React.FC = () => {
   const masaIdNum = Number(masaId);
 
   const { data: masa, isLoading: loadingMasa } = useMasaDetail(masaIdNum);
+  const { data: composicion } = useComposicion(masaIdNum);
   const completarMutation = useCompletarFase();
+
+  // Solo lo que Kevin pidió ver en Amasado: harina y agua ya pesadas en Pesaje.
+  const ingredientesRelevantes = ((composicion as any[]) || []).filter(
+    (ing: any) => ing.es_harina || ing.es_agua
+  );
 
   const [showMO, setShowMO] = useState(false);
   const [formData, setFormData] = useState({
@@ -108,6 +114,27 @@ export const AmasadoMasa: React.FC = () => {
             </div>
           </div>
         </Card>
+
+        {/* Ingredientes ya pesados en Pesaje — harina y agua */}
+        {ingredientesRelevantes.length > 0 && (
+          <Card title="Harina y Agua Pesadas">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {ingredientesRelevantes.map((ing: any) => (
+                <div key={ing.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-3 border border-gray-100">
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">{ing.ingrediente_nombre}</p>
+                    <p className="text-xs text-gray-400">{ing.es_agua ? 'Agua' : 'Harina'}</p>
+                  </div>
+                  <p className="text-lg font-bold text-gray-900">
+                    {ing.peso_real != null
+                      ? `${Number(ing.peso_real).toFixed(0)} g`
+                      : `${Number(ing.cantidad_gramos).toFixed(0)} g (teórico)`}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
 
         {/* Formulario de Control de Amasado */}
         <Card title="Control de Amasado">

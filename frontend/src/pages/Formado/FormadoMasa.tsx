@@ -193,24 +193,33 @@ export const FormadoMasa: React.FC = () => {
                   <tr className="border-b border-gray-100">
                     <th className="text-left py-2 text-gray-500 font-medium">Producto</th>
                     <th className="text-center py-2 text-gray-500 font-medium">Und. a Formar</th>
-                    <th className="text-center py-2 text-gray-500 font-medium">Gramaje</th>
+                    <th className="text-center py-2 text-gray-500 font-medium">Gramaje Unitario</th>
+                    <th className="text-center py-2 text-gray-500 font-medium">Gramaje Total</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {productos.map((p: any) => (
-                    <tr key={p.id} className="border-b border-gray-50">
-                      <td className="py-3">
-                        <div className="font-medium text-gray-800">{p.producto_nombre}</div>
-                        <div className="text-xs text-gray-400">{p.producto_codigo || p.sap_item_code}</div>
-                      </td>
-                      <td className="text-center py-3 font-semibold text-gray-900">
-                        {p.unidades_a_formar || p.cantidad_divisiones || p.unidades_ajustadas || p.unidades_pedidas}
-                      </td>
-                      <td className="text-center py-3 text-gray-600">
-                        {p.gramaje_unitario}g
-                      </td>
-                    </tr>
-                  ))}
+                  {productos.map((p: any) => {
+                    const unidades = p.unidades_a_formar || p.cantidad_divisiones || p.unidades_ajustadas || p.unidades_pedidas || 0;
+                    const gramajeUnitario = Number(p.gramaje_unitario) || 0;
+                    const gramajeTotal = unidades * gramajeUnitario;
+                    return (
+                      <tr key={p.id} className="border-b border-gray-50">
+                        <td className="py-3">
+                          <div className="font-medium text-gray-800">{p.producto_nombre}</div>
+                          <div className="text-xs text-gray-400">{p.producto_codigo || p.sap_item_code}</div>
+                        </td>
+                        <td className="text-center py-3 font-semibold text-gray-900">
+                          {unidades}
+                        </td>
+                        <td className="text-center py-3 text-gray-600">
+                          {gramajeUnitario}g
+                        </td>
+                        <td className="text-center py-3 font-semibold text-gray-900">
+                          {(gramajeTotal / 1000).toFixed(2)} kg
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
