@@ -131,7 +131,11 @@ const FaseListado = () => {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
 
-  const hoy = new Date().toISOString().split('T')[0];
+  // Fecha de hoy en horario Colombia (America/Bogota), no UTC del navegador/servidor.
+  const hoy = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
   const [fecha, setFecha] = useState(() => {
     return sessionStorage.getItem('artesa_fecha_produccion') || hoy;
   });
