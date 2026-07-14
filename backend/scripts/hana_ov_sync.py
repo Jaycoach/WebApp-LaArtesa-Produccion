@@ -78,13 +78,14 @@ def main():
         placeholders = ','.join(['?'] * len(item_codes))
         cursor.execute(f'''
             SELECT "ItemCode", "ItemName", "U_JZ_Tipos_Masa", "SalPackUn",
-                   "SWeight1", "U_JZ_MultiploDivisor", "validFor", "frozenFor"
+                   "SWeight1", "U_JZ_MultiploDivisor", "validFor", "frozenFor",
+                   "U_JZ_Tamanio", "U_JZ_Forma"
             FROM "{schema}"."OITM"
             WHERE "ItemCode" IN ({placeholders})
         ''', item_codes)
 
         articulos = {}
-        for item_code, item_name, tipo_masa, sal_pack_un, sweight1, multiplo, valid_for, frozen_for in cursor.fetchall():
+        for item_code, item_name, tipo_masa, sal_pack_un, sweight1, multiplo, valid_for, frozen_for, tamanio, forma in cursor.fetchall():
             if valid_for == 'N' or frozen_for == 'Y':
                 continue
             if not tipo_masa:
@@ -95,6 +96,8 @@ def main():
                 'salPackUn': float(sal_pack_un) if sal_pack_un is not None else 1,
                 'gramaje': float(sweight1) if sweight1 is not None else 0,
                 'multiploDivisor': round(float(multiplo)) if multiplo is not None else 0,
+                'tamanio': tamanio or None,
+                'forma': forma or None,
             }
 
         conn.close()
@@ -131,6 +134,8 @@ def main():
                 'gramaje': gramaje,
                 'kilosPedidos': kilos_pedidos,
                 'multiploDivisor': art['multiploDivisor'],
+                'tamanio': art.get('tamanio'),
+                'forma': art.get('forma'),
             })
 
         print(json.dumps(resultado))
