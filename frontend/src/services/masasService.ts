@@ -32,9 +32,10 @@ export const masasService = {
   /**
    * Sincronizar Listas de Materiales (BOM) desde SAP
    */
-  sincronizarBOM: async (): Promise<SincronizacionBOMResponse> => {
+  sincronizarBOM: async (items?: string): Promise<SincronizacionBOMResponse> => {
     const response = await apiService.post<SincronizacionBOMResponse>(
-      API_CONFIG.ENDPOINTS.SAP.SINCRONIZAR_BOM
+      API_CONFIG.ENDPOINTS.SAP.SINCRONIZAR_BOM,
+      items ? { items } : undefined
     );
     return response.data!;
   },

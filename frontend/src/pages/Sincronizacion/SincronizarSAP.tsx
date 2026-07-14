@@ -45,7 +45,16 @@ export const SincronizarSAP: React.FC = () => {
 
   const handleSyncBOM = async () => {
     try {
-      await sincronizarBOMMutation.mutateAsync();
+      await sincronizarBOMMutation.mutateAsync(undefined);
+    } catch {
+      // error manejado por el estado de la mutation
+    }
+  };
+
+  const handleSyncBOMPuntual = async () => {
+    if (!itemsPuntual.trim()) return;
+    try {
+      await sincronizarBOMMutation.mutateAsync(itemsPuntual.trim());
     } catch {
       // error manejado por el estado de la mutation
     }
@@ -88,18 +97,23 @@ export const SincronizarSAP: React.FC = () => {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Sincronizar con SAP</h1>
-        <p className="text-gray-600">Importar datos desde SAP Business One</p>
+        <p className="text-gray-600">
+          Trae la información maestra y las órdenes del día desde SAP Business One hacia Orbit.
+          Sigue el orden de los pasos de arriba hacia abajo.
+        </p>
       </div>
 
       {/* Paso 1: BOM */}
-      <Card title="Paso 1 — Listas de Materiales (BOM)">
+      <Card title="Paso 1 — Recetas y Atributos de Productos (BOM)">
         <div className="space-y-4">
           <p className="text-gray-600 text-sm">
-            Sincroniza las recetas de cada artículo desde <strong>ProductTrees SAP</strong>.
-            Guarda los ingredientes y cantidades en la base de datos local.
+            Trae desde SAP, para <strong>todos los productos</strong>: la receta (ingredientes y cantidades),
+            el tipo de masa, tamaño, forma, si algún ingrediente es de decoración, y el peso máximo de división.
+            Deja todo listo en Orbit para que Planificación pueda armar las masas del día.
             <br />
             <span className="text-amber-700 font-medium">
-              Ejecutar antes del primer día de producción y cuando se modifiquen recetas en SAP.
+              Ejecútalo antes del primer día de producción, y de nuevo cada vez que en SAP se cree un producto
+              nuevo o se modifique una receta / un atributo (tamaño, forma, decoración, etc.).
             </span>
           </p>
 
@@ -112,7 +126,7 @@ export const SincronizarSAP: React.FC = () => {
             {sincronizarBOMMutation.isPending ? 'Sincronizando BOM...' : 'Sincronizar BOM'}
           </Button>
 
-          {sincronizarBOMMutation.isSuccess && sincronizarBOMMutation.data && (
+          {sincronizarBOMMutation.isSuccess && sincronizarBOMMutation.data && !sincronizarBOMMutation.variables && (
             <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
               <p className="text-green-800 font-medium">✓ BOM sincronizado correctamente</p>
               <ul className="mt-2 text-sm text-green-700 space-y-1">
@@ -139,16 +153,18 @@ export const SincronizarSAP: React.FC = () => {
       {/* Sincronizar Inventario MP */}
       <div className="border rounded-lg p-4 bg-white space-y-4">
         <div>
-          <h3 className="font-semibold text-gray-800 mb-1">Inventario y Lotes — Bodega ALMP</h3>
+          <h3 className="font-semibold text-gray-800 mb-1">Inventario y Lotes — Bodega ALMP (materias primas)</h3>
           <p className="text-sm text-gray-500 mb-3">
-            Sincroniza stock disponible, costo promedio y lotes activos de materias primas desde SAP.
+            Trae desde SAP cuánto stock hay, a qué costo, y qué lotes están disponibles para cada materia prima.
+            Ejecútalo al inicio de cada día, después del Paso 1, para que Pesaje tenga el inventario al día.
           </p>
 
           <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-            <p className="text-sm font-medium text-gray-800 mb-1">🔄 Sincronizar Inventario y Lotes</p>
+            <p className="text-sm font-medium text-gray-800 mb-1">🔄 Sincronizar todo el inventario</p>
             <p className="text-xs text-gray-500 mb-3">
-              Sincroniza stock, costos y lotes de todas las materias primas del BOM desde SAP.
-              <strong> Puede tardar entre 10 y 15 minutos</strong> — no recargues la página ni cierres esta pestaña mientras se procesa.
+              Actualiza stock, costo y lotes de <strong>todas</strong> las materias primas usadas en las recetas.
+              <strong> Puede tardar entre 10 y 15 minutos</strong> porque consulta SAP una por una — no recargues
+              la página ni cierres esta pestaña mientras se procesa.
             </p>
             <Button
               variant="primary"
@@ -179,20 +195,29 @@ export const SincronizarSAP: React.FC = () => {
         </div>
 
         <div className="border-t border-gray-200 pt-4">
-          <p className="text-sm font-medium text-gray-800 mb-1">🎯 Sincronizar códigos puntuales</p>
+          <p className="text-sm font-medium text-gray-800 mb-1">🎯 Sincronizar solo un producto puntual</p>
           <p className="text-xs text-gray-500 mb-3">
-            Sincroniza solo los ítems indicados (código SAP, separados por coma). Útil cuando un ítem
-            no quedó sincronizado en la corrida completa por una falla temporal de SAP.
+            Escribe uno o más códigos SAP (separados por coma) cuando un producto quedó mal o no se
+            sincronizó en la corrida completa. Elige qué necesitas actualizar de ese producto — puedes
+            usar los dos botones si necesitas ambas cosas.
           </p>
+          <input
+            type="text"
+            value={itemsPuntual}
+            onChange={(e) => setItemsPuntual(e.target.value)}
+            placeholder="Ej: MP0029,MP0080"
+            disabled={algunaSincronizacionActiva}
+            className="border border-gray-300 rounded-lg px-4 py-2 w-full mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+          />
           <div className="flex gap-2 flex-wrap items-start">
-            <input
-              type="text"
-              value={itemsPuntual}
-              onChange={(e) => setItemsPuntual(e.target.value)}
-              placeholder="Ej: MP0029,MP0080"
-              disabled={algunaSincronizacionActiva}
-              className="border border-gray-300 rounded-lg px-4 py-2 flex-1 min-w-[220px] focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-            />
+            <Button
+              variant="success"
+              isLoading={sincronizarBOMMutation.isPending}
+              disabled={algunaSincronizacionActiva || !itemsPuntual.trim()}
+              onClick={handleSyncBOMPuntual}
+            >
+              {sincronizarBOMMutation.isPending ? 'Sincronizando...' : 'Actualizar receta y atributos'}
+            </Button>
             <Button
               variant="secondary"
               isLoading={sincronizarLotesItemMutation.isPending}
@@ -201,9 +226,28 @@ export const SincronizarSAP: React.FC = () => {
             >
               {sincronizarLotesItemMutation.isPending
                 ? `Sincronizando... (${formatearTiempo(segundosTranscurridos)})`
-                : 'Sincronizar códigos puntuales'}
+                : 'Actualizar stock y lotes'}
             </Button>
           </div>
+          <p className="text-xs text-gray-400 mt-2">
+            <strong>Receta y atributos</strong>: recetas, tipo de masa, tamaño, forma y decoración —
+            lo mismo que el Paso 1 pero solo para estos códigos. <strong>Stock y lotes</strong>: cantidad
+            disponible, costo y lotes — lo mismo que "Sincronizar todo el inventario" pero puntual.
+          </p>
+
+          {sincronizarBOMMutation.isSuccess && sincronizarBOMMutation.data && sincronizarBOMMutation.variables && (
+            <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg text-sm">
+              <p className="text-green-700">
+                ✓ Sincronización puntual completada: {sincronizarBOMMutation.data.bom_sincronizados} de{' '}
+                {itemsPuntual.split(',').map(c => c.trim()).filter(Boolean).length} código(s)
+              </p>
+              {(sincronizarBOMMutation.data.item_codes_no_encontrados?.length ?? 0) > 0 && (
+                <p className="text-amber-700 text-xs mt-1">
+                  ⚠ No encontrados en SAP con tipo de masa configurado: {sincronizarBOMMutation.data.item_codes_no_encontrados!.join(', ')}
+                </p>
+              )}
+            </div>
+          )}
 
           {sincronizarLotesItemMutation.isSuccess && sincronizarLotesItemMutation.data && (
             <div className="mt-3 text-sm space-y-1">
@@ -238,11 +282,12 @@ export const SincronizarSAP: React.FC = () => {
       </div>
 
       {/* Paso 2: Órdenes de Venta */}
-      <Card title="Paso 2 — Órdenes de Venta (diario)">
+      <Card title="Paso 2 — Órdenes de Venta del día">
         <div className="space-y-4">
           <p className="text-gray-600 text-sm">
-            Importa las Órdenes de Venta abiertas del día, agrupa por tipo de masa
-            y crea las masas en estado <strong>Planificación</strong>.
+            Trae las Órdenes de Venta abiertas en SAP para la fecha elegida, las agrupa por tipo de masa
+            y crea las masas del día en <strong>Planificación</strong>, listas para empezar a producir.
+            Ejecútalo cada día, después del Paso 1 y de Inventario y Lotes.
           </p>
 
           <div>
@@ -294,26 +339,24 @@ export const SincronizarSAP: React.FC = () => {
       </Card>
 
       {/* Orden de operación */}
-      <Card title="Flujo de operación">
+      <Card title="¿En qué orden hago esto?">
         <ol className="space-y-3 text-sm text-gray-700 list-decimal list-inside">
           <li>
-            <strong>Sync BOM</strong> (una vez, o cuando cambian recetas en SAP) →
-            carga los ingredientes de cada artículo
+            <strong>Paso 1 — Recetas y Atributos:</strong> una vez, o cuando SAP tenga productos
+            nuevos o recetas/atributos modificados.
           </li>
           <li>
-            <strong>Sync Inventario y Lotes</strong> (inicio del día) →
-            actualiza stock, costos y lotes de todas las materias primas
+            <strong>Inventario y Lotes:</strong> cada mañana, antes de empezar a producir.
           </li>
           <li>
-            <strong>Sync Órdenes de Venta</strong> (cada día) →
-            crea las masas del día en estado Planificación
+            <strong>Paso 2 — Órdenes de Venta:</strong> cada día, para traer las masas de hoy.
           </li>
           <li>
-            Ir a <strong>Planificación</strong> → abrir cada masa →
-            completar fase Planificación → los ingredientes se generan automáticamente desde el BOM
+            Ir a <strong>Planificación</strong> → abrir cada masa → completar la fase Planificación
+            → los ingredientes se generan solos desde la receta.
           </li>
           <li>
-            Continuar con <strong>Pesaje → Amasado → División → ...</strong>
+            Seguir el proceso normal: <strong>Pesaje → Amasado → División → Formado → Fermentación → Horneado → Empaque</strong>.
           </li>
         </ol>
       </Card>
