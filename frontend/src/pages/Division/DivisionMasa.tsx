@@ -446,6 +446,9 @@ export const DivisionMasa: React.FC = () => {
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
                           Panes sugeridos a cortar
                         </th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                          Gramaje unitario
+                        </th>
                         <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
                           Divisor
                         </th>
@@ -497,6 +500,13 @@ export const DivisionMasa: React.FC = () => {
                                   </span>
                                 );
                               })()}
+                            </td>
+
+                            {/* Gramaje unitario */}
+                            <td className="px-4 py-3 text-right">
+                              <span className="text-sm text-gray-600">
+                                {producto.gramaje_unitario ? `${parseFloat(producto.gramaje_unitario).toFixed(0)} g` : '—'}
+                              </span>
                             </td>
 
                             {/* Divisor badge */}

@@ -983,7 +983,15 @@ const sincronizarDesdeOV = async (req, res, next) => {
           );
           const totalUnidades = parseInt(totalesResult.rows[0].total_unidades);
           const kgPorPaquete = kiloPorItemCode[itemCode] || 0;
-          const multiploDivisor = grupo.productos.find(p => p.itemCode === itemCode)?.multiploDivisor || 0;
+          const prodMuestra = grupo.productos.find(p => p.itemCode === itemCode);
+          const multiploDivisor = prodMuestra?.multiploDivisor || 0;
+          // Misma lógica de fallback usada en el INSERT original (SAP > 1, si no regex " X4"/" X 20")
+          const unidadesPorPaquete = (() => {
+            if (prodMuestra?.unidadesPorPaquete && prodMuestra.unidadesPorPaquete > 1) return prodMuestra.unidadesPorPaquete;
+            const m = prodMuestra?.descripcion?.match(/ X ?(\d+)/i);
+            return m ? parseInt(m[1]) : 1;
+          })();
+          const cantidadPaquetes = unidadesPorPaquete > 0 ? totalUnidades / unidadesPorPaquete : totalUnidades;
           const unidadesAjustadas = (multiploDivisor > 0 && totalUnidades % multiploDivisor !== 0)
             ? (Math.floor(totalUnidades / multiploDivisor) + 1) * multiploDivisor
             : totalUnidades;
@@ -993,14 +1001,14 @@ const sincronizarDesdeOV = async (req, res, next) => {
             `UPDATE productos_por_masa
              SET unidades_pedidas     = $1::integer,
                  unidades_programadas = $1::integer,
-                 cantidad_paquetes    = $1::numeric,
-                 kilos_pedidos        = $2,
-                 kilos_programados    = $2,
-                 unidades_ajustadas   = $3,
-                 unidades_excedente   = $4,
+                 cantidad_paquetes    = $2::numeric,
+                 kilos_pedidos        = $3,
+                 kilos_programados    = $3,
+                 unidades_ajustadas   = $4,
+                 unidades_excedente   = $5,
                  updated_at           = NOW()
-             WHERE masa_id = $5 AND sap_item_code = $6`,
-            [totalUnidades, kgPorPaquete * totalUnidades,
+             WHERE masa_id = $6 AND sap_item_code = $7`,
+            [totalUnidades, cantidadPaquetes, kgPorPaquete * totalUnidades,
              unidadesAjustadas, unidadesExcedente,
              masaIdExistente, itemCode]
           );
