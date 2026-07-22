@@ -1,81 +1,77 @@
-async getStockMateriaPrima(itemCodes) {
-    if (!itemCodes || itemCodes.length === 0) return {};
+#!/usr/bin/env python3
+"""
+Extracción directa de stock de materia prima desde HANA (OITW + OITM), bodega ALMP.
+Reemplaza getStockMateriaPrima() (Service Layer, secuencial por artículo, 1 request
+por ítem) por una sola consulta consolidada.
 
-    if (process.env.SAP_READ_MODE === 'hana') {
-      return this._getStockMateriaPrimaHANA(itemCodes);
-    }
+Uso: python3 hana_stock_mp.py
+Entrada: lista de itemCodes como JSON array por stdin, ej: ["PEPR01","PEPR02"]
+Salida: JSON por stdout: {"stock": {itemCode: {...}}}
+"""
+import sys
+import os
+import json
+from hdbcli import dbapi
 
-    await this.ensureSession();
 
-    const resultado = {};
+def main():
+    try:
+        item_codes = json.loads(sys.stdin.read())
+    except Exception as e:
+        print(json.dumps({"error": f"Entrada inválida: {e}"}), file=sys.stderr)
+        sys.exit(1)
 
-    for (const itemCode of itemCodes) {
-      try {
-        const response = await this.client.get(
-          `/Items('${itemCode}')?$select=ItemCode,ItemName,MovingAveragePrice,InventoryUOM,ManageBatchNumbers,ItemWarehouseInfoCollection`
-        );
+    if not item_codes:
+        print(json.dumps({"stock": {}}))
+        return
 
-        const item       = response.data;
-        const bodegaAlmp = (item.ItemWarehouseInfoCollection || [])
-          .find(b => b.WarehouseCode === 'ALMP');
+    schema = os.environ.get('HANA_SCHEMA')
+    if not schema:
+        print(json.dumps({"error": "HANA_SCHEMA no configurado"}), file=sys.stderr)
+        sys.exit(1)
 
-        resultado[itemCode] = {
-          itemCode:             item.ItemCode,
-          itemName:             item.ItemName,
-          uom:                  item.InventoryUOM,
-          manageBatchNumbers:   item.ManageBatchNumbers === 'tYES',
-          costoPromedio:        bodegaAlmp?.StandardAveragePrice || item.MovingAveragePrice || 0,
-          stockAlmp:            bodegaAlmp?.InStock      || 0,
-          committedAlmp:        bodegaAlmp?.Committed    || 0,
-          orderedAlmp:          bodegaAlmp?.Ordered      || 0,
-        };
-      } catch (error) {
-        logger.warn(`SAP: no se pudo obtener stock para ${itemCode}: ${error.message}`);
-        resultado[itemCode] = null;
-      }
-    }
+    try:
+        conn = dbapi.connect(
+            address=os.environ['HANA_HOST'],
+            port=int(os.environ['HANA_PORT']),
+            user=os.environ['HANA_USER'],
+            password=os.environ['HANA_PASSWORD'],
+            encrypt=True,
+            sslValidateCertificate=False,
+        )
+        cursor = conn.cursor()
 
-    logger.info(`SAP: stock obtenido para ${Object.keys(resultado).length} ítems`);
-    return resultado;
-  }
+        placeholders = ','.join(['?'] * len(item_codes))
+        query = f'''
+            SELECT W."ItemCode", P."ItemName", P."InvntryUom", P."ManBtchNum",
+                   W."OnHand", W."IsCommited", W."OnOrder", W."AvgPrice"
+            FROM "{schema}"."OITW" W
+            INNER JOIN "{schema}"."OITM" P ON P."ItemCode" = W."ItemCode"
+            WHERE W."WhsCode" = 'ALMP' AND W."ItemCode" IN ({placeholders})
+        '''
+        cursor.execute(query, item_codes)
 
-  /**
-   * Extrae stock de materia prima directo de HANA vía script Python (hdbcli).
-   * Reemplaza las N llamadas secuenciales a /Items('{itemCode}') (Service Layer)
-   * por una sola consulta consolidada OITW+OITM. Mismo shape de retorno.
-   */
-  async _getStockMateriaPrimaHANA(itemCodes) {
-    const { execFile } = require('child_process');
-    const path = require('path');
+        resultado = {}
+        for row in cursor.fetchall():
+            item_code, item_name, uom, man_btch, on_hand, is_committed, on_order, avg_price = row
+            resultado[item_code] = {
+                "itemCode": item_code,
+                "itemName": item_name,
+                "uom": uom,
+                "manageBatchNumbers": str(man_btch or '').strip().upper() == 'Y',
+                "costoPromedio": float(avg_price) if avg_price is not None else 0,
+                "stockAlmp": float(on_hand) if on_hand is not None else 0,
+                "committedAlmp": float(is_committed) if is_committed is not None else 0,
+                "orderedAlmp": float(on_order) if on_order is not None else 0,
+            }
 
-    return new Promise((resolve) => {
-      const scriptPath = path.join(__dirname, '../../scripts/hana_stock_mp.py');
-      const child = execFile('python3', [scriptPath], {
-        timeout: 30000,
-        env: process.env,
-      }, (error, stdout, stderr) => {
-        if (error) {
-          logger.error(`HANA stock: error ejecutando script Python: ${error.message}. stderr: ${stderr}`);
-          return resolve(Object.fromEntries(itemCodes.map(c => [c, null])));
-        }
-        try {
-          const parsed = JSON.parse(stdout);
-          if (parsed.error) {
-            logger.error(`HANA stock: error reportado por script: ${parsed.error}`);
-            return resolve(Object.fromEntries(itemCodes.map(c => [c, null])));
-          }
-          const stock = parsed.stock;
-          for (const itemCode of itemCodes) {
-            if (!(itemCode in stock)) stock[itemCode] = null;
-          }
-          logger.info(`HANA stock: obtenido para ${Object.keys(parsed.stock).length}/${itemCodes.length} ítems vía HANA directo`);
-          resolve(stock);
-        } catch (parseErr) {
-          logger.error(`HANA stock: respuesta no parseable: ${parseErr.message}. stdout: ${stdout}`);
-          resolve(Object.fromEntries(itemCodes.map(c => [c, null])));
-        }
-      });
-      child.stdin.write(JSON.stringify(itemCodes));
-      child.stdin.end();
-    });
-  }
+        conn.close()
+        print(json.dumps({"stock": resultado}))
+
+    except Exception as e:
+        print(json.dumps({"error": str(e)}), file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()
