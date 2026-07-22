@@ -89,9 +89,11 @@ transports.push(
     level: 'info',
     maxSize: 5242880, // 5MB
     maxFiles: 5,
-    format: prodFormat,
     // Solo loguear eventos de SAP
-    filter: (info) => info.service === 'SAP' || info.component === 'SAP_SYNC',
+    format: winston.format.combine(
+      winston.format((info) => (info.service === 'SAP' || info.component === 'SAP_SYNC' ? info : false))(),
+      prodFormat,
+    ),
   }),
 );
 
