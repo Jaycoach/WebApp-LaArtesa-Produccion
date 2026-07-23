@@ -22,7 +22,7 @@ export const ListaMasas: React.FC = () => {
   const esSupervisor = user?.rol === 'admin' || user?.rol === 'supervisor';
 
   const [fecha, setFecha] = useState<string>(
-    new Date().toISOString().split('T')[0]
+    sessionStorage.getItem('artesa_fecha_produccion') || new Date().toISOString().split('T')[0]
   );
   const [motivoPendiente, setMotivoPendiente] = useState('');
   const [masaPendienteId, setMasaPendienteId] = useState<number | null>(null);
@@ -178,7 +178,7 @@ export const ListaMasas: React.FC = () => {
               <input
                 type="date"
                 value={fecha}
-                onChange={(e) => setFecha(e.target.value)}
+                onChange={(e) => { sessionStorage.setItem('artesa_fecha_produccion', e.target.value); setFecha(e.target.value); }}
                 className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm w-full sm:w-auto"
               />
 
