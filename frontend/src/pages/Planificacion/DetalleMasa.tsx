@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card } from '@/components/common';
 import { useMasaDetail, useProductos, useComposicion, useCancelarMasa } from '../../hooks/useMasas';
@@ -63,6 +63,15 @@ export const DetalleMasa: React.FC = () => {
   const masaId = Number(id);
 
   const { data: masa, isLoading: loadingMasa } = useMasaDetail(masaId);
+
+  // Persistir la fecha de esta masa para que "Volver a la lista" regrese
+  // a Planificación mostrando la misma fecha, no la fecha de hoy.
+  useEffect(() => {
+    if (masa?.fecha_produccion) {
+      sessionStorage.setItem('artesa_fecha_produccion', String(masa.fecha_produccion).slice(0, 10));
+    }
+  }, [masa?.fecha_produccion]);
+
   const { data: productos, isLoading: loadingProductos } = useProductos(masaId);
   const { data: composicion, isLoading: loadingComposicion } = useComposicion(masaId);
   const { data: fases } = useFases(id!);
