@@ -1568,8 +1568,8 @@ export const EmpaqueMasa: React.FC = () => {
   const { masaId: masaIdParam } = useParams<{ masaId?: string }>();
 
   const [modo, setModo] = useState<'lista' | 'masa' | 'ov' | 'resumen'>('lista');
-  const [fechaLista, setFechaLista] = useState(new Date().toISOString().slice(0, 10));
-  const [fechaResumen, setFechaResumen] = useState(new Date().toISOString().slice(0, 10));
+  const [fechaLista, setFechaLista] = useState(sessionStorage.getItem('artesa_fecha_produccion') || new Date().toISOString().slice(0, 10));
+  const [fechaResumen, setFechaResumen] = useState(sessionStorage.getItem('artesa_fecha_produccion') || new Date().toISOString().slice(0, 10));
   const [masaSeleccionada, setMasaSeleccionada] = useState<MasaPendiente | null>(null);
 
   // Búsqueda por OV (modo legado)
@@ -1824,7 +1824,7 @@ export const EmpaqueMasa: React.FC = () => {
             <input
               type="date"
               value={fechaLista}
-              onChange={e => setFechaLista(e.target.value)}
+              onChange={e => { sessionStorage.setItem('artesa_fecha_produccion', e.target.value); setFechaLista(e.target.value); }}
               className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-400"
             />
           </div>
@@ -1847,7 +1847,7 @@ export const EmpaqueMasa: React.FC = () => {
             <input
               type="date"
               value={fechaResumen}
-              onChange={e => setFechaResumen(e.target.value)}
+              onChange={e => { sessionStorage.setItem('artesa_fecha_produccion', e.target.value); setFechaResumen(e.target.value); }}
               className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:ring-2 focus:ring-purple-400"
             />
           </div>
