@@ -84,6 +84,7 @@ export interface ProductoMasa {
   producto_nombre: string;
   presentacion: string;
   gramaje_unitario: number;
+  peso_masa_dividida?: number | null;
   unidades_pedidas: number;
   unidades_programadas: number;
   unidades_producidas: number;

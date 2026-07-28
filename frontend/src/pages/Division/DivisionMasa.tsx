@@ -464,6 +464,9 @@ export const DivisionMasa: React.FC = () => {
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
                           Gramaje unitario
                         </th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                          Peso Unitario Masa
+                        </th>
                         <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
                           Divisor
                         </th>
@@ -516,11 +519,24 @@ export const DivisionMasa: React.FC = () => {
                               })()}
                             </td>
 
-                            {/* Gramaje unitario */}
+                            {/* Gramaje unitario (BOM) */}
                             <td className="px-4 py-3 text-right">
                               <span className="text-sm text-gray-600">
                                 {producto.gramaje_unitario ? `${parseFloat(producto.gramaje_unitario).toFixed(0)} g` : '—'}
                               </span>
+                            </td>
+
+                            {/* Peso Unitario Masa — U_JZ_PesMasDiv, es el dato que usa el divisor */}
+                            <td className="px-4 py-3 text-right">
+                              {producto.peso_masa_dividida ? (
+                                <span className="text-sm font-semibold text-blue-700">
+                                  {parseFloat(producto.peso_masa_dividida).toFixed(0)} g
+                                </span>
+                              ) : (
+                                <span className="text-xs text-amber-600" title="Sin U_JZ_PesMasDiv en SAP — usando Gramaje unitario como respaldo">
+                                  {producto.gramaje_unitario ? `${parseFloat(producto.gramaje_unitario).toFixed(0)} g*` : '—'}
+                                </span>
+                              )}
                             </td>
 
                             {/* Divisor badge */}
@@ -606,7 +622,8 @@ export const DivisionMasa: React.FC = () => {
                     <strong>Columnas:</strong>{' '}
                     <span className="font-semibold">Paquetes</span> = unidades en la orden de venta.{' '}
                     <span className="font-semibold">Panes sugeridos a cortar</span> = total de panes a producir (paquetes × unidades por paquete), ajustado al múltiplo del divisor de la máquina.{' '}
-                    <span className="font-semibold">Excedente</span> = unidades adicionales que se registrarán como inventario extra en SAP.
+                    <span className="font-semibold">Excedente</span> = unidades adicionales que se registrarán como inventario extra en SAP.{' '}
+                    <span className="font-semibold">Peso Unitario Masa</span> = peso individual de cada pan a dividir (campo SAP U_JZ_PesMasDiv); es el dato que usa la divisora. Si no está configurado en SAP, se muestra el Gramaje unitario como respaldo (marcado con *).{' '}
                     Los productos con <span className="inline-flex items-center px-1 rounded bg-orange-100 text-orange-800 text-xs font-semibold">×N</span> deben cortarse en múltiplos exactos.
                   </p>
                 </div>
