@@ -100,6 +100,7 @@ interface Producto {
   gramaje_unitario: number;
   unidades_ajustadas: number;
   unidades_producidas: number;
+  unidades_por_paquete: number;
   sap_doc_num: string;
   detalle_id: number | null;
   unidades_empacadas: number | null;
@@ -902,7 +903,7 @@ const PanelEmpaqueMasa: React.FC<{
                   <th className="text-right p-2 border-b">Pedidas</th>
                   <th className="text-right p-2 border-b">Divididas</th>
                   <th className="text-right p-2 border-b">Horneadas</th>
-                  <th className="text-right p-2 border-b">Empacadas</th>
+                  <th className="text-right p-2 border-b">Paquetes Empacados</th>
                   <th className="text-right p-2 border-b">Merma</th>
                   <th className="text-right p-2 border-b">Faltante</th>
                   <th className="p-2 border-b"></th>
@@ -911,9 +912,12 @@ const PanelEmpaqueMasa: React.FC<{
               <tbody>
                 {ov.productos.map(p => {
                   const det = detalles[p.id] ?? { emp: '0', merma: '0' };
-                  const empacadas = parseInt(det.emp) || 0;
-                  const mermaCalculada = (p.unidades_divididas > 0 ? p.unidades_divididas : p.unidades_horneadas) - empacadas;
-                  const faltante = p.unidades_referencia - empacadas;
+                  const empacadas = parseInt(det.emp) || 0; // paquetes, no panes
+                  const panesPorPaquete = Number(p.unidades_por_paquete) > 0 ? Number(p.unidades_por_paquete) : 1;
+                  const panesEmpacados = empacadas * panesPorPaquete;
+                  const panesEsperados = p.unidades_divididas > 0 ? p.unidades_divididas : p.unidades_horneadas;
+                  const mermaCalculada = panesEsperados - panesEmpacados;
+                  const faltante = p.unidades_referencia - panesEmpacados;
                   return (
                     <tr key={p.id} className="border-b hover:bg-gray-50">
                       <td className="p-2">
@@ -2001,7 +2005,7 @@ export const EmpaqueMasa: React.FC = () => {
                           <tr className="bg-gray-50 text-gray-600 text-xs">
                             <th className="text-left p-2 border-b">Producto</th>
                             <th className="text-right p-2 border-b">Programadas</th>
-                            <th className="text-right p-2 border-b">Empacadas</th>
+                            <th className="text-right p-2 border-b">Paquetes Empacados</th>
                             <th className="text-right p-2 border-b">Merma</th>
                             <th className="text-right p-2 border-b">Costo MP</th>
                             <th className="p-2 border-b"></th>
@@ -2013,9 +2017,11 @@ export const EmpaqueMasa: React.FC = () => {
                               emp: String(p.unidades_empacadas ?? p.unidades_ajustadas ?? ''),
                               merma: String(p.unidades_merma ?? '0'),
                             };
-                            const empacadasEdit = parseInt(edit.emp) || 0;
-                            const mermaCalculadaOV = (p.unidades_divididas > 0 ? p.unidades_divididas : p.unidades_horneadas) - empacadasEdit;
-                            const faltantes = p.unidades_ajustadas - empacadasEdit;
+                            const empacadasEdit = parseInt(edit.emp) || 0; // paquetes, no panes
+                            const panesPorPaqueteOV = Number(p.unidades_por_paquete) > 0 ? Number(p.unidades_por_paquete) : 1;
+                            const panesEmpacadosOV = empacadasEdit * panesPorPaqueteOV;
+                            const mermaCalculadaOV = (p.unidades_divididas > 0 ? p.unidades_divididas : p.unidades_horneadas) - panesEmpacadosOV;
+                            const faltantes = p.unidades_ajustadas - empacadasEdit; // esto sí compara paquetes contra paquetes, queda igual
                             return (
                               <tr key={p.id} className="border-b hover:bg-gray-50">
                                 <td className="p-2">

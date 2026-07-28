@@ -420,11 +420,22 @@ exports.actualizarDetalle = async (req, res) => {
        unidades_empacadas ?? null, unidades_merma ?? null]
     );
 
-    // Actualizar unidades_producidas en productos_por_masa
+    // unidades_empacadas llega en PAQUETES (lo que teclea el operario de empaque).
+    // productos_por_masa.unidades_producidas se usa en toda la app (incl. Planificación
+    // dinámica) con semántica de PANES — hay que convertir antes de guardar, si no,
+    // la ventana de Planificación mostraría un número equivocado tras empacar.
     if (unidades_empacadas !== undefined) {
+      const ppmR = await db.query(
+        `SELECT unidades_por_paquete FROM productos_por_masa WHERE id = $1`,
+        [productoId]
+      );
+      const panesPorPaquete = parseFloat(ppmR.rows[0]?.unidades_por_paquete) > 0
+        ? parseFloat(ppmR.rows[0].unidades_por_paquete)
+        : 1;
+      const panesEquivalentes = Math.round(unidades_empacadas * panesPorPaquete);
       await db.query(
         `UPDATE productos_por_masa SET unidades_producidas = $1 WHERE id = $2`,
-        [unidades_empacadas, productoId]
+        [panesEquivalentes, productoId]
       );
     }
 
@@ -1003,7 +1014,14 @@ exports.getMasasPendientesEmpaque = async (req, res) => {
         const mapaMateriales = {};
         for (const mat of matR.rows) {
           const prod = productos.find(p => p.sap_item_code === mat.item_code_padre);
-          const unidades = parseInt(prod?.unidades_referencia || prod?.unidades_programadas || 0);
+          // unidades_referencia viene en PANES (post-división); el BOM de empaque está
+          // definido POR PAQUETE, así que hay que convertir antes de multiplicar — si no,
+          // se sobreestima el material necesario (mismo bug reportado en el consumo real).
+          const panesRef = parseInt(prod?.unidades_referencia || prod?.unidades_programadas || 0);
+          const panesPorPaqueteRef = parseFloat(prod?.unidades_por_paquete) > 0
+            ? parseFloat(prod.unidades_por_paquete)
+            : 1;
+          const unidades = panesRef / panesPorPaqueteRef;
           const key = mat.item_code_comp;
           if (!mapaMateriales[key]) {
             mapaMateriales[key] = {
