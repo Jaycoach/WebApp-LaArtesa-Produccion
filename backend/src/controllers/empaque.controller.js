@@ -888,6 +888,14 @@ exports.getMasasPendientesEmpaque = async (req, res) => {
     const masasR = await db.query(`
       SELECT mp.id, mp.codigo_masa, mp.nombre_masa, mp.tipo_masa,
              mp.total_kilos_con_merma, mp.fecha_produccion,
+             COALESCE((
+               SELECT SUM(im.peso_real)
+               FROM ingredientes_masa im
+               WHERE im.masa_id = mp.id
+                 AND im.es_empaque = false
+                 AND im.es_decoracion = false
+                 AND im.pesado = true
+             ), 0) / 1000 AS total_kilos_pesado_real,
              mp.es_subdivision, mp.masa_padre_id,
              mp.lote_produccion,
              mp.es_repeticion, mp.es_adicional,
@@ -1018,6 +1026,7 @@ exports.getMasasPendientesEmpaque = async (req, res) => {
         nombre_masa:             masa.nombre_masa,
         tipo_masa:               masa.tipo_masa,
         total_kilos_con_merma:   parseFloat(masa.total_kilos_con_merma || 0),
+        total_kilos_pesado_real: parseFloat(masa.total_kilos_pesado_real || 0),
         fecha_produccion:        masa.fecha_produccion,
         es_subdivision:          masa.es_subdivision,
         estado_empaque:          masa.estado_empaque,

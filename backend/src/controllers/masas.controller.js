@@ -37,6 +37,7 @@ const getMasasByFecha = async (req, res, next) => {
       ...m,
       total_kilos_base:           parseFloat(m.total_kilos_base)           || 0,
       total_kilos_con_merma:      parseFloat(m.total_kilos_con_merma)      || 0,
+      total_kilos_pesado_real:    parseFloat(m.total_kilos_pesado_real)    || 0,
       porcentaje_merma:           parseFloat(m.porcentaje_merma)           || 0,
       factor_absorcion_usado:     parseFloat(m.factor_absorcion_usado)     || 0,
       total_ordenes:              parseInt(m.total_ordenes)                || 0,

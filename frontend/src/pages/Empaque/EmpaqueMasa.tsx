@@ -63,6 +63,7 @@ interface MasaPendiente {
   nombre_masa: string;
   tipo_masa: string;
   total_kilos_con_merma: number;
+  total_kilos_pesado_real: number;
   fecha_produccion: string;
   es_subdivision: boolean;
   es_repeticion?: boolean;
@@ -445,7 +446,7 @@ const PanelPendientes: React.FC<{
                 </div>
                 <div className="flex flex-wrap gap-3 text-xs text-gray-500">
                   <span>{masa.tipo_masa}</span>
-                  <span>{masa.total_kilos_con_merma.toFixed(2)} kg</span>
+                  <span>{(masa.total_kilos_pesado_real > 0 ? masa.total_kilos_pesado_real : masa.total_kilos_con_merma).toFixed(2)} kg</span>
                   <span>{fmtFecha(masa.fecha_produccion)}</span>
                   {masa.lote_produccion && (
                     <span className="font-mono font-semibold text-indigo-700 bg-indigo-50 px-1.5 rounded">
@@ -717,7 +718,7 @@ const PanelEmpaqueMasa: React.FC<{
         </button>
         <div className="flex-1">
           <h2 className="text-lg font-bold text-gray-800">{masa.nombre_masa}</h2>
-          <p className="text-xs text-gray-500 font-mono">{masa.codigo_masa} · {masa.total_kilos_con_merma.toFixed(2)} kg</p>
+          <p className="text-xs text-gray-500 font-mono">{masa.codigo_masa} · {(masa.total_kilos_pesado_real > 0 ? masa.total_kilos_pesado_real : masa.total_kilos_con_merma).toFixed(2)} kg</p>
         </div>
         {empaque_iniciado && puedeOperar && (
           <button
@@ -1660,6 +1661,7 @@ export const EmpaqueMasa: React.FC = () => {
       nombre_masa: m.nombre_masa,
       tipo_masa: m.tipo_masa,
       total_kilos_con_merma: parseFloat(String(m.total_kilos_con_merma)) || 0,
+      total_kilos_pesado_real: parseFloat(String(m.total_kilos_pesado_real)) || 0,
       fecha_produccion: m.fecha_produccion?.slice(0, 10) || '',
       es_subdivision: false,
       estado_empaque: estadoEmpaqueEfectivo,

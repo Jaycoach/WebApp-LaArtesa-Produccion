@@ -62,6 +62,14 @@ const getMasasByFecha = async (fecha, fase = null) => {
   const result = await db.query(`
     SELECT
       m.*,
+      COALESCE((
+        SELECT SUM(im.peso_real)
+        FROM ingredientes_masa im
+        WHERE im.masa_id = m.id
+          AND im.es_empaque = false
+          AND im.es_decoracion = false
+          AND im.pesado = true
+      ), 0) / 1000 AS total_kilos_pesado_real,
       (SELECT COUNT(DISTINCT ov.sap_doc_entry) FROM productos_por_masa_ov ov WHERE ov.masa_id = m.id) as total_ordenes,
       (SELECT array_agg(ov.sap_doc_num::text ORDER BY ov.sap_doc_num) FROM (SELECT DISTINCT sap_doc_num FROM productos_por_masa_ov WHERE masa_id = m.id) ov) as numeros_ov,
       COUNT(pm.id) as total_productos,
@@ -92,7 +100,18 @@ const getMasaById = async (masaId) => {
   const masaIdNum = Number(masaId);
 
   const result = await db.query(`
-    SELECT * FROM masas_produccion WHERE id = $1
+    SELECT
+      mp.*,
+      COALESCE((
+        SELECT SUM(im.peso_real)
+        FROM ingredientes_masa im
+        WHERE im.masa_id = mp.id
+          AND im.es_empaque = false
+          AND im.es_decoracion = false
+          AND im.pesado = true
+      ), 0) / 1000 AS total_kilos_pesado_real
+    FROM masas_produccion mp
+    WHERE mp.id = $1
   `, [masaIdNum]);
 
   return result.rows[0];
