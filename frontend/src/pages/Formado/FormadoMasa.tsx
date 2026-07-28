@@ -69,8 +69,10 @@ export const FormadoMasa: React.FC = () => {
     if (data?.registro_actual && !data.registro_actual.fecha_fin) {
       setEtapa('progreso');
       setMaquinaId(data.registro_actual.maquina_formado_id);
+      setObservaciones(data.registro_actual.observaciones || '');
     } else if (data?.registro_actual?.fecha_fin) {
       setEtapa('completar');
+      setObservaciones(data.registro_actual.observaciones || '');
     }
   }, [data]);
 
@@ -323,9 +325,24 @@ export const FormadoMasa: React.FC = () => {
               <span className="text-2xl">✅</span>
               <h2 className="text-lg font-semibold text-green-800">Formado completado</h2>
             </div>
-            <p className="text-green-700 text-sm mb-4">
-              El proceso de formado ha sido registrado exitosamente.
-            </p>
+            <div className="bg-white rounded-lg border border-green-100 p-4 mb-4 space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-500">Máquina formadora</span>
+                <span className="font-medium text-gray-800">{data.registro_actual?.maquina_nombre || '—'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Duración</span>
+                <span className="font-medium text-gray-800">
+                  {data.registro_actual?.duracion_minutos != null ? `${Math.round(Number(data.registro_actual.duracion_minutos))} min` : '—'}
+                </span>
+              </div>
+              {data.registro_actual?.observaciones && (
+                <div>
+                  <span className="text-gray-500 block mb-1">Observaciones</span>
+                  <p className="text-gray-800 bg-gray-50 rounded p-2 whitespace-pre-wrap">{data.registro_actual.observaciones}</p>
+                </div>
+              )}
+            </div>
             <div className="flex gap-3">
               <button
                 onClick={() => setShowMO(true)}
