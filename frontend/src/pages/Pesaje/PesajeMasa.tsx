@@ -106,6 +106,20 @@ export const PesajeMasa: React.FC = () => {
     });
   };
 
+  // Encapsula el flujo completo: marca disponible + verificado (misma lógica de siempre,
+  // solo que ahora ocurre en un solo paso invisible para el usuario) y abre el formulario
+  // de pesaje directamente — reemplaza los 2 checks manuales + botón "Registrar Pesaje".
+  const handleRegistrarPesajeClick = async (ingrediente: any) => {
+    if (ingrediente.sin_stock || ingrediente.pesado) return;
+    try {
+      if (!ingrediente.disponible) await handleMarcar(ingrediente.id, 'disponible', true);
+      if (!ingrediente.verificado) await handleMarcar(ingrediente.id, 'verificado', true);
+    } catch {
+      return; // si falla marcar disponible/verificado, no abrir el formulario
+    }
+    handleEditar(ingrediente);
+  };
+
   const handleEditar = (ingrediente: any) => {
     setEditando(ingrediente.id);
 
@@ -492,20 +506,9 @@ export const PesajeMasa: React.FC = () => {
                     <p className="text-sm text-gray-600">
                       {ing.es_empaque
                         ? `${Number(ing.cantidad_kilos).toFixed(0)} ${ing.uom || 'Und'}`
-                        : `${Number(ing.cantidad_kilos).toFixed(2)} kg (${ing.cantidad_gramos}g)`} - {ing.porcentaje_panadero}% panadero
+                        : `${ing.cantidad_gramos}g`}
                     </p>
-                    {/* Stock e inventario SAP */}
                     <div className="flex flex-wrap gap-3 mt-1 text-xs text-gray-500">
-                      {ing.stock_disponible !== null && (
-                        <span className={ing.sin_stock ? 'text-red-600 font-semibold' : 'text-green-700'}>
-                          Stock ALMP: {Number(ing.stock_disponible).toFixed(3)} {ing.uom || 'kg'}
-                        </span>
-                      )}
-                      {ing.costo_unitario_sap !== null && ing.costo_unitario_sap > 0 && (
-                        <span className="text-blue-600">
-                          Costo: ${Number(ing.costo_unitario_sap).toLocaleString('es-CO', { minimumFractionDigits: 2 })}/{ing.uom || 'kg'}
-                        </span>
-                      )}
                       {ing.excluido_stock && (
                         <span className="text-gray-400 italic">
                           Sin validación de stock (insumo propio)
@@ -542,9 +545,6 @@ export const PesajeMasa: React.FC = () => {
                           </div>
                         </div>
                       )}
-                      {ing.stock_disponible === null && (
-                        <span className="text-gray-400 italic">Sin datos de inventario SAP</span>
-                      )}
                     </div>
                   </div>
 
@@ -559,39 +559,19 @@ export const PesajeMasa: React.FC = () => {
                       <label className="flex items-center gap-2">
                         <input
                           type="checkbox"
-                          checked={ing.disponible}
-                          onChange={(e) => !ing.sin_stock && handleMarcar(ing.id, 'disponible', e.target.checked)}
-                          disabled={ing.sin_stock}
-                          className="w-5 h-5 disabled:opacity-50"
-                        />
-                        <span className="text-sm">Disponible</span>
-                      </label>
-                      <label className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={ing.verificado}
-                          onChange={(e) => handleMarcar(ing.id, 'verificado', e.target.checked)}
-                          disabled={!ing.disponible}
-                          className="w-5 h-5 disabled:opacity-50"
-                        />
-                        <span className="text-sm">Verificado</span>
-                      </label>
-                      <label className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
                           checked={ing.pesado}
-                          onChange={() => {}} // Read-only checkbox (pesado se marca mediante el formulario)
-                          disabled={!ing.verificado}
+                          onChange={() => handleRegistrarPesajeClick(ing)}
+                          disabled={ing.sin_stock || ing.pesado}
                           className="w-5 h-5 disabled:opacity-50"
                         />
-                        <span className="text-sm">Pesado</span>
+                        <span className="text-sm font-medium">{ing.pesado ? 'Pesado' : 'Registrar Pesaje'}</span>
                       </label>
                     </div>
                   )}
                 </div>
 
                 {/* Formulario de pesaje — nunca se abre para decoración */}
-                {!ing.es_decoracion && ing.verificado && ((!ing.pesado && editando === ing.id) || (ing.pesado && editando === ing.id && puedeEditar)) && (
+                {!ing.es_decoracion && ((!ing.pesado && editando === ing.id) || (ing.pesado && editando === ing.id && puedeEditar)) && (
                   <div className="mt-4 grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Peso teórico BOM (g)</label>
@@ -826,14 +806,6 @@ export const PesajeMasa: React.FC = () => {
                   </div>
                 )}
 
-                {ing.verificado && !ing.pesado && editando !== ing.id && (
-                  <button
-                    onClick={() => handleEditar(ing)}
-                    className="mt-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
-                  >
-                    Registrar Pesaje
-                  </button>
-                )}
                 {ing.pesado && puedeEditar && editando !== ing.id && (
                   <button
                     onClick={() => handleEditar(ing)}
