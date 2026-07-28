@@ -7,6 +7,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { fasesService } from '../../services/fasesService';
 import { useAuthStore } from '@/store';
 import { masasService } from '../../services/masasService';
+import { formatBogotaTime } from '../../utils/timezone';
 
 // ── Iconos SVG inline para cada fase ────────────────────────
 const FaseIcono: React.FC<{ fase: string; estado: string }> = ({ fase, estado }) => {
@@ -475,9 +476,7 @@ export const DetalleMasa: React.FC = () => {
                     {/* Fecha completado */}
                     {fase.fecha_completado && (
                       <p className="text-xs text-gray-400 mt-1 text-center truncate">
-                        {new Date(fase.fecha_completado).toLocaleTimeString('es-CO', {
-                          hour: '2-digit', minute: '2-digit'
-                        })}
+                        {formatBogotaTime(fase.fecha_completado)}
                       </p>
                     )}
 
