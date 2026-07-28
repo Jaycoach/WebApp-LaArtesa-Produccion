@@ -209,7 +209,7 @@ export const HorneadoMasa: React.FC = () => {
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-400">
                   <option value="">Seleccionar programa...</option>
                   {programas.map((p: any) => (
-                    <option key={p.id} value={p.id}>Prog. {p.numero_programa} — {p.nombre}</option>
+                    <option key={p.id} value={p.id}>Programa {p.numero_programa}</option>
                   ))}
                 </select>
               </div>
