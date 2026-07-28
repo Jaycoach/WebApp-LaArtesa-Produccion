@@ -50,11 +50,15 @@ export interface MasaProduccionResumen {
   total_unidades_pedidas: number;
   total_unidades_programadas: number;
   total_panes?: number;
+  division_completada_total?: boolean;
+  total_panes_cortados?: number;
   productos_resumen?: {
     producto_nombre: string;
     sap_item_code: string | null;
     unidades_por_paquete: number;
     cantidad_paquetes: number;
+    unidades_producidas?: number;
+    division_completada?: boolean;
   }[];
   es_repeticion: boolean;
   es_adicional?: boolean;
