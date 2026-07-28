@@ -51,6 +51,7 @@ interface Masa {
   estado: string;
   fase_actual: string;
   total_kilos_con_merma: number;
+  total_kilos_pesado_real: number;
   total_productos: number;
   total_unidades_programadas: number;
   es_repeticion?: boolean;
@@ -97,7 +98,7 @@ const MasaCard = ({
 
       <div className="mt-3 grid grid-cols-3 gap-2 text-center">
         <div className={`rounded p-1.5 ${cfg.bgColor}`}>
-          <p className={`text-sm font-bold ${cfg.color}`}>{Number(masa.total_kilos_con_merma).toFixed(1)} kg</p>
+          <p className={`text-sm font-bold ${cfg.color}`}>{Number(masa.total_kilos_pesado_real > 0 ? masa.total_kilos_pesado_real : masa.total_kilos_con_merma).toFixed(1)} kg</p>
           <p className="text-xs text-gray-500">Kilos</p>
         </div>
         <div className={`rounded p-1.5 ${cfg.bgColor}`}>

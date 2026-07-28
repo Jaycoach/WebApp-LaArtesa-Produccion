@@ -101,11 +101,11 @@ export const AmasadoMasa: React.FC = () => {
         <Card title="Información de la Masa">
           <div className="grid grid-cols-2 gap-6">
             <div>
-              <p className="text-sm text-gray-600">Total con Merma</p>
+              <p className="text-sm text-gray-600">Total Pesado</p>
               <p className="text-2xl font-bold text-gray-900">
-                {typeof masa.total_kilos_con_merma === 'number'
-                  ? masa.total_kilos_con_merma.toFixed(2)
-                  : Number(masa.total_kilos_con_merma).toFixed(2)} kg
+                {typeof masa.total_kilos_pesado_real === 'number'
+                  ? masa.total_kilos_pesado_real.toFixed(2)
+                  : Number(masa.total_kilos_pesado_real).toFixed(2)} kg
               </p>
             </div>
             <div>

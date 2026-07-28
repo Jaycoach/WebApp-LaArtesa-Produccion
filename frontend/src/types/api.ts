@@ -43,6 +43,7 @@ export interface MasaProduccionResumen {
   fase_actual: string;
   total_kilos_base: number;
   total_kilos_con_merma: number;
+  total_kilos_pesado_real: number;
   porcentaje_merma: number;
   total_ordenes: number;
   total_productos: number;
