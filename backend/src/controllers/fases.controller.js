@@ -436,14 +436,26 @@ async function insertarProductoEnMasa(masaId, prod, unidadesProg, unidadesPedida
     : (() => { const m = (prod.producto_nombre || '').match(/ X ?(\d+)/i); return m ? parseInt(m[1]) : 1; })();
   const cantPaquetes = unidadesProg;
 
+  // Multiplo_divisor y peso_masa_dividida son atributos del artículo (no cambian al subdividir) —
+  // deben copiarse del producto original, no quedarse en NULL/0.
+  const multiploDivisor = parseInt(prod.multiplo_divisor || 0);
+
+  // unidades_ajustadas/unidades_excedente sí dependen de la cantidad de ESTA tanda —
+  // recalcular con la misma fórmula usada en el sync original (sap.controller.js).
+  const unidadesAjustadas = (multiploDivisor > 0 && unidadesProg % multiploDivisor !== 0)
+    ? (Math.floor(unidadesProg / multiploDivisor) + 1) * multiploDivisor
+    : unidadesProg;
+  const unidadesExcedente = unidadesAjustadas - unidadesProg;
+
   await qr.query(`
     INSERT INTO productos_por_masa
       (masa_id, producto_codigo, producto_nombre, presentacion, gramaje_unitario,
        unidades_pedidas, unidades_programadas, unidades_producidas,
        kilos_pedidos, kilos_programados, kilos_producidos,
        sap_item_code, unidades_por_paquete, cantidad_paquetes, delta_ajuste,
-       tamanio, forma)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,0,$8,$9,0,$10,$11,$12,$13,$14,$15)
+       tamanio, forma, multiplo_divisor, unidades_ajustadas, unidades_excedente,
+       peso_masa_dividida)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,0,$8,$9,0,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
   `, [
     masaId,
     prod.producto_codigo,
@@ -460,6 +472,10 @@ async function insertarProductoEnMasa(masaId, prod, unidadesProg, unidadesPedida
     unidadesProg > unidadesPedidas ? unidadesProg - unidadesPedidas : 0,
     prod.tamanio || null,
     prod.forma || null,
+    multiploDivisor,
+    unidadesAjustadas,
+    unidadesExcedente,
+    prod.peso_masa_dividida || null,
   ]);
 }
 
