@@ -79,13 +79,13 @@ def main():
         cursor.execute(f'''
             SELECT "ItemCode", "ItemName", "U_JZ_Tipos_Masa", "SalPackUn",
                    "SWeight1", "U_JZ_MultiploDivisor", "validFor", "frozenFor",
-                   "U_JZ_Tamanio", "U_JZ_Forma"
+                   "U_JZ_Tamanio", "U_JZ_Forma", "U_JZ_PesMasDiv"
             FROM "{schema}"."OITM"
             WHERE "ItemCode" IN ({placeholders})
         ''', item_codes)
 
         articulos = {}
-        for item_code, item_name, tipo_masa, sal_pack_un, sweight1, multiplo, valid_for, frozen_for, tamanio, forma in cursor.fetchall():
+        for item_code, item_name, tipo_masa, sal_pack_un, sweight1, multiplo, valid_for, frozen_for, tamanio, forma, peso_masa_dividida in cursor.fetchall():
             if valid_for == 'N' or frozen_for == 'Y':
                 continue
             if not tipo_masa:
@@ -98,6 +98,7 @@ def main():
                 'multiploDivisor': round(float(multiplo)) if multiplo is not None else 0,
                 'tamanio': tamanio or None,
                 'forma': forma or None,
+                'pesoMasaDividida': float(peso_masa_dividida) if peso_masa_dividida is not None else None,
             }
 
         conn.close()
@@ -136,6 +137,7 @@ def main():
                 'multiploDivisor': art['multiploDivisor'],
                 'tamanio': art.get('tamanio'),
                 'forma': art.get('forma'),
+                'pesoMasaDividida': art.get('pesoMasaDividida'),
             })
 
         print(json.dumps(resultado))

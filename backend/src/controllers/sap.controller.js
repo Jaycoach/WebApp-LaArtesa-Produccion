@@ -936,8 +936,8 @@ const sincronizarDesdeOV = async (req, res, next) => {
                  sap_item_code, unidades_por_paquete, cantidad_paquetes,
                  sap_doc_entry, sap_doc_num,
                  multiplo_divisor, unidades_ajustadas, unidades_excedente,
-                 tamanio, forma
-               ) VALUES ($1,$2,$3,'Por definir',$4,0,0,0,0,$5,$6,$7,$8,$9,$10,0,0,$11,$12)
+                 tamanio, forma, peso_masa_dividida
+               ) VALUES ($1,$2,$3,'Por definir',$4,0,0,0,0,$5,$6,$7,$8,$9,$10,0,0,$11,$12,$13)
                RETURNING id`,
               [
                 masaIdExistente,
@@ -950,6 +950,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
                 multiploDivisor,
                 prod.tamanio || null,
                 prod.forma || null,
+                prod.pesoMasaDividida || null,
               ]
             );
             productoMasaId = insertPPM.rows[0].id;
@@ -1131,11 +1132,12 @@ const sincronizarDesdeOV = async (req, res, next) => {
              unidades_pedidas, unidades_programadas, kilos_pedidos, kilos_programados,
              sap_item_code, unidades_por_paquete, cantidad_paquetes, sap_doc_entry, sap_doc_num,
              multiplo_divisor, unidades_ajustadas, unidades_excedente,
-             tamanio, forma
-           ) VALUES ($1, $2, $3, 'Por definir', $4, $5, $5, $6, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+             tamanio, forma, peso_masa_dividida
+           ) VALUES ($1, $2, $3, 'Por definir', $4, $5, $5, $6, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
            ON CONFLICT (masa_id, sap_item_code) DO UPDATE SET
              tamanio               = COALESCE(EXCLUDED.tamanio, productos_por_masa.tamanio),
              forma                 = COALESCE(EXCLUDED.forma, productos_por_masa.forma),
+             peso_masa_dividida    = COALESCE(EXCLUDED.peso_masa_dividida, productos_por_masa.peso_masa_dividida),
              unidades_pedidas     = productos_por_masa.unidades_pedidas     + EXCLUDED.unidades_pedidas,
              unidades_programadas = productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas,
              cantidad_paquetes    = productos_por_masa.cantidad_paquetes    + EXCLUDED.cantidad_paquetes,
@@ -1176,6 +1178,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
             unidadesExcedente,                                      // $14
             prod.tamanio || null,                                   // $15
             prod.forma || null,                                     // $16
+            prod.pesoMasaDividida || null,                          // $17
           ]
         );
       }
@@ -1573,8 +1576,8 @@ const sincronizarBOM = async (req, res, next) => {
         // 2. Upsert en sap_articulos
         await db.query(
           `INSERT INTO sap_articulos
-             (item_code, item_name, tipo_masa, sales_qty_per_pack, gramaje, multiplo_divisor, tamanio, forma, activo, synced_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+             (item_code, item_name, tipo_masa, sales_qty_per_pack, gramaje, multiplo_divisor, tamanio, forma, peso_masa_dividida, activo, synced_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
            ON CONFLICT (item_code) DO UPDATE SET
              item_name          = EXCLUDED.item_name,
              tipo_masa          = EXCLUDED.tipo_masa,
@@ -1583,6 +1586,7 @@ const sincronizarBOM = async (req, res, next) => {
              multiplo_divisor   = EXCLUDED.multiplo_divisor,
              tamanio            = EXCLUDED.tamanio,
              forma              = EXCLUDED.forma,
+             peso_masa_dividida = COALESCE(EXCLUDED.peso_masa_dividida, sap_articulos.peso_masa_dividida),
              activo             = true,
              synced_at          = CURRENT_TIMESTAMP,
              updated_at         = CURRENT_TIMESTAMP`,
@@ -1595,6 +1599,7 @@ const sincronizarBOM = async (req, res, next) => {
             articulo.multiploDivisor || 0,
             articulo.tamanio,
             articulo.forma,
+            articulo.pesoMasaDividida,
           ]
         );
         articulosUpserted++;
