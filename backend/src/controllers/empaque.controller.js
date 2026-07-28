@@ -1014,14 +1014,17 @@ exports.getMasasPendientesEmpaque = async (req, res) => {
         const mapaMateriales = {};
         for (const mat of matR.rows) {
           const prod = productos.find(p => p.sap_item_code === mat.item_code_padre);
-          // unidades_referencia viene en PANES (post-división); el BOM de empaque está
-          // definido POR PAQUETE, así que hay que convertir antes de multiplicar — si no,
-          // se sobreestima el material necesario (mismo bug reportado en el consumo real).
-          const panesRef = parseInt(prod?.unidades_referencia || prod?.unidades_programadas || 0);
+          // unidades_referencia viene en PANES solo cuando division_completada=true (viene de
+          // cantidad_divisiones). Si aún no hay división, unidades_referencia ya es PAQUETES
+          // (viene de unidades_ajustadas/unidades_programadas) y NO debe dividirse — dividir
+          // en ese caso subestima el material 6x (bug detectado 2026-07-28 en BRIOCHE OV617).
+          const refValor = parseFloat(prod?.unidades_referencia || prod?.unidades_programadas || 0);
           const panesPorPaqueteRef = parseFloat(prod?.unidades_por_paquete) > 0
             ? parseFloat(prod.unidades_por_paquete)
             : 1;
-          const unidades = panesRef / panesPorPaqueteRef;
+          const unidades = prod?.division_completada
+            ? refValor / panesPorPaqueteRef
+            : refValor;
           const key = mat.item_code_comp;
           if (!mapaMateriales[key]) {
             mapaMateriales[key] = {
