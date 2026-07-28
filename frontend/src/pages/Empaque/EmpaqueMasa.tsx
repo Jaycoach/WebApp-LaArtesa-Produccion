@@ -268,6 +268,43 @@ const ModalFaltantes: React.FC<{
   );
 };
 
+// ── Modal Resumen Empaque Completado ────────────────────────────────────────
+// Bloqueante: no se cierra solo, exige que el usuario dé clic en "Aceptar" antes
+// de navegar de vuelta a la lista. Sin esto, el usuario no tiene forma confiable
+// de confirmar que el producto terminado y el consumo de materiales sí llegaron a SAP.
+const ModalResumenEmpaque: React.FC<{
+  docEntrada?: number | null;
+  docSalida?: number | null;
+  onAceptar: () => void;
+}> = ({ docEntrada, docSalida, onAceptar }) => {
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-2xl">✅</span>
+          <h3 className="font-bold text-lg text-green-700">Empaque completado</h3>
+        </div>
+        <div className="bg-green-50 border border-green-200 rounded p-3 mb-4 space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span className="text-gray-600">Producto terminado registrado en SAP</span>
+            <span className="font-mono font-semibold text-gray-800">{docEntrada ? `DocEntry ${docEntrada}` : '—'}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-600">Consumo de materiales de empaque en SAP</span>
+            <span className="font-mono font-semibold text-gray-800">{docSalida ? `DocEntry ${docSalida}` : '—'}</span>
+          </div>
+        </div>
+        <button
+          onClick={onAceptar}
+          className="w-full bg-green-600 text-white py-2.5 rounded hover:bg-green-700 font-semibold"
+        >
+          Aceptar
+        </button>
+      </div>
+    </div>
+  );
+};
+
 // ── Modal MO ─────────────────────────────────────────────────────────────────
 const ModalMO: React.FC<{
   masaId: number;
@@ -594,6 +631,7 @@ const PanelEmpaqueMasa: React.FC<{
   const [msg, setMsg] = useState<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
   const [modalMO, setModalMO] = useState(false);
   const [modalFaltantes, setModalFaltantes] = useState<{ faltantes: any[] } | null>(null);
+  const [modalResumen, setModalResumen] = useState<{ docEntrada?: number | null; docSalida?: number | null } | null>(null);
   const [etiquetaData, setEtiquetaData] = useState<any>(null);
   const [guardadoIds, setGuardadoIds] = useState<Set<number>>(new Set());
 
@@ -672,8 +710,11 @@ const PanelEmpaqueMasa: React.FC<{
         mostrar('err', `⚠ Empaque guardado, pero hubo errores en SAP:\n${resultado.sap_advertencias.join('\n')}\n\nContacta al supervisor para corregir el movimiento en SAP.`);
         // No navegar — dejar al usuario ver el error
       } else {
-        mostrar('ok', 'Empaque completado');
-        setTimeout(() => onCompletado(), 1500);
+        // No navegar automáticamente — esperar el "Aceptar" explícito del usuario en el modal.
+        setModalResumen({
+          docEntrada: resultado?.data?.sap_entrada?.doc_entry,
+          docSalida: resultado?.data?.sap_salida?.doc_entry,
+        });
       }
     } catch (e: any) {
       const itemSinStock = e?.data?.item_sin_stock;
@@ -1186,6 +1227,13 @@ const PanelEmpaqueMasa: React.FC<{
           faltantes={modalFaltantes.faltantes}
           onConfirmar={(obs) => { setModalFaltantes(null); handleCompletar(obs); }}
           onCancelar={() => setModalFaltantes(null)}
+        />
+      )}
+      {modalResumen && (
+        <ModalResumenEmpaque
+          docEntrada={modalResumen.docEntrada}
+          docSalida={modalResumen.docSalida}
+          onAceptar={() => { setModalResumen(null); onCompletado(); }}
         />
       )}
       {etiquetaData && (
