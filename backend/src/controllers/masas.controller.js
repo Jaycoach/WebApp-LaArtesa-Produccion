@@ -313,12 +313,33 @@ const aprobarMasa = async (req, res, next) => {
        WHERE id = $1`,
       [id, req.user.id, prioridad ?? null, hora_entrega || null]
     );
-    if (fecha_vencimiento_sugerida) {
+
+    // Fecha de vencimiento sugerida: si el usuario no la especificó manualmente,
+    // calcularla desde U_JZ_DiasExp (SAP) = fecha de aprobación + días de vencimiento
+    // del producto. Con varios productos por masa, se usa el más conservador (MIN días).
+    // Si ningún producto tiene U_JZ_DiasExp configurado, se deja igual que antes (vacío,
+    // el usuario la ingresa a mano en Empaque) — fallback preservado.
+    let fechaVencimientoFinal = fecha_vencimiento_sugerida || null;
+    if (!fechaVencimientoFinal) {
+      const diasR = await db.query(
+        `SELECT MIN(dias_vencimiento) AS dias_min
+         FROM productos_por_masa
+         WHERE masa_id = $1 AND dias_vencimiento IS NOT NULL`,
+        [id]
+      );
+      const diasMin = diasR.rows[0]?.dias_min;
+      if (diasMin != null) {
+        const fechaCalc = new Date();
+        fechaCalc.setDate(fechaCalc.getDate() + parseInt(diasMin));
+        fechaVencimientoFinal = fechaCalc.toISOString().split('T')[0];
+      }
+    }
+    if (fechaVencimientoFinal) {
       await db.query(
         `UPDATE progreso_fases
          SET datos_fase = COALESCE(datos_fase, '{}'::jsonb) || $2::jsonb
          WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
-        [id, JSON.stringify({ fecha_vencimiento_sugerida })]
+        [id, JSON.stringify({ fecha_vencimiento_sugerida: fechaVencimientoFinal })]
       );
     }
 

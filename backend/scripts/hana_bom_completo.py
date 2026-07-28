@@ -52,7 +52,7 @@ def main():
             SELECT
               P."ItemCode", P."ItemName", P."U_JZ_Tipos_Masa",
               P."SalPackUn", P."SWeight1", P."U_JZ_MultiploDivisor",
-              P."U_JZ_Tamanio", P."U_JZ_Forma", P."U_JZ_PesMasDiv",
+              P."U_JZ_Tamanio", P."U_JZ_Forma", P."U_JZ_PesMasDiv", P."U_JZ_DiasExp",
               L."Code", L."ItemName", L."Quantity", L."Warehouse",
               L."IssueMthd", L."VisOrder",
               C."InvntryUom", C."ItmsGrpCod", C."U_JZ_Decoracion"
@@ -67,7 +67,7 @@ def main():
         articulos = {}
         for row in cursor.fetchall():
             (item_code, item_name, tipo_masa, sales_qty_per_pack, gramaje,
-             multiplo_divisor, tamanio, forma, peso_masa_dividida,
+             multiplo_divisor, tamanio, forma, peso_masa_dividida, dias_vencimiento,
              comp_code, comp_name, cantidad, warehouse, issue_method, vis_order,
              uom, grupo_sap, decoracion) = row
 
@@ -82,6 +82,7 @@ def main():
                     "tamanio": tamanio,
                     "forma": forma,
                     "pesoMasaDividida": float(peso_masa_dividida) if peso_masa_dividida is not None else None,
+                    "diasVencimiento": round(float(dias_vencimiento)) if dias_vencimiento is not None else None,
                     "bom": [],
                 }
 
