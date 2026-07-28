@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card } from '@/components/common';
 import { useMasaDetail, useProductos } from '../../hooks/useMasas';
@@ -25,6 +25,21 @@ export const DivisionMasa: React.FC = () => {
   });
 
   const [cantidadesDivididas, setCantidadesDivididas] = useState<Record<number, number>>({});
+
+  // Prellenar cantidades ya guardadas (ej. división parcial guardada previamente)
+  // para que el input no aparezca vacío al volver a consultar mientras sigue en DIVISION.
+  useEffect(() => {
+    if (masa?.fase_actual === 'DIVISION' && productos && (productos as any[]).length > 0) {
+      setCantidadesDivididas(prev => {
+        if (Object.keys(prev).length > 0) return prev; // no pisar lo que el usuario ya está editando
+        const inicial: Record<number, number> = {};
+        for (const p of productos as any[]) {
+          if (Number(p.unidades_producidas) > 0) inicial[p.id] = Number(p.unidades_producidas);
+        }
+        return inicial;
+      });
+    }
+  }, [masa?.fase_actual, productos]);
 
   // ── Helpers ────────────────────────────────────────────────────
 
@@ -466,7 +481,6 @@ export const DivisionMasa: React.FC = () => {
                         const error      = cantidad > 0 ? validarCantidad(producto, cantidad) : null;
                         const divisor    = parseInt(producto.multiplo_divisor || 0);
                         const pedidas    = parseInt(producto.unidades_pedidas || 0);
-                        const ajustadas  = parseInt(producto.unidades_ajustadas || producto.unidades_programadas);
                         const excedente  = parseInt(producto.unidades_excedente || 0);
                         const esCorrecto = cantidad > 0 && !error;
 
@@ -535,9 +549,9 @@ export const DivisionMasa: React.FC = () => {
                             <td className="px-4 py-3 text-sm text-right">
                               {masa.fase_actual !== 'DIVISION' ? (
                                 <span className={`font-mono font-semibold text-sm ${
-                                  cantidad > 0 ? 'text-yellow-700' : 'text-gray-400'
+                                  Number(producto.unidades_producidas) > 0 ? 'text-yellow-700' : 'text-gray-400'
                                 }`}>
-                                  {cantidad > 0 ? cantidad : '—'}
+                                  {Number(producto.unidades_producidas) > 0 ? producto.unidades_producidas : '—'}
                                 </span>
                               ) : (
                                 <div className="flex flex-col items-end gap-1">
@@ -553,7 +567,13 @@ export const DivisionMasa: React.FC = () => {
                                         ? 'border-green-400 bg-green-50'
                                         : 'border-gray-300'
                                     }`}
-                                    placeholder={String(ajustadas)}
+                                    placeholder={String((() => {
+                                      const xSAP = parseFloat(String(producto.unidades_por_paquete || 0));
+                                      const xNombre = producto.producto_nombre?.match(/ X ?(\d+)/i);
+                                      const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
+                                      const programadas = parseInt(producto.unidades_programadas || producto.unidades_pedidas || 0);
+                                      return programadas * xPaq;
+                                    })())}
                                   />
                                   {error && (
                                     <p className="text-xs text-red-600 text-right max-w-xs">{error}</p>
