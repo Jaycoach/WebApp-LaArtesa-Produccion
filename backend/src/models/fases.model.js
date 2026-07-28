@@ -76,12 +76,16 @@ const getMasasByFecha = async (fecha, fase = null) => {
       SUM(pm.unidades_pedidas) as total_unidades_pedidas,
       SUM(pm.unidades_programadas) as total_unidades_programadas,
       SUM(pm.cantidad_paquetes) as total_panes,
+      BOOL_AND(COALESCE(pm.division_completada, false)) as division_completada_total,
+      SUM(CASE WHEN pm.division_completada THEN pm.unidades_producidas ELSE NULL END) as total_panes_cortados,
       json_agg(
         json_build_object(
           'producto_nombre', pm.producto_nombre,
           'sap_item_code', pm.sap_item_code,
           'unidades_por_paquete', pm.unidades_por_paquete,
-          'cantidad_paquetes', pm.cantidad_paquetes
+          'cantidad_paquetes', pm.cantidad_paquetes,
+          'unidades_producidas', pm.unidades_producidas,
+          'division_completada', COALESCE(pm.division_completada, false)
         ) ORDER BY pm.producto_nombre
       ) FILTER (WHERE pm.id IS NOT NULL) as productos_resumen
     FROM masas_produccion m

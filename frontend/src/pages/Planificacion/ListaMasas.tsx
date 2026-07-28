@@ -378,9 +378,9 @@ export const ListaMasas: React.FC = () => {
                       </span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Con merma ({masa.porcentaje_merma || 0}%):</span>
+                      <span className="text-gray-600">{masa.total_kilos_pesado_real > 0 ? 'Total Pesado:' : `Con merma (${masa.porcentaje_merma || 0}%):`}</span>
                       <span className="font-semibold text-blue-600">
-                        {typeof masa.total_kilos_con_merma === 'number' ? masa.total_kilos_con_merma.toFixed(2) : '0.00'} kg
+                        {(masa.total_kilos_pesado_real > 0 ? masa.total_kilos_pesado_real : masa.total_kilos_con_merma).toFixed(2)} kg
                       </span>
                     </div>
                   </div>
@@ -400,11 +400,13 @@ export const ListaMasas: React.FC = () => {
                     </div>
                     <div className="text-center">
                       <p className="text-2xl font-bold text-emerald-700">
-                        {Number(masa.total_unidades_programadas) > 0
-                          ? Number(masa.total_unidades_programadas).toLocaleString('es-CO')
-                          : '—'}
+                        {masa.division_completada_total && Number(masa.total_panes_cortados) > 0
+                          ? Number(masa.total_panes_cortados).toLocaleString('es-CO')
+                          : (Number(masa.total_unidades_programadas) > 0
+                              ? Number(masa.total_unidades_programadas).toLocaleString('es-CO')
+                              : '—')}
                       </p>
-                      <p className="text-xs text-gray-500">Total paquetes</p>
+                      <p className="text-xs text-gray-500">{masa.division_completada_total ? 'Panes cortados' : 'Total paquetes'}</p>
                     </div>
                   </div>
                   {masa.productos_resumen && masa.productos_resumen.length > 0 && (
@@ -415,9 +417,11 @@ export const ListaMasas: React.FC = () => {
                             {p.producto_nombre}
                           </span>
                           <span className="text-xs font-bold text-emerald-700 shrink-0">
-                            {Number(p.cantidad_paquetes) > 0
-                              ? `${Number(p.cantidad_paquetes).toLocaleString('es-CO')} paq · ${(Number(p.cantidad_paquetes) * Number(p.unidades_por_paquete || 1)).toLocaleString('es-CO')} panes`
-                              : '—'}
+                            {p.division_completada && Number(p.unidades_producidas) > 0
+                              ? `${Math.round(Number(p.unidades_producidas) / Number(p.unidades_por_paquete || 1)).toLocaleString('es-CO')} paq · ${Number(p.unidades_producidas).toLocaleString('es-CO')} panes (cortado)`
+                              : (Number(p.cantidad_paquetes) > 0
+                                  ? `${Number(p.cantidad_paquetes).toLocaleString('es-CO')} paq · ${(Number(p.cantidad_paquetes) * Number(p.unidades_por_paquete || 1)).toLocaleString('es-CO')} panes`
+                                  : '—')}
                           </span>
                         </div>
                       ))}

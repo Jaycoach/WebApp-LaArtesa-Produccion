@@ -378,9 +378,9 @@ export const DetalleMasa: React.FC = () => {
               </p>
             </div>
             <div>
-              <p className="text-sm text-gray-600">Con Merma ({masa.porcentaje_merma || 0}%)</p>
+              <p className="text-sm text-gray-600">{masa.total_kilos_pesado_real > 0 ? 'Total Pesado' : `Con Merma (${masa.porcentaje_merma || 0}%)`}</p>
               <p className="text-2xl font-bold text-blue-600">
-                {Number(masa.total_kilos_con_merma).toFixed(2)} kg
+                {(masa.total_kilos_pesado_real > 0 ? masa.total_kilos_pesado_real : Number(masa.total_kilos_con_merma)).toFixed(2)} kg
               </p>
             </div>
             <div>
