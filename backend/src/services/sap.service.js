@@ -393,7 +393,7 @@ class SAPService {
       const response = await this.client.get('/Items', {
         params: {
           $filter: filterParts,
-          $select: 'ItemCode,ItemName,SalesQtyPerPackUnit,U_JZ_Tipos_Masa,SalesUnitWeight1,U_JZ_MultiploDivisor,U_JZ_Tamanio,U_JZ_Forma,U_JZ_PesMasDiv,Valid,Frozen',
+          $select: 'ItemCode,ItemName,SalesQtyPerPackUnit,U_JZ_Tipos_Masa,SalesUnitWeight1,U_JZ_MultiploDivisor,U_JZ_Tamanio,U_JZ_Forma,U_JZ_PesMasDiv,U_JZ_DiasExp,Valid,Frozen',
           $top: BATCH,
         },
       });
@@ -413,6 +413,7 @@ class SAPService {
           tamanio:             item.U_JZ_Tamanio || fallbackAtributos.tamanio,
           forma:               item.U_JZ_Forma || fallbackAtributos.forma,
           pesoMasaDividida:    item.U_JZ_PesMasDiv != null ? Number(item.U_JZ_PesMasDiv) : null,
+          diasVencimiento:     item.U_JZ_DiasExp != null ? Math.round(Number(item.U_JZ_DiasExp)) : null,
         };
       }
     }
@@ -549,7 +550,7 @@ class SAPService {
       const response = await this.client.get('/Items', {
         params: {
           $filter: "U_JZ_Tipos_Masa ne null and U_JZ_Tipos_Masa ne '' and Valid eq 'tYES' and Frozen eq 'tNO'",
-          $select: 'ItemCode,ItemName,U_JZ_Tipos_Masa,SalesQtyPerPackUnit,SalesUnitWeight1,U_JZ_MultiploDivisor,U_JZ_Tamanio,U_JZ_Forma,U_JZ_PesMasDiv,Valid,Frozen',
+          $select: 'ItemCode,ItemName,U_JZ_Tipos_Masa,SalesQtyPerPackUnit,SalesUnitWeight1,U_JZ_MultiploDivisor,U_JZ_Tamanio,U_JZ_Forma,U_JZ_PesMasDiv,U_JZ_DiasExp,Valid,Frozen',
           $top: top,
           $skip: skip,
         },
@@ -575,6 +576,7 @@ class SAPService {
         tamanio:         item.U_JZ_Tamanio || fallbackAtributos.tamanio,
         forma:           item.U_JZ_Forma || fallbackAtributos.forma,
         pesoMasaDividida: item.U_JZ_PesMasDiv != null ? Number(item.U_JZ_PesMasDiv) : null,
+        diasVencimiento:  item.U_JZ_DiasExp != null ? Math.round(Number(item.U_JZ_DiasExp)) : null,
       };
     });
   }
