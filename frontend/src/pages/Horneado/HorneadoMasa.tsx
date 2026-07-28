@@ -9,6 +9,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ModalMO } from '../../components/common/ModalMO';
+import { formatBogotaTime } from '../../utils/timezone';
 
 const getToken = () => {
   try {
@@ -606,13 +607,13 @@ export const HorneadoMasa: React.FC = () => {
                 {data.registro_actual.hora_entrada && (
                   <div className="bg-white rounded-lg p-3 border border-green-100">
                     <div className="text-xs text-gray-500 mb-0.5">Entrada horno</div>
-                    <div className="font-semibold text-gray-800">{new Date(data.registro_actual.hora_entrada).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</div>
+                    <div className="font-semibold text-gray-800">{formatBogotaTime(data.registro_actual.hora_entrada)}</div>
                   </div>
                 )}
                 {data.registro_actual.hora_salida && (
                   <div className="bg-white rounded-lg p-3 border border-green-100">
                     <div className="text-xs text-gray-500 mb-0.5">Salida horno</div>
-                    <div className="font-semibold text-gray-800">{new Date(data.registro_actual.hora_salida).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</div>
+                    <div className="font-semibold text-gray-800">{formatBogotaTime(data.registro_actual.hora_salida)}</div>
                   </div>
                 )}
               </div>

@@ -10,6 +10,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ModalMO } from '../../components/common/ModalMO';
+import { bogotaNowForDatetimeLocal, datetimeLocalToBogotaISO, formatBogotaTime } from '../../utils/timezone';
 
 // ─────────────────────────────────────────────
 const getToken = () => {
@@ -56,13 +57,8 @@ export const FermentacionMasa: React.FC = () => {
   const [horaEntradaReal, setHoraEntradaReal] = useState('');
   const [horaSalidaReal, setHoraSalidaReal] = useState('');
 
-  // Hora actual del cliente en formato datetime-local (timezone Colombia)
-  const ahoraLocal = () => {
-    const now = new Date();
-    const offset = now.getTimezoneOffset();
-    const local = new Date(now.getTime() - offset * 60000);
-    return local.toISOString().slice(0, 16);
-  };
+  // Hora actual en Bogotá (fija, no depende del timezone del navegador/equipo del usuario)
+  const ahoraLocal = () => bogotaNowForDatetimeLocal();
 
   const { data, isLoading } = useQuery({
     queryKey: ['fermentacion', masaId],
@@ -263,7 +259,7 @@ export const FermentacionMasa: React.FC = () => {
                 onClick={() => avanzar('camara/entrada', {
                   temperatura_camara: parseFloat(temperatura) || null,
                   humedad_camara: parseFloat(humedad) || null,
-                  hora_entrada_real: horaEntradaReal || undefined,
+                  hora_entrada_real: datetimeLocalToBogotaISO(horaEntradaReal),
                 })}
                 disabled={mutacion.isPending}
                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-semibold py-3 rounded-lg transition-colors"
@@ -279,7 +275,7 @@ export const FermentacionMasa: React.FC = () => {
               {horaSalidaSugerida && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                   <p className="text-blue-800 text-sm">
-                    ⏰ Salida sugerida: <strong>{new Date(horaSalidaSugerida).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</strong>
+                    ⏰ Salida sugerida: <strong>{formatBogotaTime(horaSalidaSugerida)}</strong>
                   </p>
                 </div>
               )}
@@ -300,7 +296,7 @@ export const FermentacionMasa: React.FC = () => {
                   rows={2} className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none" />
               </div>
               <button
-                onClick={() => avanzar('camara/salida', { hora_salida_real: horaSalidaReal || undefined })}
+                onClick={() => avanzar('camara/salida', { hora_salida_real: datetimeLocalToBogotaISO(horaSalidaReal) })}
                 disabled={mutacion.isPending}
                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-semibold py-3 rounded-lg transition-colors"
               >
@@ -350,7 +346,7 @@ export const FermentacionMasa: React.FC = () => {
                   rows={2} className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none" />
               </div>
               <button
-                onClick={() => avanzar('frio/salida', { hora_salida_real: horaSalidaReal || undefined })}
+                onClick={() => avanzar('frio/salida', { hora_salida_real: datetimeLocalToBogotaISO(horaSalidaReal) })}
                 disabled={mutacion.isPending}
                 className="w-full bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white font-semibold py-3 rounded-lg transition-colors"
               >
@@ -388,13 +384,13 @@ export const FermentacionMasa: React.FC = () => {
                   {registro.hora_entrada_camara && (
                     <div className="bg-white rounded-lg p-3 border border-green-100">
                       <div className="text-xs text-gray-500 mb-0.5">Entrada cámara</div>
-                      <div className="font-semibold text-gray-800">{new Date(registro.hora_entrada_camara).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</div>
+                      <div className="font-semibold text-gray-800">{formatBogotaTime(registro.hora_entrada_camara)}</div>
                     </div>
                   )}
                   {registro.hora_salida_camara_real && (
                     <div className="bg-white rounded-lg p-3 border border-green-100">
                       <div className="text-xs text-gray-500 mb-0.5">Salida cámara</div>
-                      <div className="font-semibold text-gray-800">{new Date(registro.hora_salida_camara_real).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</div>
+                      <div className="font-semibold text-gray-800">{formatBogotaTime(registro.hora_salida_camara_real)}</div>
                     </div>
                   )}
                   {registro.temperatura_camara != null && (
@@ -412,13 +408,13 @@ export const FermentacionMasa: React.FC = () => {
                   {registro.hora_entrada_frio && (
                     <div className="bg-white rounded-lg p-3 border border-cyan-100">
                       <div className="text-xs text-gray-500 mb-0.5">Entrada frío</div>
-                      <div className="font-semibold text-gray-800">{new Date(registro.hora_entrada_frio).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</div>
+                      <div className="font-semibold text-gray-800">{formatBogotaTime(registro.hora_entrada_frio)}</div>
                     </div>
                   )}
                   {registro.hora_salida_frio && (
                     <div className="bg-white rounded-lg p-3 border border-cyan-100">
                       <div className="text-xs text-gray-500 mb-0.5">Salida frío</div>
-                      <div className="font-semibold text-gray-800">{new Date(registro.hora_salida_frio).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</div>
+                      <div className="font-semibold text-gray-800">{formatBogotaTime(registro.hora_salida_frio)}</div>
                     </div>
                   )}
                 </div>
