@@ -44,6 +44,9 @@ interface ProductoPendiente {
   sap_doc_num: string | null;
   sap_doc_entry: number | null;
   unidades_terminadas_horneado: number | null;
+  multiplo_divisor: number;
+  unidades_ajustadas: number;
+  unidades_excedente: number;
 }
 interface OVPendiente {
   doc_num: string;
@@ -514,20 +517,29 @@ const PanelPendientes: React.FC<{
                 )}
                 <div className="space-y-1">
                   {ov.productos.map(p => (
-                    <div key={p.id} className="flex items-center justify-between text-xs">
-                      <div className="flex-1 min-w-0">
-                        <span className="font-medium text-gray-700 truncate block">{p.producto_nombre}</span>
-                        <span className="text-gray-400 font-mono">{p.sap_item_code} · {p.presentacion}</span>
+                    <div key={p.id}>
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex-1 min-w-0">
+                          <span className="font-medium text-gray-700 truncate block">{p.producto_nombre}</span>
+                          <span className="text-gray-400 font-mono">{p.sap_item_code} · {p.presentacion}</span>
+                        </div>
+                        <div className="flex items-center gap-3 ml-3 shrink-0">
+                          <span className="text-purple-700 font-semibold">
+                            {p.unidades_programadas} paq
+                          </span>
+                          {p.division_completada && (
+                            <span className="text-blue-600 font-semibold">{p.unidades_referencia} div.</span>
+                          )}
+                          <EtiquetaRapida masaId={masa.id} productoId={p.id} />
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3 ml-3 shrink-0">
-                        <span className="text-purple-700 font-semibold">
-                          {p.unidades_programadas} paq
-                        </span>
-                        {p.division_completada && (
-                          <span className="text-blue-600 font-semibold">{p.unidades_referencia} div.</span>
-                        )}
-                        <EtiquetaRapida masaId={masa.id} productoId={p.id} />
-                      </div>
+                      {Number(p.unidades_excedente) > 0 && (
+                        <div className="mt-1 mb-1 text-[11px] leading-snug bg-amber-50 border border-amber-200 text-amber-700 rounded px-2 py-1">
+                          ⚠️ Ajuste por divisor de máquina (×{p.multiplo_divisor}): se producen{' '}
+                          <strong>{p.unidades_ajustadas}</strong> uds en vez de {p.unidades_programadas}{' '}
+                          (+{p.unidades_excedente} excedente). El material de empaque ya incluye este ajuste.
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
