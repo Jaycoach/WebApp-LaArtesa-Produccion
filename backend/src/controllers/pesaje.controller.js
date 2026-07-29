@@ -277,6 +277,23 @@ const getChecklist = async (req, res, next) => {
 const updateIngrediente = async (req, res, next) => {
   try {
     const { masaId, ingredienteId } = req.params;
+
+    // Bloqueo estricto: el pesaje solo es editable hasta que Amasado se
+    // complete. Una vez la masa avanza (División, Formado, Fermentación,
+    // Horneado, Empaque), modificar un ingrediente ya usado en producción
+    // no tiene sentido físico y queda prohibido — sin excepción de rol.
+    const masaR = await db.query(`SELECT fase_actual FROM masas_produccion WHERE id = $1`, [masaId]);
+    if (!masaR.rows.length) {
+      return res.status(404).json({ success: false, message: 'Masa no encontrada' });
+    }
+    const fasesEditables = ['PLANIFICACION', 'PESAJE', 'AMASADO'];
+    if (!fasesEditables.includes(masaR.rows[0].fase_actual)) {
+      return res.status(403).json({
+        success: false,
+        message: `No se puede modificar el pesaje: la masa ya avanzó a la fase ${masaR.rows[0].fase_actual}. El pesaje solo es editable hasta completar Amasado.`,
+      });
+    }
+
     const {
       disponible,
       verificado,
@@ -1330,4 +1347,5 @@ module.exports = {
   devolverStockMasa,
   getAjustesPendientes,
   confirmarAjustesPendientes,
+  calcularAjustesPendientes,
 };

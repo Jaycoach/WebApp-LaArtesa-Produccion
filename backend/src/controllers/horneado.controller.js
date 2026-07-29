@@ -5,6 +5,7 @@
 
 const db = require('../database/connection');
 const logger = require('../utils/logger');
+const { calcularAjustesPendientes } = require('./pesaje.controller');
 
 /**
  * Obtener información de horneado para una masa
@@ -685,6 +686,16 @@ exports.completarHorneado = async (req, res) => {
     } = req.body;
 
     const usuario = req.user;
+
+    // Bloqueo: no se puede completar si hay ajustes de pesaje pendientes de SAP
+    const ajustesPendientes = await calcularAjustesPendientes(masaId);
+    if (ajustesPendientes.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `No se puede completar HORNEADO: hay ${ajustesPendientes.length} ajuste(s) de pesaje pendientes de transmitir a SAP. Ve a Pesaje y confirma los ajustes antes de continuar.`,
+        data: { ajustes_pendientes: ajustesPendientes },
+      });
+    }
 
     await client.query('BEGIN');
 
