@@ -380,7 +380,7 @@ export const ListaMasas: React.FC = () => {
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-600">{masa.total_kilos_pesado_real > 0 ? 'Total Pesado:' : `Con merma (${masa.porcentaje_merma || 0}%):`}</span>
                       <span className="font-semibold text-blue-600">
-                        {(masa.total_kilos_pesado_real > 0 ? masa.total_kilos_pesado_real : masa.total_kilos_con_merma).toFixed(2)} kg
+                        {(Number(masa.total_kilos_pesado_real) > 0 ? Number(masa.total_kilos_pesado_real) : Number(masa.total_kilos_con_merma)).toFixed(2)} kg
                       </span>
                     </div>
                   </div>
