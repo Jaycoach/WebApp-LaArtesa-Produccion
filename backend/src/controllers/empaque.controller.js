@@ -950,7 +950,10 @@ exports.getMasasPendientesEmpaque = async (req, res) => {
                COALESCE(ppm.division_completada, false) AS division_completada,
                COALESCE(ppm.unidades_producidas, 0) AS unidades_producidas,
                ppm.sap_doc_num, ppm.sap_doc_entry,
-               ppm.unidades_por_paquete
+               ppm.unidades_por_paquete,
+               COALESCE(ppm.multiplo_divisor, 0)   AS multiplo_divisor,
+               COALESCE(ppm.unidades_ajustadas, 0) AS unidades_ajustadas,
+               COALESCE(ppm.unidades_excedente, 0) AS unidades_excedente
         FROM productos_por_masa ppm
         WHERE ppm.masa_id = $1
         ORDER BY ppm.sap_doc_num, ppm.producto_nombre
