@@ -54,6 +54,8 @@ export const API_CONFIG = {
         `/pesaje/${masaId}/ingredientes/${ingredienteId}`,
       CONFIRMAR: (masaId: number) => `/pesaje/${masaId}/confirmar`,
       ENVIAR_CORREO: (masaId: number) => `/pesaje/${masaId}/enviar-correo`,
+      AJUSTAR_SAP: (masaId: number, ingredienteId: number) =>
+        `/pesaje/${masaId}/ingredientes/${ingredienteId}/ajustar-sap`,
     },
 
     // Configuración
