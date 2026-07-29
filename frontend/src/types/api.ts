@@ -152,6 +152,7 @@ export interface ChecklistPesaje {
   progreso: number; // 0-100
   productos_con_ajuste?: any[];
   hay_ajustes_divisor?: boolean;
+  pesaje_transmitido?: boolean;
   sin_stock_count?: number;
   ingredientes_sin_stock?: string[];
   productos_resumen?: {

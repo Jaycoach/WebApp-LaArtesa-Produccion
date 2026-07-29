@@ -214,19 +214,27 @@ export const useEnviarCorreoEmpaque = () => {
 };
 
 /**
- * Hook para transmitir a SAP el ajuste de excedente/faltante de un
- * ingrediente editado después de la confirmación de pesaje.
+ * Hook para consultar ajustes pendientes de sincronizar con SAP (solo lectura).
  */
-export const useAjustarPesajeSAP = () => {
+export const useAjustesPendientes = (masaId: number, enabled: boolean) => {
+  return useQuery({
+    queryKey: ['pesaje', 'ajustes-pendientes', masaId],
+    queryFn: () => checklistService.getAjustesPendientes(masaId),
+    enabled: enabled && !!masaId,
+  });
+};
+
+/**
+ * Hook para transmitir a SAP todos los ajustes pendientes de la masa.
+ */
+export const useConfirmarAjustesPendientes = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ masaId, ingredienteId }: { masaId: number; ingredienteId: number }) =>
-      checklistService.ajustarSap(masaId, ingredienteId),
-    onSuccess: (data, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: CHECKLIST_QUERY_KEYS.byMasa(variables.masaId),
-      });
+    mutationFn: (masaId: number) => checklistService.confirmarAjustesPendientes(masaId),
+    onSuccess: (_, masaId) => {
+      queryClient.invalidateQueries({ queryKey: CHECKLIST_QUERY_KEYS.byMasa(masaId) });
+      queryClient.invalidateQueries({ queryKey: ['pesaje', 'ajustes-pendientes', masaId] });
     },
   });
 };
