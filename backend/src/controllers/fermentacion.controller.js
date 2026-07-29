@@ -5,6 +5,7 @@
 
 const db = require('../database/connection');
 const logger = require('../utils/logger');
+const { calcularAjustesPendientes } = require('./pesaje.controller');
 
 /**
  * Obtener información de fermentación para una masa
@@ -266,6 +267,16 @@ exports.registrarSalidaCamara = async (req, res) => {
 
     const usuario = req.user;
 
+    // Bloqueo: no se puede completar si hay ajustes de pesaje pendientes de SAP
+    const ajustesPendientes = await calcularAjustesPendientes(masaId);
+    if (ajustesPendientes.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `No se puede completar FERMENTACION: hay ${ajustesPendientes.length} ajuste(s) de pesaje pendientes de transmitir a SAP. Ve a Pesaje y confirma los ajustes antes de continuar.`,
+        data: { ajustes_pendientes: ajustesPendientes },
+      });
+    }
+
     await client.query('BEGIN');
 
     // Obtener registro de fermentación actual
@@ -444,6 +455,16 @@ exports.registrarSalidaFrio = async (req, res) => {
     const { observaciones, hora_salida_real } = req.body;
 
     const usuario = req.user;
+
+    // Bloqueo: no se puede completar si hay ajustes de pesaje pendientes de SAP
+    const ajustesPendientes = await calcularAjustesPendientes(masaId);
+    if (ajustesPendientes.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `No se puede completar FERMENTACION: hay ${ajustesPendientes.length} ajuste(s) de pesaje pendientes de transmitir a SAP. Ve a Pesaje y confirma los ajustes antes de continuar.`,
+        data: { ajustes_pendientes: ajustesPendientes },
+      });
+    }
 
     await client.query('BEGIN');
 
