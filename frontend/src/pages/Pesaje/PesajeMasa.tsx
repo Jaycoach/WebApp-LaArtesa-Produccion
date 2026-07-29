@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card } from '@/components/common';
-import { useChecklist, useUpdateIngrediente, useConfirmarPesaje, useAjustarPesajeSAP } from '../../hooks/useChecklist';
+import { useChecklist, useUpdateIngrediente, useConfirmarPesaje, useAjustesPendientes, useConfirmarAjustesPendientes } from '../../hooks/useChecklist';
 import { ModalMO } from '../../components/common/ModalMO';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useCancelarMasa } from '../../hooks/useMasas';
@@ -15,7 +15,6 @@ export const PesajeMasa: React.FC = () => {
   const { data: checklist, isLoading, error } = useChecklist(masaIdNum);
   const updateMutation = useUpdateIngrediente();
   const confirmarMutation = useConfirmarPesaje();
-  const ajustarSapMutation = useAjustarPesajeSAP();
 
   const { user } = useAuthStore();
   const puedeEditar = user?.rol === 'admin' || user?.rol === 'supervisor';
@@ -35,12 +34,9 @@ export const PesajeMasa: React.FC = () => {
   };
   const [showMO, setShowMO] = useState(false);
   const [editando, setEditando] = useState<number | null>(null);
-  const [pendingAjuste, setPendingAjuste] = useState<{
-    ingredienteId: number;
-    ingredienteNombre: string;
-    pesoAnterior: number;
-    pesoNuevo: number;
-  } | null>(null);
+  const [mostrarAjustes, setMostrarAjustes] = useState(false);
+  const { data: ajustesData, isLoading: cargandoAjustes } = useAjustesPendientes(masaIdNum, mostrarAjustes);
+  const confirmarAjustesMutation = useConfirmarAjustesPendientes();
 
   const parseFechaVencimiento = (raw: string): string | null => {
     const s = raw.replace(/[^0-9]/g, ''); // solo dígitos
@@ -225,9 +221,6 @@ export const PesajeMasa: React.FC = () => {
     }
 
     try {
-      const yaEstabaPesado = ing?.pesado === true;
-      const pesoAnterior = ing?.peso_real != null ? Number(ing.peso_real) : null;
-
       await updateMutation.mutateAsync({
         masaId: masaIdNum,
         ingredienteId,
@@ -240,19 +233,6 @@ export const PesajeMasa: React.FC = () => {
         },
       });
       setEditando(null);
-
-      // Guardado local completo. Si el pesaje YA fue transmitido a SAP y esto
-      // es una edición (no el primer pesaje) con cambio real de peso, se
-      // ofrece transmitir el ajuste (excedente/faltante) a SAP.
-      if ((checklist as any)?.pesaje_transmitido && yaEstabaPesado && pesoAnterior != null
-          && Math.abs(pesoReal - pesoAnterior) >= 0.01) {
-        setPendingAjuste({
-          ingredienteId,
-          ingredienteNombre: ing?.ingrediente_nombre || 'Ingrediente',
-          pesoAnterior,
-          pesoNuevo: pesoReal,
-        });
-      }
     } catch (err: any) {
       // handleError de api.ts transforma el error — usa err?.status (no err?.response?.status)
       if (err?.status === 409) {
@@ -902,6 +882,14 @@ export const PesajeMasa: React.FC = () => {
             >
               + Mano de obra
             </button>
+            {checklist?.pesaje_transmitido && (
+              <button
+                onClick={() => setMostrarAjustes(true)}
+                className="px-3 py-2 text-sm border border-amber-300 text-amber-700 rounded hover:bg-amber-50"
+              >
+                🔄 Revisar ajustes pendientes SAP
+              </button>
+            )}
             {checklist.todosPesados && !checklist.pesaje_completado && (
               <button
                 onClick={handleConfirmar}
@@ -926,44 +914,71 @@ export const PesajeMasa: React.FC = () => {
           </div>
         </div>
         {showMO && <ModalMO masaId={Number(masaId)} fase="PESAJE" onClose={() => setShowMO(false)} />}
-        {pendingAjuste && (
+        {mostrarAjustes && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-              <h3 className="text-lg font-bold text-gray-800 mb-2">Este pesaje ya fue transmitido a SAP</h3>
-              <p className="text-sm text-gray-600 mb-4">
-                Modificaste <strong>{pendingAjuste.ingredienteNombre}</strong> de{' '}
-                {pendingAjuste.pesoAnterior}g a {pendingAjuste.pesoNuevo}g
-                {' '}({pendingAjuste.pesoNuevo > pendingAjuste.pesoAnterior ? '+' : ''}
-                {(pendingAjuste.pesoNuevo - pendingAjuste.pesoAnterior).toFixed(0)}g).
-                El cambio ya se guardó localmente. ¿Transmitir este ajuste a SAP ahora
-                (como {pendingAjuste.pesoNuevo > pendingAjuste.pesoAnterior ? 'salida adicional' : 'entrada de devolución'})?
+            <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 max-h-[85vh] overflow-y-auto">
+              <h3 className="text-lg font-bold text-gray-800 mb-1">Ajustes pendientes de transmitir a SAP</h3>
+              <p className="text-sm text-gray-500 mb-4">
+                Este pesaje ya fue transmitido a SAP. Revisa las diferencias antes de confirmar.
               </p>
+
+              {cargandoAjustes && <p className="text-sm text-gray-500">Cargando...</p>}
+
+              {!cargandoAjustes && ajustesData?.pendientes?.length === 0 && (
+                <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded p-3">
+                  No hay diferencias pendientes por transmitir.
+                </p>
+              )}
+
+              {!cargandoAjustes && (ajustesData?.pendientes?.length ?? 0) > 0 && (
+                <table className="w-full text-sm mb-4">
+                  <thead>
+                    <tr className="bg-gray-50 text-xs text-gray-500">
+                      <th className="text-left p-2">Ingrediente</th>
+                      <th className="text-right p-2">En SAP</th>
+                      <th className="text-right p-2">Actual</th>
+                      <th className="text-right p-2">Diferencia</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ajustesData!.pendientes.map((p: any) => (
+                      <tr key={p.ingrediente_id} className="border-t border-gray-100">
+                        <td className="p-2">{p.ingrediente_nombre}</td>
+                        <td className="p-2 text-right text-gray-500">{p.peso_confirmado_sap + p.ajustado_previo}g</td>
+                        <td className="p-2 text-right font-medium">{p.peso_actual}g</td>
+                        <td className={`p-2 text-right font-bold ${p.tipo === 'EXCEDENTE' ? 'text-orange-600' : 'text-red-600'}`}>
+                          {p.delta_gramos > 0 ? '+' : ''}{p.delta_gramos}g ({p.tipo === 'EXCEDENTE' ? 'excedente' : 'faltante'})
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
               <div className="flex justify-end gap-2">
                 <button
-                  onClick={() => setPendingAjuste(null)}
+                  onClick={() => setMostrarAjustes(false)}
                   className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 text-sm"
                 >
-                  Ahora no
+                  Cerrar
                 </button>
-                <button
-                  disabled={ajustarSapMutation.isPending}
-                  onClick={async () => {
-                    const ajuste = pendingAjuste;
-                    setPendingAjuste(null);
-                    try {
-                      const resultado = await ajustarSapMutation.mutateAsync({
-                        masaId: masaIdNum,
-                        ingredienteId: ajuste!.ingredienteId,
-                      });
-                      alert(resultado?.message || 'Ajuste procesado.');
-                    } catch (err: any) {
-                      alert(`⚠ No se pudo transmitir el ajuste a SAP: ${err?.message || 'Error desconocido'}. El dato local ya quedó guardado; puedes reintentar más tarde.`);
-                    }
-                  }}
-                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm"
-                >
-                  {ajustarSapMutation.isPending ? 'Enviando a SAP...' : 'Transmitir a SAP'}
-                </button>
+                {(ajustesData?.pendientes?.length ?? 0) > 0 && (
+                  <button
+                    disabled={confirmarAjustesMutation.isPending}
+                    onClick={async () => {
+                      try {
+                        const resultado = await confirmarAjustesMutation.mutateAsync(masaIdNum);
+                        alert(resultado.message);
+                        setMostrarAjustes(false);
+                      } catch (err: any) {
+                        alert(`⚠ Error al transmitir ajustes: ${err?.message || 'Error desconocido'}`);
+                      }
+                    }}
+                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm"
+                  >
+                    {confirmarAjustesMutation.isPending ? 'Transmitiendo...' : 'Confirmar y transmitir a SAP'}
+                  </button>
+                )}
               </div>
             </div>
           </div>

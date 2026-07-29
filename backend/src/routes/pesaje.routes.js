@@ -40,4 +40,18 @@ router.post('/:masaId/confirmar', pesajeController.confirmarPesaje);
  */
 router.post('/:masaId/enviar-correo', pesajeController.enviarCorreoEmpaque);
 
+/**
+ * @route   GET /api/pesaje/:masaId/ajustes-pendientes
+ * @desc    Lista ajustes pendientes de sincronizar con SAP (sin transmitir)
+ * @access  Private
+ */
+router.get('/:masaId/ajustes-pendientes', pesajeController.getAjustesPendientes);
+
+/**
+ * @route   POST /api/pesaje/:masaId/ajustes-pendientes/confirmar
+ * @desc    Transmite a SAP todos los ajustes pendientes de la masa
+ * @access  Private
+ */
+router.post('/:masaId/ajustes-pendientes/confirmar', pesajeController.confirmarAjustesPendientes);
+
 module.exports = router;

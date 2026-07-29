@@ -1109,10 +1109,225 @@ const devolverStockMasa = async (masaId) => {
   logger.info(`Stock devuelto para masa cancelada ${masaId}: ${lotes.rows.length} lotes liberados`);
 };
 
+/**
+ * Calcula, para cada ingrediente de una masa ya transmitida a SAP, la diferencia
+ * pendiente de sincronizar (excedente/faltante) contra la línea base peso_confirmado_sap,
+ * descontando ajustes ya exitosos previos. Solo lectura — no llama a SAP.
+ */
+const calcularAjustesPendientes = async (masaId) => {
+  const ingR = await db.query(
+    `SELECT im.id, im.ingrediente_sap_code, im.ingrediente_nombre,
+            im.peso_real, im.peso_confirmado_sap, im.lote
+     FROM ingredientes_masa im
+     WHERE im.masa_id = $1
+       AND im.es_empaque = false
+       AND im.pesado = true
+       AND im.peso_confirmado_sap IS NOT NULL`,
+    [masaId]
+  );
+
+  const prevR = await db.query(
+    `SELECT ingrediente_id, COALESCE(SUM(delta_gramos), 0) AS ajustado_previo
+     FROM pesaje_ajustes_sap
+     WHERE masa_id = $1 AND sap_doc_entry IS NOT NULL
+     GROUP BY ingrediente_id`,
+    [masaId]
+  );
+  const prevMap = {};
+  for (const r of prevR.rows) prevMap[r.ingrediente_id] = parseFloat(r.ajustado_previo);
+
+  const pendientes = [];
+  for (const ing of ingR.rows) {
+    const pesoBase = parseFloat(ing.peso_confirmado_sap);
+    const pesoActual = parseFloat(ing.peso_real);
+    const ajustadoPrevio = prevMap[ing.id] || 0;
+    const delta = parseFloat((pesoActual - pesoBase - ajustadoPrevio).toFixed(2));
+    if (Math.abs(delta) >= 0.01) {
+      pendientes.push({
+        ingrediente_id: ing.id,
+        ingrediente_sap_code: ing.ingrediente_sap_code,
+        ingrediente_nombre: ing.ingrediente_nombre,
+        peso_confirmado_sap: pesoBase,
+        ajustado_previo: ajustadoPrevio,
+        peso_actual: pesoActual,
+        delta_gramos: delta,
+        tipo: delta > 0 ? 'EXCEDENTE' : 'FALTANTE',
+        lote: ing.lote,
+      });
+    }
+  }
+  return pendientes;
+};
+
+/**
+ * @desc    Lista ajustes pendientes de sincronizar con SAP, SIN transmitir nada.
+ * @route   GET /api/pesaje/:masaId/ajustes-pendientes
+ * @access  Private
+ */
+const getAjustesPendientes = async (req, res, next) => {
+  try {
+    const { masaId } = req.params;
+    const masaR = await db.query(`SELECT sap_doc_entry_pesaje FROM masas_produccion WHERE id = $1`, [masaId]);
+    if (!masaR.rows.length) return res.status(404).json({ success: false, message: 'Masa no encontrada' });
+    if (!masaR.rows[0].sap_doc_entry_pesaje) {
+      return res.json({ success: true, data: { pesaje_transmitido: false, pendientes: [] } });
+    }
+    const pendientes = await calcularAjustesPendientes(masaId);
+    res.json({ success: true, data: { pesaje_transmitido: true, pendientes } });
+  } catch (error) {
+    logger.error('Error en getAjustesPendientes:', error);
+    next(error);
+  }
+};
+
+// Inserta filas de auditoría exitosas y actualiza stock local
+const registrarAjustesYStock = async (masaId, items, docInfo, usuarioId) => {
+  for (const p of items) {
+    await db.query(
+      `INSERT INTO pesaje_ajustes_sap
+         (masa_id, ingrediente_id, ingrediente_sap_code, ingrediente_nombre,
+          peso_confirmado_sap_g, ajustado_previo_g, peso_nuevo_g, delta_gramos,
+          tipo, lote, sap_doc_entry, sap_doc_num, usuario_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [masaId, p.ingrediente_id, p.ingrediente_sap_code, p.ingrediente_nombre,
+       p.peso_confirmado_sap, p.ajustado_previo, p.peso_actual, p.delta_gramos,
+       p.tipo, p.lote, docInfo.doc_entry, docInfo.doc_num, usuarioId]
+    );
+    const signo = p.tipo === 'EXCEDENTE' ? -1 : 1;
+    const cantidadKg = Math.abs(p.delta_gramos) / 1000;
+    await db.query(
+      `UPDATE sap_inventario_mp SET stock_almp = GREATEST(0, stock_almp + $1), ultimo_sync = NOW()
+       WHERE item_code = $2`,
+      [signo * cantidadKg, p.ingrediente_sap_code]
+    );
+    await db.query(
+      `UPDATE sap_lotes_mp SET cantidad_disponible = GREATEST(0, cantidad_disponible + $1), ultimo_sync = NOW()
+       WHERE item_code = $2 AND batch = $3`,
+      [signo * cantidadKg, p.ingrediente_sap_code, p.lote]
+    );
+  }
+};
+
+// Inserta filas de auditoría con error (sap_doc_entry queda NULL — no cuentan como "ya enviadas",
+// así que el próximo intento las vuelve a incluir automáticamente)
+const registrarAjustesFallidos = async (masaId, items, errorMsg, usuarioId) => {
+  for (const p of items) {
+    await db.query(
+      `INSERT INTO pesaje_ajustes_sap
+         (masa_id, ingrediente_id, ingrediente_sap_code, ingrediente_nombre,
+          peso_confirmado_sap_g, ajustado_previo_g, peso_nuevo_g, delta_gramos,
+          tipo, lote, sap_error, usuario_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [masaId, p.ingrediente_id, p.ingrediente_sap_code, p.ingrediente_nombre,
+       p.peso_confirmado_sap, p.ajustado_previo, p.peso_actual, p.delta_gramos,
+       p.tipo, p.lote, errorMsg, usuarioId]
+    );
+  }
+};
+
+/**
+ * @desc    Transmite a SAP TODOS los ajustes pendientes de una masa, agrupados en
+ *          un único InventoryGenExits (excedentes) y/o un único InventoryGenEntries
+ *          (faltantes) — mismo patrón multi-línea que el pesaje original.
+ * @route   POST /api/pesaje/:masaId/ajustes-pendientes/confirmar
+ * @access  Private
+ */
+const confirmarAjustesPendientes = async (req, res, next) => {
+  try {
+    const { masaId } = req.params;
+    const masaR = await db.query(`SELECT sap_doc_entry_pesaje FROM masas_produccion WHERE id = $1`, [masaId]);
+    if (!masaR.rows.length) return res.status(404).json({ success: false, message: 'Masa no encontrada' });
+    if (!masaR.rows[0].sap_doc_entry_pesaje) {
+      return res.status(422).json({ success: false, message: 'El pesaje aún no ha sido transmitido a SAP.' });
+    }
+
+    const pendientes = await calcularAjustesPendientes(masaId);
+    if (pendientes.length === 0) {
+      return res.json({ success: true, message: 'No hay ajustes pendientes por transmitir.', data: { procesados: [] } });
+    }
+
+    const sinLote = pendientes.filter(p => !p.lote);
+    if (sinLote.length > 0) {
+      return res.status(422).json({
+        success: false,
+        message: `Sin lote registrado, no se pueden ajustar en SAP: ${sinLote.map(p => p.ingrediente_nombre).join(', ')}`,
+      });
+    }
+
+    const excedentes = pendientes.filter(p => p.tipo === 'EXCEDENTE');
+    const faltantes  = pendientes.filter(p => p.tipo === 'FALTANTE');
+
+    await sapService.ensureSession();
+    const hoy = new Date().toISOString().split('T')[0];
+    const resultado = { excedente: null, faltante: null, errores: [] };
+
+    if (excedentes.length > 0) {
+      try {
+        const resp = await sapService.client.post('/InventoryGenExits', {
+          DocDate: hoy,
+          Comments: `Ajuste excedentes pesaje masa ${masaId}`,
+          U_JZ_NumMasa: String(masaId),
+          DocumentLines: excedentes.map(p => ({
+            ItemCode: p.ingrediente_sap_code,
+            Quantity: Math.abs(p.delta_gramos) / 1000,
+            WarehouseCode: 'ALMP',
+            AccountCode: '14100501',
+            DistributionRule: 'Operac',
+            BatchNumbers: [{ BatchNumber: p.lote, Quantity: Math.abs(p.delta_gramos) / 1000 }],
+          })),
+        });
+        resultado.excedente = { doc_entry: resp.data?.DocEntry, doc_num: String(resp.data?.DocNum || '') };
+        await registrarAjustesYStock(masaId, excedentes, resultado.excedente, req.user.id);
+      } catch (err) {
+        const msg = err?.response?.data?.error?.message?.value || err?.response?.data?.error?.message || err.message;
+        resultado.errores.push({ tipo: 'EXCEDENTE', mensaje: msg });
+        await registrarAjustesFallidos(masaId, excedentes, msg, req.user.id);
+      }
+    }
+
+    if (faltantes.length > 0) {
+      try {
+        const resp = await sapService.client.post('/InventoryGenEntries', {
+          DocDate: hoy,
+          Comments: `Ajuste faltantes pesaje masa ${masaId}`,
+          U_JZ_NumMasa: String(masaId),
+          DocumentLines: faltantes.map(p => ({
+            ItemCode: p.ingrediente_sap_code,
+            Quantity: Math.abs(p.delta_gramos) / 1000,
+            WarehouseCode: 'ALMP',
+            AccountCode: '14100501',
+            DistributionRule: 'Operac',
+            BatchNumbers: [{ BatchNumber: p.lote, Quantity: Math.abs(p.delta_gramos) / 1000 }],
+          })),
+        });
+        resultado.faltante = { doc_entry: resp.data?.DocEntry, doc_num: String(resp.data?.DocNum || '') };
+        await registrarAjustesYStock(masaId, faltantes, resultado.faltante, req.user.id);
+      } catch (err) {
+        const msg = err?.response?.data?.error?.message?.value || err?.response?.data?.error?.message || err.message;
+        resultado.errores.push({ tipo: 'FALTANTE', mensaje: msg });
+        await registrarAjustesFallidos(masaId, faltantes, msg, req.user.id);
+      }
+    }
+
+    res.json({
+      success: resultado.errores.length === 0,
+      message: resultado.errores.length === 0
+        ? 'Ajustes transmitidos a SAP correctamente.'
+        : `Algunos ajustes fallaron: ${resultado.errores.map(e => e.mensaje).join(' | ')}`,
+      data: resultado,
+    });
+  } catch (error) {
+    logger.error('Error en confirmarAjustesPendientes:', error);
+    next(error);
+  }
+};
+
 module.exports = {
   getChecklist,
   updateIngrediente,
   confirmarPesaje,
   enviarCorreoEmpaque,
   devolverStockMasa,
+  getAjustesPendientes,
+  confirmarAjustesPendientes,
 };

@@ -108,17 +108,28 @@ export const checklistService = {
   },
 
   /**
-   * Transmite a SAP el excedente/faltante de un ingrediente editado
-   * después de que el pesaje ya fue confirmado.
+   * Lista ajustes pendientes de sincronizar con SAP (excedente/faltante) sin transmitir nada.
    */
-  ajustarSap: async (
-    masaId: number,
-    ingredienteId: number
-  ): Promise<{ aplica: boolean; tipo?: string; delta_gramos?: number; sap_doc_num?: string; message: string }> => {
-    const response = await apiService.post<any>(
-      API_CONFIG.ENDPOINTS.PESAJE.AJUSTAR_SAP(masaId, ingredienteId)
+  getAjustesPendientes: async (
+    masaId: number
+  ): Promise<{ pesaje_transmitido: boolean; pendientes: any[] }> => {
+    const response = await apiService.get<any>(
+      API_CONFIG.ENDPOINTS.PESAJE.AJUSTES_PENDIENTES(masaId)
     );
     return response.data!;
+  },
+
+  /**
+   * Transmite a SAP todos los ajustes pendientes de la masa (agrupados en
+   * un GenExit de excedentes y/o un GenEntry de faltantes).
+   */
+  confirmarAjustesPendientes: async (
+    masaId: number
+  ): Promise<{ message: string; data: any }> => {
+    const response = await apiService.post<any>(
+      API_CONFIG.ENDPOINTS.PESAJE.CONFIRMAR_AJUSTES(masaId)
+    );
+    return { message: response.message || '', data: response.data };
   },
 };
 
