@@ -17,7 +17,10 @@ export const PesajeMasa: React.FC = () => {
   const confirmarMutation = useConfirmarPesaje();
 
   const { user } = useAuthStore();
-  const puedeEditar = user?.rol === 'admin' || user?.rol === 'supervisor';
+  const esRolEditor = user?.rol === 'admin' || user?.rol === 'supervisor';
+  const fasesEditablesPesaje = ['PLANIFICACION', 'PESAJE', 'AMASADO'];
+  const masaAvanzada = !!checklist?.fase_actual && !fasesEditablesPesaje.includes(checklist.fase_actual);
+  const puedeEditar = esRolEditor && !masaAvanzada;
   const cancelarMutation = useCancelarMasa();
   const [motivoCancelar, setMotivoCancelar] = useState('');
   const [mostrarCancelar, setMostrarCancelar] = useState(false);
@@ -815,13 +818,19 @@ export const PesajeMasa: React.FC = () => {
                   </div>
                 )}
 
-                {ing.pesado && puedeEditar && editando !== ing.id && (
-                  <button
-                    onClick={() => handleEditar(ing)}
-                    className="mt-2 px-3 py-1.5 bg-amber-500 text-white rounded hover:bg-amber-600 text-xs font-medium"
-                  >
-                    ✏️ Editar pesaje
-                  </button>
+                {ing.pesado && esRolEditor && editando !== ing.id && (
+                  puedeEditar ? (
+                    <button
+                      onClick={() => handleEditar(ing)}
+                      className="mt-2 px-3 py-1.5 bg-amber-500 text-white rounded hover:bg-amber-600 text-xs font-medium"
+                    >
+                      ✏️ Editar pesaje
+                    </button>
+                  ) : (
+                    <p className="mt-2 text-xs text-gray-400 italic">
+                      No editable — la masa ya avanzó a {checklist?.fase_actual}.
+                    </p>
+                  )
                 )}
 
                 {/* Datos de pesaje completado */}

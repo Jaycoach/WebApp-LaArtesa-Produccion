@@ -242,6 +242,7 @@ const getChecklist = async (req, res, next) => {
     const checklist = {
       masa_id:              masa.id,
       tipo_masa:            masa.tipo_masa,
+      fase_actual:          masa.fase_actual,
       es_repeticion:        masa.es_repeticion ?? false,
       sap_doc_entry_pesaje: masa.sap_doc_entry_pesaje ?? null,
       sap_doc_num_pesaje:   masa.sap_doc_num_pesaje   ?? null,

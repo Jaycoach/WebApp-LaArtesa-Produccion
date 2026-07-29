@@ -141,6 +141,7 @@ export interface ProgresoFase {
 export interface ChecklistPesaje {
   masa_id: number;
   tipo_masa: string;
+  fase_actual?: string;
   es_repeticion: boolean;
   fecha_inicio?: string;
   usuario_responsable?: string;
