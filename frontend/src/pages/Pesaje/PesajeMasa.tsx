@@ -694,7 +694,13 @@ export const PesajeMasa: React.FC = () => {
                                         const nuevos = formData.lotes_consumo.map(lc =>
                                           lc.batch === l.batch ? { ...lc, cantidad_kg: e.target.value } : lc
                                         );
-                                        setFormData({ ...formData, lotes_consumo: nuevos });
+                                        // Recalcular peso_real como suma de lotes — el campo mostrado como
+                                        // "Peso teórico BOM (g)" debe reflejar lo que realmente se va a guardar,
+                                        // no quedar congelado en el valor con el que se abrió el formulario.
+                                        // Bug detectado 2026-07-28: bloqueaba ajustes de supervisor en modo edición
+                                        // porque comparaba contra el peso_real original, nunca actualizado.
+                                        const nuevaSuma = nuevos.reduce((s, lc) => s + (parseFloat(lc.cantidad_kg) || 0), 0);
+                                        setFormData({ ...formData, lotes_consumo: nuevos, peso_real: String(nuevaSuma) });
                                         setStockError(null);
                                       }}
                                       className="w-24 px-2 py-1 border border-purple-300 rounded text-sm focus:ring-2 focus:ring-purple-400"
