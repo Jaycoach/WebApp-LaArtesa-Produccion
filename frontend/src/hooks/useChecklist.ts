@@ -212,3 +212,21 @@ export const useEnviarCorreoEmpaque = () => {
     },
   });
 };
+
+/**
+ * Hook para transmitir a SAP el ajuste de excedente/faltante de un
+ * ingrediente editado después de la confirmación de pesaje.
+ */
+export const useAjustarPesajeSAP = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ masaId, ingredienteId }: { masaId: number; ingredienteId: number }) =>
+      checklistService.ajustarSap(masaId, ingredienteId),
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: CHECKLIST_QUERY_KEYS.byMasa(variables.masaId),
+      });
+    },
+  });
+};

@@ -106,6 +106,20 @@ export const checklistService = {
     );
     return response.data!;
   },
+
+  /**
+   * Transmite a SAP el excedente/faltante de un ingrediente editado
+   * después de que el pesaje ya fue confirmado.
+   */
+  ajustarSap: async (
+    masaId: number,
+    ingredienteId: number
+  ): Promise<{ aplica: boolean; tipo?: string; delta_gramos?: number; sap_doc_num?: string; message: string }> => {
+    const response = await apiService.post<any>(
+      API_CONFIG.ENDPOINTS.PESAJE.AJUSTAR_SAP(masaId, ingredienteId)
+    );
+    return response.data!;
+  },
 };
 
 export default checklistService;
