@@ -321,9 +321,14 @@ function clasificarClaveAgrupacion(producto, tipoMasa) {
  * Aplica igual al grupo por tamaño+forma que al grupo base por tipo_masa.
  */
 function agruparProductosEnTandas(productos, limiteKg, tipoMasa) {
+  // FIX 2026-08-04: la subdivisión por límite de kg de amasado debe agrupar
+  // SOLO por tipo_masa. La separación por forma/tamaño (clasificarClaveAgrupacion)
+  // solo tiene sentido en la fase de División — antes de eso son el mismo moje
+  // (misma receta/materias primas). Agruparlas aquí generaba "masas" distintas
+  // para lo que era una sola masa, como pasó con Árabe/Árabe cuadrada el 3-ago.
   const grupos = new Map();
   for (const prod of productos) {
-    const clave = clasificarClaveAgrupacion(prod, tipoMasa);
+    const clave = `TIPOMASA:${tipoMasa}`;
     if (!grupos.has(clave)) grupos.set(clave, { clave, productos: [], kgTotal: 0 });
     const g = grupos.get(clave);
     g.productos.push(prod);

@@ -899,21 +899,51 @@ const sincronizarDesdeOV = async (req, res, next) => {
         masaExistente.estado !== 'PLANIFICACION' ||
         masaExistente.fase_actual !== 'PLANIFICACION'
       );
+
+      // FIX 2026-08-04: antes de crear OTRA masa ADICIONAL, buscar si ya existe una
+      // ADICIONAL de este mismo tipo que siga sin aprobar (PLANIFICACION) — en ese caso
+      // hay que sumarle ahí en vez de crear una nueva. Reproducido en vivo el 3-ago:
+      // el query de masaExistente de arriba excluye es_adicional=true, así que cada
+      // sync sucesivo creaba una ADICIONAL distinta en vez de consolidarlas mientras
+      // ninguna hubiera iniciado pesaje. Respeta es_repeticion=true (esas SIEMPRE
+      // deben quedar separadas, nunca entran a este bloque).
+      let masaParaMerge = estaEnPlanificacion ? masaExistente : null;
+      if (!masaParaMerge && (estaEnProduccion || estaCompletada) && !forzar) {
+        const adicionalExistenteResult = await client.query(
+          `SELECT id, uuid, codigo_masa, estado, fase_actual
+           FROM masas_produccion
+           WHERE DATE(fecha_produccion) = $1
+             AND tipo_masa = $2
+             AND es_repeticion = $3
+             AND es_subdivision = false
+             AND es_adicional = true
+             AND estado = 'PLANIFICACION'
+             AND fase_actual = 'PLANIFICACION'
+           ORDER BY id DESC
+           LIMIT 1`,
+          [fechaProduccion, tipoMasa, esRepeticionGrupo]
+        );
+        if (adicionalExistenteResult.rows.length > 0) {
+          masaParaMerge = adicionalExistenteResult.rows[0];
+          logger.info(`Tipo ${tipoMasa} — sumando a ADICIONAL existente sin aprobar (masa ${masaParaMerge.id}) en vez de crear otra ADICIONAL`);
+        }
+      }
+
       // Si ya está COMPLETADA o en producción: crear masa ADICIONAL con código único
       // No omitir — puede ser una OV genuinamente nueva para el mismo tipo de masa
-      if (estaCompletada) {
+      if (estaCompletada && !masaParaMerge) {
         logger.info(`Tipo ${tipoMasa} ya COMPLETADA (masa ${masaExistente.id}) — nueva OV, se creará masa ADICIONAL`);
       }
-      if (estaEnProduccion) {
+      if (estaEnProduccion && !masaParaMerge) {
         logger.info(`Tipo ${tipoMasa} ya en fase ${masaExistente.fase_actual} — creando masa ADICIONAL`);
         // continuar el flujo normal de creación pero marcando es_adicional=true
         // (se aplica más abajo en el INSERT)
       }
 
-      // Si ya está en PLANIFICACION (forzar=false): registrar OVs nuevas en productos_por_masa_ov
-      // y recalcular totales en productos_por_masa desde la tabla de OVs
-      if (estaEnPlanificacion && !forzar) {
-        const masaIdExistente = masaExistente.id;
+      // Si ya existe una masa (original o ADICIONAL) en PLANIFICACION sin aprobar (forzar=false):
+      // registrar OVs nuevas en productos_por_masa_ov y recalcular totales en productos_por_masa
+      if (masaParaMerge && !forzar) {
+        const masaIdExistente = masaParaMerge.id;
         let ovsNuevas = 0;
 
         for (const prod of grupo.productos) {
@@ -1029,8 +1059,8 @@ const sincronizarDesdeOV = async (req, res, next) => {
         logger.info(`Tipo ${tipoMasa} en PLANIFICACION — ${ovsNuevas} OVs nuevas registradas en masa ${masaIdExistente}`);
         masasCreadas.push({
           id: masaIdExistente,
-          uuid: masaExistente.uuid,
-          codigo: masaExistente.codigo_masa,
+          uuid: masaParaMerge.uuid,
+          codigo: masaParaMerge.codigo_masa,
           tipo_masa: tipoMasa,
           accion: 'ACTUALIZADA',
           ovs_nuevas: ovsNuevas
