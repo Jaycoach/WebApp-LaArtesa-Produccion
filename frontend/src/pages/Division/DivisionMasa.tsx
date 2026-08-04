@@ -62,6 +62,28 @@ export const DivisionMasa: React.FC = () => {
   };
 
   /**
+   * FIX B5 (2026-08-04): panes sugeridos a cortar, redondeados al múltiplo
+   * del divisor de la máquina (multiplo_divisor, en PANES — no confundir con
+   * unidades_ajustadas del backend, que redondea PAQUETES y no aplica aquí).
+   * Antes esta pantalla sugería el bruto sin redondear (ej. 130 con divisor
+   * 20), lo cual no es cortable en la máquina — el usuario tenía que darse
+   * cuenta solo al chocar con el error de validación al guardar.
+   * Ej: 130 panes, divisor 20 → sugiere 140.
+   */
+  const getPanesSugeridos = (producto: any): number => {
+    const xSAP = parseFloat(String(producto.unidades_por_paquete || 0));
+    const xNombre = producto.producto_nombre?.match(/ X ?(\d+)/i);
+    const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
+    const programadas = parseInt(producto.unidades_programadas || producto.unidades_pedidas || 0);
+    const panesBrutos = programadas * xPaq;
+    const divisor = parseInt(producto.multiplo_divisor || 0);
+    if (divisor > 0 && panesBrutos % divisor !== 0) {
+      return (Math.floor(panesBrutos / divisor) + 1) * divisor;
+    }
+    return panesBrutos;
+  };
+
+  /**
    * Valida la cantidad ingresada para un producto.
    * Retorna null si es válida, o string con el mensaje de error.
    */
@@ -513,17 +535,25 @@ export const DivisionMasa: React.FC = () => {
                               </span>
                             </td>
 
-                            {/* Panes sugeridos */}
+                            {/* Panes sugeridos — ya redondeados al múltiplo del divisor */}
                             <td className="px-4 py-3 text-right">
                               {(() => {
                                 const xSAP = parseFloat(String(producto.unidades_por_paquete || 0));
                                 const xNombre = producto.producto_nombre?.match(/ X ?(\d+)/i);
                                 const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
                                 const programadas = parseInt(producto.unidades_programadas || producto.unidades_pedidas || 0);
+                                const panesBrutos = programadas * xPaq;
+                                const panesSugeridosAjustados = getPanesSugeridos(producto);
+                                const fueAjustado = panesSugeridosAjustados !== panesBrutos;
                                 return (
                                   <span className="text-base font-bold text-indigo-700">
-                                    {programadas * xPaq}
+                                    {panesSugeridosAjustados}
                                     <span className="text-xs font-normal text-indigo-400 ml-1">×{xPaq}</span>
+                                    {fueAjustado && (
+                                      <span className="block text-xs font-normal text-amber-600">
+                                        ajustado desde {panesBrutos}
+                                      </span>
+                                    )}
                                   </span>
                                 );
                               })()}
@@ -604,13 +634,7 @@ export const DivisionMasa: React.FC = () => {
                                         ? 'border-green-400 bg-green-50'
                                         : 'border-gray-300'
                                     }`}
-                                    placeholder={String((() => {
-                                      const xSAP = parseFloat(String(producto.unidades_por_paquete || 0));
-                                      const xNombre = producto.producto_nombre?.match(/ X ?(\d+)/i);
-                                      const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
-                                      const programadas = parseInt(producto.unidades_programadas || producto.unidades_pedidas || 0);
-                                      return programadas * xPaq;
-                                    })())}
+                                    placeholder={String(getPanesSugeridos(producto))}
                                   />
                                   {cantidad > 0 && pesoTotalDivision > 0 && (
                                     <p className="text-xs text-blue-600 text-right">
@@ -621,11 +645,7 @@ export const DivisionMasa: React.FC = () => {
                                     <p className="text-xs text-red-600 text-right max-w-xs">{error}</p>
                                   )}
                                   {esCorrecto && (() => {
-                                    const xSAP = parseFloat(String(producto.unidades_por_paquete || 0));
-                                    const xNombre = producto.producto_nombre?.match(/ X ?(\d+)/i);
-                                    const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
-                                    const programadas = parseInt(producto.unidades_programadas || producto.unidades_pedidas || 0);
-                                    const panesSugeridos = programadas * xPaq;
+                                    const panesSugeridos = getPanesSugeridos(producto);
                                     return cantidad > panesSugeridos ? (
                                       <p className="text-xs text-amber-600 text-right">
                                         +{cantidad - panesSugeridos} excedente real
