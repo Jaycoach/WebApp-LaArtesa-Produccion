@@ -492,6 +492,10 @@ export const DivisionMasa: React.FC = () => {
                         const pesoTotalMasa    = divisor > 0 && pesoUnitario > 0 ? divisor * pesoUnitario : 0;
                         // Peso Total División = Peso Unitario Masa × Unidades Cortadas ingresadas por el usuario
                         const pesoTotalDivision = cantidad > 0 && pesoUnitario > 0 ? cantidad * pesoUnitario : 0;
+                        // Validación B4: divisor guardado (snapshot al sincronizar) vs. valor vivo en SAP
+                        const divisorSapActual = producto.multiplo_divisor_sap_actual != null
+                          ? parseInt(producto.multiplo_divisor_sap_actual) : null;
+                        const divisorDesincronizado = divisorSapActual != null && divisorSapActual !== divisor;
 
                         return (
                           <tr key={producto.id} className={`hover:bg-gray-50 ${excedente > 0 ? 'bg-amber-50/30' : ''}`}>
@@ -548,8 +552,19 @@ export const DivisionMasa: React.FC = () => {
                             {/* Divisor badge */}
                             <td className="px-4 py-3 text-center">
                               {divisor > 0 ? (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-orange-100 text-orange-800">
-                                  ×{divisor}
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold ${
+                                    divisorDesincronizado
+                                      ? 'bg-red-100 text-red-800'
+                                      : 'bg-orange-100 text-orange-800'
+                                  }`}
+                                  title={
+                                    divisorDesincronizado
+                                      ? `Desincronizado: en Orbit está ×${divisor}, en SAP ahora es ×${divisorSapActual}. Sincroniza BOM para actualizar.`
+                                      : undefined
+                                  }
+                                >
+                                  {divisorDesincronizado && '⚠️'}×{divisor}
                                 </span>
                               ) : (
                                 <span className="text-gray-300 text-xs">—</span>

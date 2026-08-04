@@ -128,10 +128,18 @@ const getProductosByMasa = async (masaId) => {
   // Asegurar que masaId sea un número
   const masaIdNum = Number(masaId);
 
+  // FIX B4 (2026-08-04): LEFT JOIN a sap_articulos para exponer el valor VIVO
+  // del divisor en SAP junto al snapshot guardado (multiplo_divisor). No se
+  // toca el snapshot — todos los cálculos existentes siguen usando la misma
+  // columna de siempre. Solo se agrega multiplo_divisor_sap_actual para que
+  // el frontend pueda avisar si están desincronizados.
   const result = await db.query(`
-    SELECT * FROM productos_por_masa
-    WHERE masa_id = $1
-    ORDER BY producto_nombre, presentacion
+    SELECT ppm.*,
+           sa.multiplo_divisor AS multiplo_divisor_sap_actual
+    FROM productos_por_masa ppm
+    LEFT JOIN sap_articulos sa ON sa.item_code = ppm.sap_item_code
+    WHERE ppm.masa_id = $1
+    ORDER BY ppm.producto_nombre, ppm.presentacion
   `, [masaIdNum]);
 
   return result.rows;

@@ -3,7 +3,8 @@
     "allow": [
       "Bash(node --check src/controllers/pesaje.controller.js)",
       "Bash(node --check src/controllers/sap.controller.js)",
-      "Bash(node --check src/controllers/fases.controller.js)"
+      "Bash(node --check src/controllers/fases.controller.js)",
+      "Bash(node --check src/models/fases.model.js)"
     ]
   }
 }
