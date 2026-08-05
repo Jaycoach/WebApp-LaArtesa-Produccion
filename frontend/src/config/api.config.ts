@@ -66,6 +66,7 @@ export const API_CONFIG = {
       COSTO_AGUA: '/config/costo-agua',
       COSTO_AGUA2: '/config/costo-agua2',
       CATALOGO_TIPOS_MASA: '/config/catalogo-tipos-masa',
+      AMASADORAS: '/config/amasadoras',
     },
 
     // Fases de producción

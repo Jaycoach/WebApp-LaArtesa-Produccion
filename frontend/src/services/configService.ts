@@ -107,6 +107,12 @@ export const configService = {
     );
     return handleApiResponse(response);
   },
+  getAmasadoras: async (): Promise<any[]> => {
+    const response = await apiClient.get<ApiResponse<any[]>>(
+      API_CONFIG.ENDPOINTS.CONFIG.AMASADORAS
+    );
+    return handleApiResponse(response);
+  },
   updateTipoMasaFormado: async (id: number, requiere_formado: boolean): Promise<any> => {
     const response = await apiClient.put<ApiResponse<any>>(
       `${API_CONFIG.ENDPOINTS.CONFIG.CATALOGO_TIPOS_MASA}/${id}`,

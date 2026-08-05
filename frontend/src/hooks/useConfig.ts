@@ -127,6 +127,13 @@ export const useCatalogoTiposMasa = () => {
     staleTime: 1000 * 60 * 5,
   });
 };
+export const useAmasadoras = () => {
+  return useQuery({
+    queryKey: ['amasadoras'],
+    queryFn: () => configService.getAmasadoras(),
+    staleTime: 1000 * 60 * 5,
+  });
+};
 export const useUpdateTipoMasaFormado = () => {
   const queryClient = useQueryClient();
   return useMutation({
