@@ -401,3 +401,16 @@ exports.updateCatalogoTiposMasa = async (req, res) => {
     res.status(500).json({ success: false, message: e.message });
   }
 };
+
+// ── AMASADORAS ────────────────────────────────────────────────────────────
+exports.getAmasadoras = async (req, res, next) => {
+  try {
+    const r = await db.query(
+      `SELECT id, nombre, codigo, capacidad_kg, tipo, activa
+       FROM amasadoras
+       WHERE activa = true
+       ORDER BY id`
+    );
+    res.json({ success: true, data: r.rows });
+  } catch (e) { next(e); }
+};

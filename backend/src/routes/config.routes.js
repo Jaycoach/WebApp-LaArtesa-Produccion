@@ -46,6 +46,8 @@ router.post('/etiquetas',        checkRole(['admin']), c.upsertEtiqueta);
 router.get('/catalogo-tipos-masa',     c.getCatalogoTiposMasa);
 router.put('/catalogo-tipos-masa/:id', checkRole(['admin', 'supervisor']), c.updateCatalogoTiposMasa);
 
+// Amasadoras
+router.get('/amasadoras',                    c.getAmasadoras);
 // Sync precios empaque SAP
 router.post('/sync-empaque',     checkRole(['admin', 'supervisor']), c.syncPreciosEmpaque);
 

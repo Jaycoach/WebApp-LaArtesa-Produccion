@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card } from '@/components/common';
 import { useMasaDetail, useComposicion } from '../../hooks/useMasas';
+import { useAmasadoras } from '../../hooks/useConfig';
 import { useCompletarFase } from '../../hooks/useFases';
 import { ModalMO } from '../../components/common/ModalMO';
 
@@ -12,6 +13,7 @@ export const AmasadoMasa: React.FC = () => {
 
   const { data: masa, isLoading: loadingMasa } = useMasaDetail(masaIdNum);
   const { data: composicion } = useComposicion(masaIdNum);
+  const { data: amasadoras } = useAmasadoras();
   const completarMutation = useCompletarFase();
 
   // Solo lo que Kevin pidió ver en Amasado: harina y agua ya pesadas en Pesaje.
@@ -206,9 +208,9 @@ export const AmasadoMasa: React.FC = () => {
                 onChange={(e) => setFormData({ ...formData, amasadora_id: e.target.value })}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
-                <option value="1">Amasadora 1</option>
-                <option value="2">Amasadora 2</option>
-                <option value="3">Amasadora 3</option>
+                {(amasadoras || []).map((a: any) => (
+                  <option key={a.id} value={String(a.id)}>{a.nombre}</option>
+                ))}
               </select>
             </div>
 
