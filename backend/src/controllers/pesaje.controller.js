@@ -114,30 +114,16 @@ const getChecklist = async (req, res, next) => {
       ? configExcluidos.rows[0].valor.split(',').map(c => c.trim()).filter(Boolean)
       : [];
 
-    // Leer costos de insumos propios desde configuración
-    const configCostosInsumos = await db.query(
-      `SELECT clave, valor FROM configuracion_sistema
-       WHERE clave IN ('costo_agua_litro', 'costo_agua2_litro')`
-    );
-    const costosInsumos = {};
-    for (const row of configCostosInsumos.rows) {
-      costosInsumos[row.clave] = parseFloat(row.valor) || 0;
-    }
-    const costoAgua = costosInsumos['costo_agua_litro'] || 0;
-    const costoAgua2 = costosInsumos['costo_agua2_litro'] || 0;
-
     // Adjuntar datos de stock a cada ingrediente
     const ingredientesConStock = ingredientes.map(ing => {
       const esExcluido = excluidos.includes(ing.ingrediente_sap_code);
       const inv = inventarioMap[ing.ingrediente_sap_code] || null;
       const stockDisponible = inv ? parseFloat(inv.stock_almp) - parseFloat(inv.committed_almp) : null;
       const cantidadRequerida = parseFloat(ing.cantidad_kilos) || 0;
-      // Excluidos nunca bloquean por stock
+      // Excluidos nunca bloquean por stock (ej: agua no requiere lote), pero el costo
+      // SIEMPRE viene de SAP (costo_promedio) — nunca de configuración manual.
       const sinStock = esExcluido ? false : (inv !== null && stockDisponible < cantidadRequerida);
-      // Costo: excluidos usan configuración, resto usan SAP
-      const costoUnitario = esExcluido
-        ? (ing.ingrediente_sap_code === 'MP0008' ? costoAgua2 : costoAgua)
-        : (inv ? parseFloat(inv.costo_promedio) : null);
+      const costoUnitario = inv ? parseFloat(inv.costo_promedio) : null;
       // Lotes ordenados por expiration_date ASC (FEFO) → el primero es el sugerido
       const lotes = lotesMap[ing.ingrediente_sap_code] || [];
       return {
@@ -391,15 +377,6 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
   const inicio = Date.now();
   let requestPayload = null;
   try {
-    // Ítems excluidos del consumo SAP (agua, insumos propios sin lote SAP)
-    const configExc = await db.query(
-      `SELECT valor FROM configuracion_sistema WHERE clave = 'ingredientes_excluir_stock_validacion'`
-    );
-    const excluidos = configExc.rows.length > 0
-      ? configExc.rows[0].valor.split(',').map(c => c.trim()).filter(Boolean)
-      : [];
-    const excluidosParam = excluidos.length > 0 ? excluidos : null;
-
     const result = await db.query(
       `SELECT im.ingrediente_sap_code, im.ingrediente_nombre,
               im.peso_real, im.lote,
@@ -409,9 +386,8 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
        WHERE im.masa_id = $1
          AND im.es_empaque = false
          AND im.pesado = true
-         AND im.peso_real > 0
-         AND ($2::text[] IS NULL OR im.ingrediente_sap_code != ALL($2::text[]))`,
-      [masaId, excluidosParam]
+         AND im.peso_real > 0`,
+      [masaId]
     );
 
     if (result.rows.length === 0) {
@@ -431,9 +407,8 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
        WHERE plc.masa_id = $1
          AND plc.confirmado_sap = false
          AND plc.liberado_en IS NULL
-         AND im.es_empaque = false
-         AND ($2::text[] IS NULL OR plc.item_code != ALL($2::text[]))`,
-      [masaId, excluidosParam]
+         AND im.es_empaque = false`,
+      [masaId]
     );
 
     // Agrupar por item_code (un ítem puede tener múltiples lotes)
@@ -456,9 +431,8 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
          AND im.es_empaque = false
          AND im.pesado = true
          AND im.peso_real > 0
-         AND plc.id IS NULL
-         AND ($2::text[] IS NULL OR im.ingrediente_sap_code != ALL($2::text[]))`,
-      [masaId, excluidosParam]
+         AND plc.id IS NULL`,
+      [masaId]
     );
     for (const r of sinLotesResult.rows) {
       if (!itemMap[r.ingrediente_sap_code]) {
