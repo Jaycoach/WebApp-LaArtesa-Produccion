@@ -145,6 +145,50 @@ const getProductosByMasa = async (masaId) => {
   return result.rows;
 };
 
+const getInfoCancelacion = async (masaId) => {
+  const masasResult = await db.query(
+    `WITH RECURSIVE relacionadas AS (
+       SELECT m.id, m.codigo_masa, m.estado, m.sap_doc_entry_pesaje, m.masa_padre_id,
+              m.masa_adicional_referencia_id
+       FROM masas_produccion m
+       WHERE m.id = $1
+       UNION
+       SELECT m.id, m.codigo_masa, m.estado, m.sap_doc_entry_pesaje, m.masa_padre_id,
+              m.masa_adicional_referencia_id
+       FROM masas_produccion m
+       INNER JOIN relacionadas r
+         ON m.masa_padre_id = r.id OR m.masa_adicional_referencia_id = r.id
+     )
+     SELECT r.id, r.codigo_masa, r.estado, r.sap_doc_entry_pesaje, pf.estado AS estado_pesaje
+     FROM relacionadas r
+     LEFT JOIN progreso_fases pf ON pf.masa_id = r.id AND pf.fase = 'PESAJE'
+     WHERE r.estado != 'CANCELADA'
+     ORDER BY r.id`,
+    [masaId]
+  );
+
+  const masas = masasResult.rows.map(m => ({
+    ...m,
+    bloqueada: m.estado_pesaje === 'COMPLETADA' || !!m.sap_doc_entry_pesaje,
+  }));
+
+  const idsRelacionados = masas.map(m => m.id);
+  let lineas = [];
+  if (idsRelacionados.length > 0) {
+    const lineasResult = await db.query(
+      `SELECT ov.masa_id, ov.sap_doc_entry, ov.sap_doc_num, ov.sap_line_num,
+              ov.sap_item_code, ov.unidades_pedidas
+       FROM productos_por_masa_ov ov
+       WHERE ov.masa_id = ANY($1::int[])
+       ORDER BY ov.sap_doc_num, ov.sap_line_num`,
+      [idsRelacionados]
+    );
+    lineas = lineasResult.rows;
+  }
+
+  return { masas, lineas };
+};
+
 const updateUnidadesProgramadas = async (productoId, unidades, userId, motivo = null) => {
   // Leer estado anterior para auditoría
   const anterior = await db.query(
@@ -643,6 +687,7 @@ module.exports = {
   // Productos
   getProductosByMasa,
   updateUnidadesProgramadas,
+  getInfoCancelacion,
   // Ingredientes
   getIngredientesByMasa,
   updateIngredienteChecklist,
