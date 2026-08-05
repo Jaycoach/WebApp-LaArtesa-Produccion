@@ -4,6 +4,7 @@
 
 const db = require('../database/connection');
 const fasesModel = require('../models/fases.model');
+const sapService = require('../services/sap.service');
 const logger = require('../utils/logger');
 const { sendAprobacionMasaEmail } = require('../services/email.service');
 const { devolverStockMasa } = require('./pesaje.controller');
@@ -586,16 +587,24 @@ const marcarPendiente = async (req, res, next) => {
   }
 };
 
-/**
- * Cancela una masa APROBADA que aún no inició pesaje.
- * Libera cualquier reserva local de lotes (pesaje_lotes_consumo) que
- * nunca llegó a confirmarse en SAP — esas filas se eliminan porque
- * no hay nada que auditar (el consumo real nunca ocurrió).
- */
+const getInfoCancelacionMasa = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const info = await fasesModel.getInfoCancelacion(id);
+    if (!info.masas.length) {
+      return res.status(404).json({ success: false, message: 'Masa no encontrada o ya cancelada' });
+    }
+    res.json({ success: true, data: info });
+  } catch (error) {
+    logger.error(`Error obteniendo info de cancelación de masa ${req.params.id}:`, error);
+    next(error);
+  }
+};
+
 const cancelarMasa = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { motivo, confirmar_parcial } = req.body;
+    const { motivo, confirmar_parcial, lineas_seleccionadas } = req.body;
 
     if (!motivo || !motivo.trim()) {
       return res.status(400).json({
@@ -604,102 +613,76 @@ const cancelarMasa = async (req, res, next) => {
       });
     }
 
-    const masaCheck = await db.query(
-      `SELECT m.id, m.estado, m.sap_doc_entry_pesaje, m.codigo_masa, pf.estado AS estado_pesaje
-       FROM masas_produccion m
-       LEFT JOIN progreso_fases pf ON pf.masa_id = m.id AND pf.fase = 'PESAJE'
-       WHERE m.id = $1`,
-      [id]
-    );
-    if (!masaCheck.rows.length) {
-      return res.status(404).json({ success: false, message: 'Masa no encontrada' });
+    const info = await fasesModel.getInfoCancelacion(id);
+    if (!info.masas.length) {
+      return res.status(404).json({ success: false, message: 'Masa no encontrada o ya cancelada' });
     }
-    const masa = masaCheck.rows[0];
 
-    if (!['APROBADA', 'SUBDIVIDIDA'].includes(masa.estado)) {
+    const raiz = info.masas.find(m => String(m.id) === String(id));
+    if (!raiz || !['PLANIFICACION', 'APROBADA', 'SUBDIVIDIDA'].includes(raiz.estado)) {
       return res.status(403).json({
         success: false,
-        message: `Solo se pueden cancelar masas en estado APROBADA o SUBDIVIDIDA. Estado actual: ${masa.estado}`,
-        estado: masa.estado,
+        message: `Solo se pueden cancelar masas en estado PLANIFICACION, APROBADA o SUBDIVIDIDA. Estado actual: ${raiz?.estado || 'desconocido'}`,
+        estado: raiz?.estado,
       });
     }
-
-    // ── Masa simple (no subdividida): flujo original sin cambios ──
-    if (masa.estado === 'APROBADA') {
-      if (masa.estado_pesaje === 'COMPLETADA' || masa.sap_doc_entry_pesaje) {
-        return res.status(403).json({
-          success: false,
-          message: 'No se puede cancelar: el pesaje ya fue confirmado en SAP para esta masa.',
-        });
-      }
-      await devolverStockMasa(id);
-      await db.query(
-        `UPDATE masas_produccion
-         SET estado = 'CANCELADA', cancelado_por = $1, cancelado_en = NOW(),
-             motivo_cancelacion = $2, updated_at = NOW()
-         WHERE id = $3`,
-        [req.user.id, motivo.trim(), id]
-      );
-      logger.info(`Masa ${id} cancelada por usuario ${req.user.id}. Motivo: ${motivo.trim()}`);
-      return res.json({
-        success: true,
-        message: 'Masa cancelada y stock reservado liberado.',
-        data: { masaId: id, estado: 'CANCELADA' },
-      });
-    }
-
-    // ── Masa SUBDIVIDIDA: cascada a sub-masas ──
-    const hijasResult = await db.query(
-      `SELECT m.id, m.codigo_masa, m.estado, m.sap_doc_entry_pesaje, pf.estado AS estado_pesaje
-       FROM masas_produccion m
-       LEFT JOIN progreso_fases pf ON pf.masa_id = m.id AND pf.fase = 'PESAJE'
-       WHERE m.masa_padre_id = $1`,
-      [id]
-    );
-    const hijas = hijasResult.rows.filter(h => h.estado !== 'CANCELADA');
-    const bloqueadas = hijas.filter(h => h.estado_pesaje === 'COMPLETADA' || h.sap_doc_entry_pesaje);
-    const cancelables = hijas.filter(h => !(h.estado_pesaje === 'COMPLETADA' || h.sap_doc_entry_pesaje));
-
-    if (bloqueadas.length > 0 && cancelables.length === 0) {
+    if (raiz.bloqueada) {
       return res.status(403).json({
         success: false,
-        message: 'No se puede cancelar: todas las tandas ya tienen pesaje confirmado en SAP.',
+        message: 'No se puede cancelar: el pesaje ya fue confirmado en SAP para esta masa.',
       });
     }
+
+    const bloqueadas = info.masas.filter(m => m.id !== raiz.id && m.bloqueada);
+    const cancelables = info.masas.filter(m => !m.bloqueada);
 
     if (bloqueadas.length > 0 && !confirmar_parcial) {
       return res.status(409).json({
         success: false,
-        message: `${bloqueadas.map(h => h.codigo_masa).join(', ')} ya tiene pesaje confirmado y no podrá ser cancelada. ¿Cancelar las demás tandas junto con la masa principal, dejando esta(s) activa(s)?`,
+        message: `${bloqueadas.map(m => m.codigo_masa).join(', ')} ya tiene(n) pesaje confirmado y no podrá(n) ser cancelada(s). ¿Cancelar las demás junto con la masa principal, dejando esta(s) activa(s)?`,
         data: {
           requiere_confirmacion: true,
-          bloqueadas: bloqueadas.map(h => ({ id: h.id, codigo_masa: h.codigo_masa })),
-          cancelables: cancelables.map(h => ({ id: h.id, codigo_masa: h.codigo_masa })),
+          bloqueadas: bloqueadas.map(m => ({ id: m.id, codigo_masa: m.codigo_masa })),
+          cancelables: cancelables.map(m => ({ id: m.id, codigo_masa: m.codigo_masa })),
         },
       });
     }
 
+    const idsCancelables = new Set(cancelables.map(m => m.id));
+    const todasLasLineas = info.lineas.filter(l => idsCancelables.has(l.masa_id));
+    const lineasACerrar = Array.isArray(lineas_seleccionadas) && lineas_seleccionadas.length > 0
+      ? todasLasLineas.filter(l => lineas_seleccionadas.some(
+          sel => sel.sap_doc_entry === l.sap_doc_entry && sel.sap_line_num === l.sap_line_num
+        ))
+      : todasLasLineas;
+
+    const resultadosSap = [];
+    for (const linea of lineasACerrar) {
+      const resultado = await sapService.cerrarLineaOV(linea.sap_doc_entry, linea.sap_line_num);
+      resultadosSap.push({ ...linea, ...resultado });
+      await db.query(
+        `INSERT INTO cancelaciones_ov_sap
+           (masa_id, sap_doc_entry, sap_doc_num, sap_line_num, sap_item_code, exitosa, mensaje_error, cancelado_por)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [linea.masa_id, linea.sap_doc_entry, linea.sap_doc_num, linea.sap_line_num,
+         linea.sap_item_code, resultado.exitosa, resultado.mensaje || null, req.user.id]
+      );
+    }
+    const fallidas = resultadosSap.filter(r => !r.exitosa);
+
     const client = await db.getClient();
     try {
       await client.query('BEGIN');
-      for (const h of cancelables) {
-        await devolverStockMasa(h.id);
+      for (const m of cancelables) {
+        await devolverStockMasa(m.id);
         await client.query(
           `UPDATE masas_produccion
            SET estado = 'CANCELADA', cancelado_por = $1, cancelado_en = NOW(),
                motivo_cancelacion = $2, updated_at = NOW()
            WHERE id = $3`,
-          [req.user.id, motivo.trim(), h.id]
+          [req.user.id, motivo.trim(), m.id]
         );
       }
-      await devolverStockMasa(id);
-      await client.query(
-        `UPDATE masas_produccion
-         SET estado = 'CANCELADA', cancelado_por = $1, cancelado_en = NOW(),
-             motivo_cancelacion = $2, updated_at = NOW()
-         WHERE id = $3`,
-        [req.user.id, motivo.trim(), id]
-      );
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
@@ -708,14 +691,22 @@ const cancelarMasa = async (req, res, next) => {
       client.release();
     }
 
-    logger.info(`Masa ${id} (SUBDIVIDIDA) cancelada por usuario ${req.user.id} junto con ${cancelables.length} tanda(s). Motivo: ${motivo.trim()}. No canceladas por pesaje confirmado: ${bloqueadas.map(h => h.codigo_masa).join(', ') || 'ninguna'}`);
-
+    logger.info(`Masa ${id} y ${cancelables.length - 1} relacionada(s) canceladas por usuario ${req.user.id}. Líneas SAP: ${resultadosSap.length - fallidas.length} ok, ${fallidas.length} fallidas. Motivo: ${motivo.trim()}`);
     res.json({
       success: true,
-      message: bloqueadas.length > 0
-        ? `Masa principal y ${cancelables.length} tanda(s) canceladas. ${bloqueadas.length} tanda(s) con pesaje confirmado quedaron activas.`
-        : `Masa principal y sus ${cancelables.length} tanda(s) canceladas.`,
-      data: { masaId: id, estado: 'CANCELADA', tandas_canceladas: cancelables.length, tandas_no_canceladas: bloqueadas.length },
+      message: fallidas.length > 0
+        ? `Masa(s) cancelada(s) en Orbit. ${fallidas.length} línea(s) de OV no se pudieron cerrar en SAP por su estado — revisar detalle.`
+        : `Masa(s) cancelada(s) correctamente, ${resultadosSap.length} línea(s) de OV cerradas en SAP.`,
+      data: {
+        masaId: id,
+        estado: 'CANCELADA',
+        canceladas: cancelables.map(m => m.codigo_masa),
+        no_canceladas: bloqueadas.map(m => m.codigo_masa),
+        lineas_sap: resultadosSap.map(r => ({
+          doc_num: r.sap_doc_num, line_num: r.sap_line_num, item_code: r.sap_item_code,
+          exitosa: r.exitosa, mensaje: r.mensaje || null,
+        })),
+      },
     });
   } catch (error) {
     logger.error(`Error cancelando masa ${req.params.id}:`, error);
@@ -731,5 +722,6 @@ module.exports = {
   updateUnidadesProgramadas,
   aprobarMasa,
   marcarPendiente,
+  getInfoCancelacionMasa,
   cancelarMasa,
 };

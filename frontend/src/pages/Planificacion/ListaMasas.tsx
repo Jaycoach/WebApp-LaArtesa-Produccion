@@ -8,10 +8,10 @@ import {
   useSincronizarBOM,
   useAprobarMasa,
   useMarcarPendiente,
-  useCancelarMasa,
 } from '../../hooks/useMasas';
 import { useAuthStore } from '@/store';
 import { MasaProduccionResumen } from '../../types/api';
+import { ModalCancelarMasa } from '@/components/common/ModalCancelarMasa';
 
 /**
  * Página: Lista de masas de producción del día
@@ -26,7 +26,6 @@ export const ListaMasas: React.FC = () => {
   );
   const [motivoPendiente, setMotivoPendiente] = useState('');
   const [masaPendienteId, setMasaPendienteId] = useState<number | null>(null);
-  const [motivoCancelar, setMotivoCancelar] = useState('');
   const [masaCancelarId, setMasaCancelarId] = useState<number | null>(null);
 
   const { data: masas, isLoading, error, refetch } = useMasasByFecha(fecha);
@@ -35,7 +34,6 @@ export const ListaMasas: React.FC = () => {
   const sincronizandoRef = useRef(false);
   const aprobarMutation = useAprobarMasa();
   const pendienteMutation = useMarcarPendiente();
-  const cancelarMutation = useCancelarMasa();
 
   const handleSincronizar = async () => {
     if (sincronizandoRef.current || sincronizarMutation.isPending) return;
@@ -100,17 +98,6 @@ export const ListaMasas: React.FC = () => {
   const handleAbrirCancelar = (e: React.MouseEvent, masaId: number) => {
     e.stopPropagation();
     setMasaCancelarId(masaId);
-    setMotivoCancelar('');
-  };
-
-  const handleConfirmarCancelar = async () => {
-    if (!masaCancelarId || !motivoCancelar.trim()) return;
-    try {
-      await cancelarMutation.mutateAsync({ masaId: masaCancelarId, motivo: motivoCancelar.trim() });
-      setMasaCancelarId(null);
-    } catch (error: any) {
-      alert(error?.message || 'Error desconocido al cancelar la masa');
-    }
   };
 
   const handleConfirmarPendiente = async () => {
@@ -429,7 +416,7 @@ export const ListaMasas: React.FC = () => {
                   )}
 
                   {/* Botones acción SUPERVISOR/ADMIN */}
-                  {esSupervisor && (masa.estado === 'PLANIFICACION' || masa.estado === 'PENDIENTE' || masa.estado === 'APROBADA') && (
+                  {esSupervisor && ['PLANIFICACION', 'PENDIENTE', 'APROBADA', 'SUBDIVIDIDA'].includes(masa.estado) && (
                     <div className="flex gap-2 mb-3" onClick={(e) => e.stopPropagation()}>
                       {(masa.estado === 'PLANIFICACION' || masa.estado === 'PENDIENTE') && (
                         <button
@@ -449,11 +436,10 @@ export const ListaMasas: React.FC = () => {
                           ⏸ Pendiente
                         </button>
                       )}
-                      {masa.estado === 'APROBADA' && (
+                      {['PLANIFICACION', 'PENDIENTE', 'APROBADA', 'SUBDIVIDIDA'].includes(masa.estado) && (
                         <button
                           onClick={(e) => handleAbrirCancelar(e, masa.id)}
-                          disabled={cancelarMutation.isPending}
-                          className="flex-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg disabled:opacity-50 transition-colors"
+                          className="flex-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors"
                         >
                           ✕ Cancelar
                         </button>
@@ -505,39 +491,13 @@ export const ListaMasas: React.FC = () => {
           </div>
         </div>
       )}
-      {/* Modal motivo cancelación (obligatorio) */}
-      {masaCancelarId !== null && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Cancelar Masa</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Se liberará el stock reservado y la OV en SAP. El motivo es obligatorio.
-            </p>
-            <textarea
-              value={motivoCancelar}
-              onChange={(e) => setMotivoCancelar(e.target.value)}
-              placeholder="Motivo de la cancelación (obligatorio)..."
-              rows={3}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-400 text-sm resize-none"
-            />
-            <div className="flex gap-3 mt-4">
-              <button
-                onClick={() => setMasaCancelarId(null)}
-                className="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm font-medium"
-              >
-                Volver
-              </button>
-              <button
-                onClick={handleConfirmarCancelar}
-                disabled={cancelarMutation.isPending || !motivoCancelar.trim()}
-                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
-              >
-                {cancelarMutation.isPending ? 'Cancelando...' : 'Confirmar cancelación'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Modal cancelación de masa (motivo + selección de líneas OV a cerrar en SAP) */}
+      <ModalCancelarMasa
+        masaId={masaCancelarId ?? 0}
+        isOpen={masaCancelarId !== null}
+        onClose={() => setMasaCancelarId(null)}
+        onCancelada={() => { setMasaCancelarId(null); refetch(); }}
+      />
       {/* Modal confirmación de aprobación con fecha de vencimiento */}
       {aprobarModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">

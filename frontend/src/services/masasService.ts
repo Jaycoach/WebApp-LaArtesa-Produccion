@@ -138,10 +138,21 @@ export const masasService = {
     return response.data!;
   },
 
-  cancelarMasa: async (masaId: number, motivo: string, confirmarParcial?: boolean): Promise<any> => {
+  getInfoCancelacion: async (masaId: number): Promise<any> => {
+    const response = await apiService.get<any>(`/masas/${masaId}/cancelacion-info`);
+    return response.data!;
+  },
+
+  cancelarMasa: async (
+    masaId: number,
+    motivo: string,
+    confirmarParcial?: boolean,
+    lineasSeleccionadas?: { sap_doc_entry: number; sap_line_num: number }[]
+  ): Promise<any> => {
     const response = await apiService.patch<any>(`/masas/${masaId}/cancelar`, {
       motivo,
       ...(confirmarParcial ? { confirmar_parcial: true } : {}),
+      ...(lineasSeleccionadas ? { lineas_seleccionadas: lineasSeleccionadas } : {}),
     });
     return response.data!;
   },

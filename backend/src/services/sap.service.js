@@ -374,6 +374,27 @@ class SAPService {
   }
 
   /**
+   * Cierra una línea específica de una Orden de Venta en SAP (LineStatus → bost_Close).
+   * Usado al cancelar una masa para liberar la línea de OV asociada.
+   * @param {number} docEntry - DocEntry de la OV
+   * @param {number} lineNum - LineNum de la línea a cerrar
+   */
+  async cerrarLineaOV(docEntry, lineNum) {
+    try {
+      await this.ensureSession();
+      await this.client.patch(`/Orders(${docEntry})`, {
+        DocumentLines: [{ LineNum: lineNum, LineStatus: 'bost_Close' }],
+      });
+      logger.info(`SAP: línea ${lineNum} de OV DocEntry ${docEntry} cerrada correctamente`);
+      return { exitosa: true };
+    } catch (error) {
+      const mensaje = error.response?.data?.error?.message?.value || error.message;
+      logger.error(`SAP: error cerrando línea ${lineNum} de OV DocEntry ${docEntry}: ${mensaje}`);
+      return { exitosa: false, mensaje };
+    }
+  }
+
+  /**
    * Obtiene info de múltiples artículos en lote (SalesQtyPerPackUnit, U_JZ_Tipos_Masa).
    * @param {string[]} itemCodes - array de códigos únicos
    * @returns {Object} mapa { itemCode: { itemName, salesQtyPerPackUnit, tipoMasa } }

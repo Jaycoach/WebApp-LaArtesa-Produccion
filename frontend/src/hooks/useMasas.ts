@@ -222,11 +222,24 @@ export const useMarcarPendiente = () => {
 /**
  * Hook para cancelar una masa (ADMIN/SUPERVISOR)
  */
+export const useInfoCancelacionMasa = (masaId: number | null) => {
+  return useQuery({
+    queryKey: ['masas', 'cancelacion-info', masaId],
+    queryFn: () => masasService.getInfoCancelacion(masaId as number),
+    enabled: !!masaId,
+  });
+};
+
 export const useCancelarMasa = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ masaId, motivo, confirmarParcial }: { masaId: number; motivo: string; confirmarParcial?: boolean }) =>
-      masasService.cancelarMasa(masaId, motivo, confirmarParcial),
+    mutationFn: ({ masaId, motivo, confirmarParcial, lineasSeleccionadas }: {
+      masaId: number;
+      motivo: string;
+      confirmarParcial?: boolean;
+      lineasSeleccionadas?: { sap_doc_entry: number; sap_line_num: number }[];
+    }) =>
+      masasService.cancelarMasa(masaId, motivo, confirmarParcial, lineasSeleccionadas),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: MASAS_QUERY_KEYS.all });
     },
