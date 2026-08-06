@@ -133,11 +133,28 @@ const getProductosByMasa = async (masaId) => {
   // toca el snapshot — todos los cálculos existentes siguen usando la misma
   // columna de siempre. Solo se agrega multiplo_divisor_sap_actual para que
   // el frontend pueda avisar si están desincronizados.
+  // FIX DetalleMasa (2026-08-06): LEFT JOIN LATERAL a productos_por_masa_ov
+  // para exponer las OV de SAP que componen cada producto (hallazgo en
+  // pruebas B1: la pantalla de detalle de masa no mostraba las OV incluidas,
+  // aunque el dato ya existe en productos_por_masa_ov desde la migración 039).
   const result = await db.query(`
     SELECT ppm.*,
-           sa.multiplo_divisor AS multiplo_divisor_sap_actual
+           sa.multiplo_divisor AS multiplo_divisor_sap_actual,
+           COALESCE(ov.ordenes, '[]'::json) AS ordenes_venta
     FROM productos_por_masa ppm
     LEFT JOIN sap_articulos sa ON sa.item_code = ppm.sap_item_code
+    LEFT JOIN LATERAL (
+      SELECT json_agg(
+               json_build_object(
+                 'sap_doc_entry', ppmo.sap_doc_entry,
+                 'sap_doc_num', ppmo.sap_doc_num,
+                 'sap_line_num', ppmo.sap_line_num,
+                 'unidades_pedidas', ppmo.unidades_pedidas
+               ) ORDER BY ppmo.sap_doc_num
+             ) AS ordenes
+      FROM productos_por_masa_ov ppmo
+      WHERE ppmo.producto_masa_id = ppm.id
+    ) ov ON true
     WHERE ppm.masa_id = $1
     ORDER BY ppm.producto_nombre, ppm.presentacion
   `, [masaIdNum]);

@@ -404,6 +404,7 @@ export const DetalleMasa: React.FC = () => {
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Código</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">OV</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Gramaje</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Paq. Pedidos</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Paq. a Producir</th>
@@ -431,6 +432,23 @@ export const DetalleMasa: React.FC = () => {
                       <tr key={producto.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-xs text-gray-400 font-mono">{producto.sap_item_code}</td>
                         <td className="px-4 py-3 text-sm font-medium text-gray-900">{producto.producto_nombre}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            {(producto.ordenes_venta || []).length > 0 ? (
+                              (producto.ordenes_venta as any[]).map((ov: any) => (
+                                <span
+                                  key={`${ov.sap_doc_entry}-${ov.sap_line_num}`}
+                                  className="text-xs font-mono bg-gray-100 text-gray-700 rounded px-1.5 py-0.5"
+                                  title={`Línea ${ov.sap_line_num} · ${ov.unidades_pedidas} paq. pedidos`}
+                                >
+                                  #{ov.sap_doc_num}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-xs text-gray-300">—</span>
+                            )}
+                          </div>
+                        </td>
                         <td className="px-4 py-3 text-sm text-gray-600 text-right">{producto.gramaje_unitario}g</td>
 
                         {/* Paq. Pedidos — fijo, de SAP */}
