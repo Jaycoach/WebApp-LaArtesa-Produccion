@@ -1835,6 +1835,7 @@ export const EmpaqueMasa: React.FC = () => {
   // ── Render: vista principal (lista + búsqueda OV) ──
   return (
     <div className="p-4 max-w-5xl mx-auto">
+      <BarraNavegacionFases />
       <h1 className="text-2xl font-bold mb-5 text-gray-800">Empaque</h1>
 
       <div className="flex gap-1 mb-5 border-b border-gray-200">

@@ -13,7 +13,7 @@ interface FaseSiguiente extends FaseAdyacente {
 }
 
 interface BarraNavegacionFasesProps {
-  masaId: string | number;
+  masaId?: string | number;
   codigoMasa?: string;
   faseAnterior?: FaseAdyacente;
   faseSiguiente?: FaseSiguiente;
@@ -55,13 +55,15 @@ export const BarraNavegacionFases: React.FC<BarraNavegacionFasesProps> = ({
         >
           🏠 Todas las masas
         </button>
-        <button
-          onClick={() => navigate(`/planificacion/masas/${masaId}`)}
-          className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm font-medium"
-          title="Detalle de la masa"
-        >
-          📄 {codigoMasa || 'Detalle'}
-        </button>
+        {masaId != null && (
+          <button
+            onClick={() => navigate(`/planificacion/masas/${masaId}`)}
+            className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm font-medium"
+            title="Detalle de la masa"
+          >
+            📄 {codigoMasa || 'Detalle'}
+          </button>
+        )}
       </div>
       <div className="flex items-center gap-2">
         {faseAnterior && (
