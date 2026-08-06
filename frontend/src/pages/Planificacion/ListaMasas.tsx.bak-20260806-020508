@@ -423,135 +423,177 @@ export const ListaMasas: React.FC = () => {
             {busqueda && masasFiltradas.length === 0 && (
               <div className="text-sm text-gray-400 px-1 mb-3">Sin resultados para "{busqueda}"</div>
             )}
-          <div className="bg-white rounded-lg shadow-sm divide-y divide-gray-100 overflow-hidden">
-            {[...masasFiltradas].sort((a, b) => Number(b.es_repeticion) - Number(a.es_repeticion)).map((masa: MasaProduccionResumen) => {
-              const expandida = expandidas.has(masa.id);
-              const totalMostrado = masa.division_completada_total && Number(masa.total_panes_cortados) > 0
-                ? `${Number(masa.total_panes_cortados).toLocaleString('es-CO')} panes`
-                : (Number(masa.total_unidades_programadas) > 0
-                    ? `${Number(masa.total_unidades_programadas).toLocaleString('es-CO')} paq`
-                    : '—');
-              const kgMostrado = (Number(masa.total_kilos_pesado_real) > 0 ? Number(masa.total_kilos_pesado_real) : Number(masa.total_kilos_con_merma)).toFixed(2);
-              return (
-                <div key={masa.id} className={seleccionadas.has(masa.id) ? 'bg-green-50' : ''}>
-                  <div
-                    className={`flex items-center gap-2 md:gap-3 px-3 md:px-4 py-2.5 hover:bg-gray-50 cursor-pointer border-l-4 ${
-                      masa.es_repeticion
-                        ? 'border-red-500'
-                        : masa.estado === 'APROBADA'
-                        ? 'border-green-500'
-                        : masa.estado === 'PENDIENTE'
-                        ? 'border-yellow-500'
-                        : 'border-transparent'
-                    }`}
-                    onClick={() => toggleExpandir(masa.id)}
-                  >
-                    {esSupervisor && ['PLANIFICACION', 'PENDIENTE'].includes(masa.estado) ? (
-                      <input
-                        type="checkbox"
-                        checked={seleccionadas.has(masa.id)}
-                        onChange={() => toggleSeleccion(masa.id)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="w-4 h-4 accent-green-600 shrink-0"
-                      />
-                    ) : (
-                      <span className="w-4 shrink-0" />
-                    )}
-                    <span className="text-gray-400 text-xs w-3 shrink-0">{expandida ? '▾' : '▸'}</span>
-
-                    <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-6">
+            {[...masasFiltradas].sort((a, b) => Number(b.es_repeticion) - Number(a.es_repeticion)).map((masa: MasaProduccionResumen) => (
+              <div
+                key={masa.id}
+                className={`bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer border-l-4 ${
+                  masa.es_repeticion
+                    ? 'border-red-500'
+                    : masa.estado === 'APROBADA'
+                    ? 'border-green-500'
+                    : masa.estado === 'PENDIENTE'
+                    ? 'border-yellow-500'
+                    : 'border-transparent'
+                } ${seleccionadas.has(masa.id) ? 'ring-2 ring-green-400' : ''}`}
+                onClick={() => handleVerDetalle(masa.id)}
+              >
+                <div className="p-4 md:p-6">
+                  {/* Header de la card */}
+                  <div className="flex justify-between items-start mb-4">
+                    <div className="flex-1 min-w-0">
+                      {esSupervisor && ['PLANIFICACION', 'PENDIENTE'].includes(masa.estado) && (
+                        <input
+                          type="checkbox"
+                          checked={seleccionadas.has(masa.id)}
+                          onChange={() => toggleSeleccion(masa.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-4 h-4 accent-green-600 mb-1"
+                        />
+                      )}
                       {masa.es_repeticion && (
-                        <span className="text-xs font-bold bg-red-600 text-white rounded px-1.5 py-0.5 shrink-0">🔴 PRIORIDAD</span>
+                        <span className="inline-flex items-center gap-1 text-xs font-bold bg-red-600 text-white rounded px-2 py-0.5 mb-1">
+                          🔴 REPETICIÓN — PRIORIDAD
+                        </span>
                       )}
                       {masa.es_adicional && (
-                        <span className="text-xs font-bold bg-orange-500 text-white rounded px-1.5 py-0.5 shrink-0 uppercase">ADICIONAL</span>
+                        <span
+                          style={{
+                            backgroundColor: '#f97316',
+                            color: 'white',
+                            fontSize: '0.65rem',
+                            fontWeight: 700,
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            letterSpacing: '0.05em',
+                            textTransform: 'uppercase',
+                          }}
+                        >
+                          ADICIONAL
+                        </span>
                       )}
-                      <span className={`font-semibold text-sm truncate ${masa.es_repeticion ? 'text-red-600' : 'text-gray-900'}`}>
-                        {masa.tipo_masa}
-                      </span>
-                      <span className="text-xs text-gray-400 truncate hidden sm:inline">{masa.nombre_masa}</span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className={`text-lg md:text-xl font-bold ${masa.es_repeticion ? 'text-red-600' : 'text-gray-900'}`}>
+                          {masa.tipo_masa}
+                        </h3>
+                      </div>
+                      <p className={`text-sm truncate ${masa.es_repeticion ? 'text-red-500 font-medium' : 'text-gray-500'}`}>
+                        {masa.nombre_masa}
+                      </p>
                     </div>
-
-                    <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${getEstadoBadge(masa.estado)}`}>
+                    <span className={`ml-2 shrink-0 px-3 py-1 rounded-full text-xs font-medium ${getEstadoBadge(masa.estado)}`}>
                       {getEstadoLabel(masa.estado)}
                     </span>
-                    <span className="shrink-0 text-sm text-gray-600 w-20 text-right hidden md:inline">{kgMostrado} kg</span>
-                    <span className="shrink-0 text-sm text-gray-600 w-16 text-right hidden lg:inline">{masa.total_ordenes} OV</span>
-                    <span className="shrink-0 text-sm font-semibold text-emerald-700 w-24 text-right hidden lg:inline">{totalMostrado}</span>
-
-                    {esSupervisor && ['PLANIFICACION', 'PENDIENTE', 'APROBADA', 'SUBDIVIDIDA'].includes(masa.estado) && (
-                      <div className="flex gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                        {(masa.estado === 'PLANIFICACION' || masa.estado === 'PENDIENTE') && (
-                          <button
-                            onClick={(e) => handleAprobar(e, masa.id)}
-                            disabled={aprobarMutation.isPending}
-                            className="px-2 py-1 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded disabled:opacity-50"
-                            title="Aprobar"
-                          >
-                            ✓
-                          </button>
-                        )}
-                        {(masa.estado === 'PLANIFICACION' || masa.estado === 'APROBADA') && (
-                          <button
-                            onClick={(e) => handleAbrirPendiente(e, masa.id)}
-                            className="px-2 py-1 bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-medium rounded"
-                            title="Marcar pendiente"
-                          >
-                            ⏸
-                          </button>
-                        )}
-                        <button
-                          onClick={(e) => handleAbrirCancelar(e, masa.id)}
-                          className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white text-xs font-medium rounded"
-                          title="Cancelar"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    )}
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleVerDetalle(masa.id); }}
-                      className="shrink-0 px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium rounded"
-                    >
-                      Detalle →
-                    </button>
                   </div>
 
-                  {expandida && (
-                    <div className="px-4 md:px-6 pb-3 bg-gray-50/60">
-                      <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-500 pt-2 pb-2 md:hidden">
-                        <span>{kgMostrado} kg</span>
-                        <span>{masa.total_ordenes} OV</span>
-                        <span className="font-semibold text-emerald-700">{totalMostrado}</span>
-                      </div>
+                  {/* Totales */}
+                  <div className="space-y-2 mb-4">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Total base:</span>
+                      <span className="font-semibold">
+                        {typeof masa.total_kilos_base === 'number' ? masa.total_kilos_base.toFixed(2) : '0.00'} kg
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">{masa.total_kilos_pesado_real > 0 ? 'Total Pesado:' : `Con merma (${masa.porcentaje_merma || 0}%):`}</span>
+                      <span className="font-semibold text-blue-600">
+                        {(Number(masa.total_kilos_pesado_real) > 0 ? Number(masa.total_kilos_pesado_real) : Number(masa.total_kilos_con_merma)).toFixed(2)} kg
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Estadísticas */}
+                  <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-200 mb-3">
+                    <div className="text-center">
+                      <p className="text-2xl font-bold text-gray-900">{masa.total_ordenes}</p>
+                      <p className="text-xs text-gray-500">Órdenes</p>
                       {masa.numeros_ov && masa.numeros_ov.length > 0 && (
-                        <p className="text-xs text-gray-400 mb-2">OV: {masa.numeros_ov.join(', ')}</p>
+                        <p className="text-xs text-gray-400 mt-1" title={masa.numeros_ov.join(', ')}>
+                          {masa.numeros_ov.length <= 3
+                            ? masa.numeros_ov.join(', ')
+                            : `${masa.numeros_ov.slice(0, 3).join(', ')}…`}
+                        </p>
                       )}
-                      {masa.productos_resumen && masa.productos_resumen.length > 0 ? (
-                        <div className="rounded-lg bg-white border border-gray-100 divide-y divide-gray-100">
-                          {masa.productos_resumen.map((p, i) => (
-                            <div key={i} className="flex items-center justify-between px-3 py-1.5">
-                              <span className="text-xs text-gray-700 truncate flex-1 mr-2" title={p.producto_nombre}>
-                                {p.producto_nombre}
-                              </span>
-                              <span className="text-xs font-bold text-emerald-700 shrink-0">
-                                {p.division_completada && Number(p.unidades_producidas) > 0
-                                  ? `${Math.round(Number(p.unidades_producidas) / Number(p.unidades_por_paquete || 1)).toLocaleString('es-CO')} paq · ${Number(p.unidades_producidas).toLocaleString('es-CO')} panes (cortado)`
-                                  : (Number(p.cantidad_paquetes) > 0
-                                      ? `${Number(p.cantidad_paquetes).toLocaleString('es-CO')} paq · ${(Number(p.cantidad_paquetes) * Number(p.unidades_por_paquete || 1)).toLocaleString('es-CO')} panes`
-                                      : '—')}
-                              </span>
-                            </div>
-                          ))}
+                    </div>
+                    <div className="text-center">
+                      <p className="text-2xl font-bold text-emerald-700">
+                        {masa.division_completada_total && Number(masa.total_panes_cortados) > 0
+                          ? Number(masa.total_panes_cortados).toLocaleString('es-CO')
+                          : (Number(masa.total_unidades_programadas) > 0
+                              ? Number(masa.total_unidades_programadas).toLocaleString('es-CO')
+                              : '—')}
+                      </p>
+                      <p className="text-xs text-gray-500">{masa.division_completada_total ? 'Panes cortados' : 'Total paquetes'}</p>
+                    </div>
+                  </div>
+                  {masa.productos_resumen && masa.productos_resumen.length > 0 && (
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => toggleExpandir(masa.id)}
+                        className="text-xs text-indigo-600 hover:text-indigo-800 font-medium mb-1"
+                      >
+                        {expandidas.has(masa.id) ? '▾ Ocultar productos' : `▸ Ver ${masa.productos_resumen.length} producto(s)`}
+                      </button>
+                    </div>
+                  )}
+                  {masa.productos_resumen && masa.productos_resumen.length > 0 && expandidas.has(masa.id) && (
+                    <div className="mb-3 rounded-lg bg-gray-50 border border-gray-100 divide-y divide-gray-100">
+                      {masa.productos_resumen.map((p, i) => (
+                        <div key={i} className="flex items-center justify-between px-3 py-1.5">
+                          <span className="text-xs text-gray-700 truncate flex-1 mr-2" title={p.producto_nombre}>
+                            {p.producto_nombre}
+                          </span>
+                          <span className="text-xs font-bold text-emerald-700 shrink-0">
+                            {p.division_completada && Number(p.unidades_producidas) > 0
+                              ? `${Math.round(Number(p.unidades_producidas) / Number(p.unidades_por_paquete || 1)).toLocaleString('es-CO')} paq · ${Number(p.unidades_producidas).toLocaleString('es-CO')} panes (cortado)`
+                              : (Number(p.cantidad_paquetes) > 0
+                                  ? `${Number(p.cantidad_paquetes).toLocaleString('es-CO')} paq · ${(Number(p.cantidad_paquetes) * Number(p.unidades_por_paquete || 1)).toLocaleString('es-CO')} panes`
+                                  : '—')}
+                          </span>
                         </div>
-                      ) : (
-                        <p className="text-xs text-gray-400">Sin productos</p>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Botones acción SUPERVISOR/ADMIN */}
+                  {esSupervisor && ['PLANIFICACION', 'PENDIENTE', 'APROBADA', 'SUBDIVIDIDA'].includes(masa.estado) && (
+                    <div className="flex gap-2 mb-3" onClick={(e) => e.stopPropagation()}>
+                      {(masa.estado === 'PLANIFICACION' || masa.estado === 'PENDIENTE') && (
+                        <button
+                          onClick={(e) => handleAprobar(e, masa.id)}
+                          disabled={aprobarMutation.isPending}
+                          className="flex-1 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg disabled:opacity-50 transition-colors"
+                        >
+                          {aprobarMutation.isPending ? '...' : '✓ Aprobar'}
+                        </button>
+                      )}
+                      {(masa.estado === 'PLANIFICACION' || masa.estado === 'APROBADA') && (
+                        <button
+                          onClick={(e) => handleAbrirPendiente(e, masa.id)}
+                          disabled={pendienteMutation.isPending}
+                          className="flex-1 px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-white text-sm font-medium rounded-lg disabled:opacity-50 transition-colors"
+                        >
+                          ⏸ Pendiente
+                        </button>
+                      )}
+                      {['PLANIFICACION', 'PENDIENTE', 'APROBADA', 'SUBDIVIDIDA'].includes(masa.estado) && (
+                        <button
+                          onClick={(e) => handleAbrirCancelar(e, masa.id)}
+                          className="flex-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors"
+                        >
+                          ✕ Cancelar
+                        </button>
                       )}
                     </div>
                   )}
+
+                  {/* Botón de acción */}
+                  <button className="w-full px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg transition-colors text-sm">
+                    Ver detalle →
+                  </button>
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
           </>
         )}
