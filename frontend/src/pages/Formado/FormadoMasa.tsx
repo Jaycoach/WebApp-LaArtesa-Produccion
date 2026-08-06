@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ModalMO } from '../../components/common/ModalMO';
+import { BarraNavegacionFases } from '../../components/common/BarraNavegacionFases';
 
 // ─────────────────────────────────────────────
 // Tipos
@@ -136,6 +137,17 @@ export const FormadoMasa: React.FC = () => {
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-4xl mx-auto space-y-6">
 
+        <BarraNavegacionFases
+          masaId={masaId!}
+          codigoMasa={masa.codigo}
+          faseAnterior={{ label: 'División', ruta: `/division/${masaId}` }}
+          faseSiguiente={{
+            label: 'Fermentación',
+            ruta: `/fermentacion/${masaId}`,
+            habilitada: etapa === 'completar',
+          }}
+        />
+
         {/* Header */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
           <div className="flex items-center justify-between">
@@ -150,30 +162,6 @@ export const FormadoMasa: React.FC = () => {
               <p className="text-gray-500 text-sm">
                 {masa.codigo} — {masa.nombre}
               </p>
-            </div>
-            <div className="flex flex-col items-end gap-2">
-              <button
-                onClick={() => navigate(`/planificacion/masas/${masaId}`)}
-                className="text-sm text-gray-500 hover:text-gray-800"
-              >
-                ← Volver al detalle
-              </button>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => navigate(`/division/${masaId}`)}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-white border border-gray-200 hover:border-yellow-300 hover:bg-yellow-50 text-gray-600 hover:text-yellow-700 rounded-lg text-xs font-medium shadow-sm transition-colors"
-                >
-                  ← División
-                </button>
-                {etapa === 'completar' && (
-                  <button
-                    onClick={() => navigate(`/fermentacion/${masaId}`)}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors"
-                  >
-                    🌡️ Fermentación →
-                  </button>
-                )}
-              </div>
             </div>
           </div>
         </div>
@@ -273,12 +261,6 @@ export const FormadoMasa: React.FC = () => {
             >
               {iniciarMutation.isPending ? 'Iniciando...' : '▶ Iniciar Formado'}
             </button>
-            <button
-              onClick={() => navigate(`/planificacion/masas/${masaId}`)}
-              className="w-full px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-medium"
-            >
-              ← Volver al detalle
-            </button>
           </div>
         )}
 
@@ -308,12 +290,6 @@ export const FormadoMasa: React.FC = () => {
               className="w-full bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white font-semibold py-3 rounded-lg transition-colors"
             >
               {completarMutation.isPending ? 'Completando...' : '✅ Completar Formado → Ir a Fermentación'}
-            </button>
-            <button
-              onClick={() => navigate(`/planificacion/masas/${masaId}`)}
-              className="w-full px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-medium"
-            >
-              ← Volver al detalle
             </button>
           </div>
         )}
@@ -349,18 +325,6 @@ export const FormadoMasa: React.FC = () => {
                 className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 text-sm font-medium"
               >
                 + Mano de obra
-              </button>
-              <button
-                onClick={() => navigate(`/fermentacion/${masaId}`)}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg transition-colors"
-              >
-                Ir a Fermentación →
-              </button>
-              <button
-                onClick={() => navigate(`/planificacion/masas/${masaId}`)}
-                className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-medium"
-              >
-                ← Volver al detalle
               </button>
             </div>
           </div>

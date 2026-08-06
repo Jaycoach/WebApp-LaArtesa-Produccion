@@ -4,7 +4,13 @@
       "Bash(node --check src/controllers/pesaje.controller.js)",
       "Bash(node --check src/controllers/sap.controller.js)",
       "Bash(node --check src/controllers/fases.controller.js)",
-      "Bash(node --check src/models/fases.model.js)"
+      "Bash(node --check src/models/fases.model.js)",
+      "Bash(npx tsc *)",
+      "Bash(wc -l /tmp_tsc_out.txt)",
+      "Bash(cat /tmp_tsc_out.txt)",
+      "Bash(tee /c/Users/jayco/AppData/Local/Temp/claude/tsc_out.txt)",
+      "Read(//c/Users/jayco/AppData/Local/Temp/claude/**)",
+      "Bash(grep -iE \"Fermentacion|Horneado\" /c/Users/jayco/AppData/Local/Temp/claude/tsc_out3.txt)"
     ]
   }
 }

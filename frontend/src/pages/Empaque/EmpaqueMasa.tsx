@@ -8,9 +8,10 @@
  * Si hay faltantes, se exige observación obligatoria antes de completar.
  */
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card } from '@/components/common';
+import { BarraNavegacionFases } from '@/components/common/BarraNavegacionFases';
 
 // ── auth helper ──────────────────────────────────────────────────────────────
 const getToken = () => {
@@ -584,7 +585,6 @@ const PanelEmpaqueMasa: React.FC<{
   tiposMO: any[];
 }> = ({ masa, onVolver, onCompletado, tiposMO }) => {
   const qc = useQueryClient();
-  const navigate = useNavigate();
 
   // Re-fetch del estado real de la masa para detectar cambios post-iniciar
   const { data: masaActualData, refetch: refetchMasaActual } = useQuery({
@@ -760,15 +760,14 @@ const PanelEmpaqueMasa: React.FC<{
 
   return (
     <div className="space-y-5">
+      <BarraNavegacionFases
+        masaId={masa.id}
+        codigoMasa={masa.codigo_masa}
+        faseAnterior={{ label: 'Horneado', ruta: `/horneado/${masa.id}` }}
+      />
       <div className="flex items-center gap-3">
         <button onClick={onVolver} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm font-medium">
           ← Lista
-        </button>
-        <button
-          onClick={() => navigate(`/horneado/${masa.id}`)}
-          className="flex items-center gap-1 px-4 py-2 bg-white border border-gray-200 hover:border-red-300 hover:bg-red-50 text-gray-600 hover:text-red-700 rounded-lg text-sm font-medium shadow-sm transition-colors"
-        >
-          ← Horneado
         </button>
         <div className="flex-1">
           <h2 className="text-lg font-bold text-gray-800">{masa.nombre_masa}</h2>
@@ -1251,12 +1250,6 @@ const PanelEmpaqueMasa: React.FC<{
       {etiquetaData && (
         <Etiqueta data={etiquetaData} onClose={() => setEtiquetaData(null)} />
       )}
-
-      <div className="pt-2 border-t border-gray-100">
-        <button onClick={onVolver} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm font-medium">
-          ← Volver a la lista
-        </button>
-      </div>
     </div>
   );
 };

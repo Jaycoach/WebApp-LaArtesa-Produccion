@@ -7,9 +7,10 @@
  * La completación de la fase desbloquea HORNEADO
  */
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ModalMO } from '../../components/common/ModalMO';
+import { BarraNavegacionFases } from '../../components/common/BarraNavegacionFases';
 import { bogotaNowForDatetimeLocal, datetimeLocalToBogotaISO, formatBogotaTime } from '../../utils/timezone';
 
 // ─────────────────────────────────────────────
@@ -45,7 +46,6 @@ type SubEtapa = 'entrada_camara' | 'salida_camara' | 'entrada_frio' | 'salida_fr
 
 export const FermentacionMasa: React.FC = () => {
   const { masaId } = useParams<{ masaId: string }>();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const [showMO, setShowMO] = useState(false);
@@ -130,6 +130,17 @@ export const FermentacionMasa: React.FC = () => {
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-4xl mx-auto space-y-6">
 
+        <BarraNavegacionFases
+          masaId={masaId!}
+          codigoMasa={masa.codigo}
+          faseAnterior={{ label: 'Formado', ruta: `/formado/${masaId}` }}
+          faseSiguiente={{
+            label: 'Horneado',
+            ruta: `/horneado/${masaId}`,
+            habilitada: subEtapa === 'completada',
+          }}
+        />
+
         {/* Header */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
           <div className="flex items-center justify-between">
@@ -142,30 +153,6 @@ export const FermentacionMasa: React.FC = () => {
                 </span>
               </div>
               <p className="text-gray-500 text-sm">{masa.codigo} — {masa.nombre}</p>
-            </div>
-            <div className="flex flex-col items-end gap-2">
-              <button
-                onClick={() => navigate(`/planificacion/masas/${masaId}`)}
-                className="text-sm text-gray-500 hover:text-gray-800"
-              >
-                ← Volver al detalle
-              </button>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => navigate(`/formado/${masaId}`)}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-white border border-gray-200 hover:border-orange-300 hover:bg-orange-50 text-gray-600 hover:text-orange-700 rounded-lg text-xs font-medium shadow-sm transition-colors"
-                >
-                  ← Formado
-                </button>
-                {subEtapa === 'completada' && (
-                  <button
-                    onClick={() => navigate(`/horneado/${masaId}`)}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors"
-                  >
-                    🔥 Horneado →
-                  </button>
-                )}
-              </div>
             </div>
           </div>
         </div>
@@ -431,12 +418,6 @@ export const FermentacionMasa: React.FC = () => {
                   className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 text-sm font-medium"
                 >
                   + Mano de obra
-                </button>
-                <button
-                  onClick={() => navigate(`/horneado/${masaId}`)}
-                  className="bg-orange-600 hover:bg-orange-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
-                >
-                  🔥 Ir a Horneado →
                 </button>
               </div>
             </div>

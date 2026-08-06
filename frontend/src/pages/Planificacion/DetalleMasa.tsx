@@ -9,6 +9,7 @@ import { useAuthStore } from '@/store';
 import { masasService } from '../../services/masasService';
 import { formatBogotaTime } from '../../utils/timezone';
 import { ModalCancelarMasa } from '@/components/common/ModalCancelarMasa';
+import { BarraNavegacionFases } from '@/components/common/BarraNavegacionFases';
 
 // ── Iconos SVG inline para cada fase ────────────────────────
 const FaseIcono: React.FC<{ fase: string; estado: string }> = ({ fase, estado }) => {
@@ -207,7 +208,17 @@ export const DetalleMasa: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto space-y-6">
-
+        <BarraNavegacionFases
+          masaId={masaId}
+          codigoMasa={masa.codigo_masa}
+          faseSiguiente={masa.fase_actual === 'PLANIFICACION' ? {
+            label: 'Pesaje',
+            ruta: `/pesaje/${masaId}`,
+            habilitada: masa.estado === 'APROBADA',
+            loading: iniciandoPesaje,
+            onClick: handleIniciarPesaje,
+          } : undefined}
+        />
         {/* Header */}
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex justify-between items-start">
@@ -241,27 +252,6 @@ export const DetalleMasa: React.FC = () => {
                 {masa.fase_actual}
               </span>
               <p className="text-sm text-gray-500 mt-2">{masa.fecha_produccion}</p>
-              {masa.fase_actual === 'PLANIFICACION' && (
-                <button
-                  onClick={handleIniciarPesaje}
-                  disabled={iniciandoPesaje || masa.estado !== 'APROBADA'}
-                  title={masa.estado !== 'APROBADA' ? 'Requiere aprobación de supervisor' : ''}
-                  className={`mt-3 px-5 py-2 text-white rounded-lg font-medium transition-colors flex items-center gap-2 ml-auto
-                    ${masa.estado === 'APROBADA'
-                      ? 'bg-green-600 hover:bg-green-700 disabled:bg-green-300'
-                      : 'bg-gray-400 cursor-not-allowed'
-                    }`}
-                >
-                  {iniciandoPesaje ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                      Iniciando...
-                    </>
-                  ) : (
-                    <>⚖️ Iniciar Pesaje</>
-                  )}
-                </button>
-              )}
               {esSupervisor && ['PLANIFICACION', 'PENDIENTE', 'APROBADA', 'SUBDIVIDIDA'].includes(masa.estado) && (
                 <button
                   onClick={() => setMostrarCancelar(true)}

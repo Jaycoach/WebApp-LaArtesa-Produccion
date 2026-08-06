@@ -4,6 +4,7 @@ import { Card } from '@/components/common';
 import { useChecklist, useUpdateIngrediente, useConfirmarPesaje, useAjustesPendientes, useConfirmarAjustesPendientes } from '../../hooks/useChecklist';
 import { ModalMO } from '../../components/common/ModalMO';
 import { ModalCancelarMasa } from '@/components/common/ModalCancelarMasa';
+import { BarraNavegacionFases } from '../../components/common/BarraNavegacionFases';
 import { useAuthStore } from '../../store/useAuthStore';
 import { formatDate } from '@/utils/formatters';
 
@@ -357,15 +358,15 @@ export const PesajeMasa: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto space-y-6">
-        {/* Botón Volver superior */}
-        <div>
-          <button
-            onClick={() => navigate(`/planificacion/masas/${masaId}`)}
-            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm font-medium"
-          >
-            ← Volver al detalle
-          </button>
-        </div>
+        <BarraNavegacionFases
+          masaId={masaId!}
+          codigoMasa={checklist.codigo_masa}
+          faseSiguiente={{
+            label: 'Amasado',
+            ruta: `/amasado/${masaId}`,
+            habilitada: !!checklist.pesaje_completado,
+          }}
+        />
         {/* Header */}
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex justify-between items-start">
@@ -854,14 +855,7 @@ export const PesajeMasa: React.FC = () => {
         </Card>
 
         {/* Botones de acción */}
-        <div className="flex justify-between">
-          <button
-            onClick={() => navigate(`/planificacion/masas/${masaId}`)}
-            className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg"
-          >
-            ← Volver
-          </button>
-
+        <div className="flex justify-end">
           <div className="flex gap-3">
             {puedeEditar && (
               <button

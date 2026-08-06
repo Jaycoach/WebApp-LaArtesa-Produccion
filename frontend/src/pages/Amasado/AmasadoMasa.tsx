@@ -5,6 +5,7 @@ import { useMasaDetail, useComposicion } from '../../hooks/useMasas';
 import { useAmasadoras } from '../../hooks/useConfig';
 import { useCompletarFase } from '../../hooks/useFases';
 import { ModalMO } from '../../components/common/ModalMO';
+import { BarraNavegacionFases } from '../../components/common/BarraNavegacionFases';
 
 export const AmasadoMasa: React.FC = () => {
   const { masaId } = useParams<{ masaId: string }>();
@@ -77,6 +78,16 @@ export const AmasadoMasa: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-5xl mx-auto space-y-6">
+        <BarraNavegacionFases
+          masaId={masaId!}
+          codigoMasa={masa.codigo_masa}
+          faseAnterior={{ label: 'Pesaje', ruta: `/pesaje/${masaId}` }}
+          faseSiguiente={{
+            label: 'División',
+            ruta: `/division/${masaId}`,
+            habilitada: masa.fase_actual !== 'AMASADO',
+          }}
+        />
         {/* Header */}
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex justify-between items-start">
@@ -89,12 +100,6 @@ export const AmasadoMasa: React.FC = () => {
               <span className="px-4 py-2 rounded-full text-sm font-medium bg-indigo-100 text-indigo-800">
                 {masa.fase_actual}
               </span>
-              <button
-                onClick={() => navigate(`/planificacion/masas/${masaId}`)}
-                className="text-sm text-gray-500 hover:text-gray-800"
-              >
-                ← Volver
-              </button>
             </div>
           </div>
         </div>
@@ -241,22 +246,7 @@ export const AmasadoMasa: React.FC = () => {
         </Card>
 
         {/* Botones */}
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigate(`/planificacion/masas/${masaId}`)}
-              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm"
-            >
-              ← Volver al detalle
-            </button>
-            <button
-              onClick={() => navigate(`/pesaje/${masaId}`)}
-              className="flex items-center gap-1 px-4 py-2 bg-white border border-gray-200 hover:border-blue-300 hover:bg-blue-50 text-gray-600 hover:text-blue-700 rounded-lg text-sm font-medium shadow-sm transition-colors"
-            >
-              ← Pesaje
-            </button>
-          </div>
-
+        <div className="flex justify-end items-center">
           <div className="flex gap-3 items-center">
             <button
               onClick={() => setShowMO(true)}
@@ -264,20 +254,13 @@ export const AmasadoMasa: React.FC = () => {
             >
               + Mano de obra
             </button>
-            {masa.fase_actual === 'AMASADO' ? (
+            {masa.fase_actual === 'AMASADO' && (
               <button
                 onClick={handleCompletar}
                 disabled={completarMutation.isPending}
                 className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-semibold"
               >
                 {completarMutation.isPending ? 'Completando...' : 'Completar Amasado'}
-              </button>
-            ) : (
-              <button
-                onClick={() => navigate(`/division/${masaId}`)}
-                className="flex items-center gap-1 px-6 py-3 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg font-semibold shadow-sm transition-colors"
-              >
-                División →
               </button>
             )}
           </div>

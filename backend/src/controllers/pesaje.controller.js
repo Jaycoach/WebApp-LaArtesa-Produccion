@@ -227,6 +227,7 @@ const getChecklist = async (req, res, next) => {
 
     const checklist = {
       masa_id:              masa.id,
+      codigo_masa:          masa.codigo_masa,
       tipo_masa:            masa.tipo_masa,
       fase_actual:          masa.fase_actual,
       es_repeticion:        masa.es_repeticion ?? false,
