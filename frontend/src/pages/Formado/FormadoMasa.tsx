@@ -4,7 +4,7 @@
  * Actualizado 2026-03-02
  */
 import React, { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ModalMO } from '../../components/common/ModalMO';
 import { BarraNavegacionFases } from '../../components/common/BarraNavegacionFases';
@@ -50,7 +50,6 @@ const fetchFormado = async (masaId: string): Promise<FormadoInfo> => {
 // ─────────────────────────────────────────────
 export const FormadoMasa: React.FC = () => {
   const { masaId } = useParams<{ masaId: string }>();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const [maquinaId, setMaquinaId] = useState<number | null>(null);
@@ -108,7 +107,7 @@ export const FormadoMasa: React.FC = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['fases', masaId] });
-      navigate(`/planificacion/masas/${masaId}`);
+      queryClient.invalidateQueries({ queryKey: ['formado', masaId] });
     },
     onError: (e: any) => setErrorMsg(e.message)
   });

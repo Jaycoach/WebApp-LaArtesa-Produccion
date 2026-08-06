@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { Card } from '@/components/common';
 import { useMasaDetail, useProductos } from '../../hooks/useMasas';
 import { useCompletarFase } from '../../hooks/useFases';
@@ -8,7 +8,6 @@ import { BarraNavegacionFases } from '../../components/common/BarraNavegacionFas
 
 export const DivisionMasa: React.FC = () => {
   const { masaId } = useParams<{ masaId: string }>();
-  const navigate = useNavigate();
   const masaIdNum = Number(masaId);
 
   const { data: masa, isLoading: loadingMasa } = useMasaDetail(masaIdNum);
@@ -204,7 +203,6 @@ export const DivisionMasa: React.FC = () => {
           },
         },
       });
-      navigate(`/planificacion/masas/${masaId}`);
     } catch (err: any) {
       const msg = err?.response?.data?.message || err?.message || 'Error desconocido al completar división';
       alert('Error al completar la división:\n\n' + msg);

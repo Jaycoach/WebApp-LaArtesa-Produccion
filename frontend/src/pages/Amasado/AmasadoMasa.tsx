@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { Card } from '@/components/common';
 import { useMasaDetail, useComposicion } from '../../hooks/useMasas';
 import { useAmasadoras } from '../../hooks/useConfig';
@@ -9,7 +9,6 @@ import { BarraNavegacionFases } from '../../components/common/BarraNavegacionFas
 
 export const AmasadoMasa: React.FC = () => {
   const { masaId } = useParams<{ masaId: string }>();
-  const navigate = useNavigate();
   const masaIdNum = Number(masaId);
 
   const { data: masa, isLoading: loadingMasa } = useMasaDetail(masaIdNum);
@@ -53,7 +52,6 @@ export const AmasadoMasa: React.FC = () => {
           },
         },
       });
-      navigate(`/planificacion/masas/${masaId}`);
     }
   };
 

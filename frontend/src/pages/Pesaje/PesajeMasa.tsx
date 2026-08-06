@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card } from '@/components/common';
 import { useChecklist, useUpdateIngrediente, useConfirmarPesaje, useAjustesPendientes, useConfirmarAjustesPendientes } from '../../hooks/useChecklist';
@@ -27,6 +27,7 @@ export const PesajeMasa: React.FC = () => {
   const [showMO, setShowMO] = useState(false);
   const [editando, setEditando] = useState<number | null>(null);
   const [mostrarAjustes, setMostrarAjustes] = useState(false);
+  const ingredienteRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const { data: ajustesData, isLoading: cargandoAjustes } = useAjustesPendientes(masaIdNum, mostrarAjustes);
   const confirmarAjustesMutation = useConfirmarAjustesPendientes();
 
@@ -158,6 +159,11 @@ export const PesajeMasa: React.FC = () => {
         ? [{ batch: lotePreseleccionado, cantidad_kg: ingrediente.pesado && ingrediente.peso_real ? String(ingrediente.peso_real) : '', fecha_vencimiento: vencimientoPreseleccionado }]
         : []),
     });
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        ingredienteRefs.current[ingrediente.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    });
   };
 
   const handleGuardar = async (ingredienteId: number) => {
@@ -258,8 +264,7 @@ export const PesajeMasa: React.FC = () => {
     try {
       const resultado = await confirmarMutation.mutateAsync(masaIdNum);
       const docNum = resultado?.sap_doc_num ?? resultado?.sap_docentry ?? '—';
-      alert(`✅ Pesaje confirmado exitosamente.\nSalida SAP Nº ${docNum} creada.`);
-      navigate(`/planificacion/masas/${masaId}`);
+      alert(`✅ Pesaje confirmado exitosamente.\nSalida SAP Nº ${docNum} creada.\n\nPuedes continuar a Amasado con el botón de arriba cuando estés listo.`);
     } catch (err: any) {
         const data = err?.data || {};
         const mensaje = err?.message || 'Error al confirmar pesaje';
@@ -482,7 +487,11 @@ export const PesajeMasa: React.FC = () => {
               </div>
             )}
             {checklist.ingredientes.filter((ing: any) => !ing.es_empaque).map((ing: any) => (
-              <div key={ing.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+              <div
+                key={ing.id}
+                ref={(el) => { ingredienteRefs.current[ing.id] = el; }}
+                className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow"
+              >
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
