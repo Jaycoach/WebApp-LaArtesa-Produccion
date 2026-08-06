@@ -16,7 +16,8 @@
       "Bash(node -c src/services/email.service.js)",
       "Bash(node -c ../.claude/settings.json)",
       "Bash(cd .. && pwd)",
-      "Read(//c/Users/jayco/OneDrive/CLIENTES/MASORG/Desarrollo/**)"
+      "Read(//c/Users/jayco/OneDrive/CLIENTES/MASORG/Desarrollo/**)",
+      "Bash(node -c src/controllers/fases.controller.js)"
     ]
   }
 }

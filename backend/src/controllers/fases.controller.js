@@ -399,7 +399,7 @@ async function distribuirProductosPorTandas(tandas, subMasaIds, qr = db) {
     }
   });
 
-  for (const [, ocurrencias] of ocurrenciasPorProducto) {
+  for (const [productoMasaIdOriginal, ocurrencias] of ocurrenciasPorProducto) {
     const prod = ocurrencias[0].producto;
     const totalProg   = parseInt(prod.unidades_programadas);
     const totalPed    = parseInt(prod.unidades_pedidas);
@@ -410,6 +410,22 @@ async function distribuirProductosPorTandas(tandas, subMasaIds, qr = db) {
     let pedRestante   = totalPed;
     let kgPedRestante  = totalKgPed;
     let kgProgRestante = totalKgProg;
+
+    // FIX (2026-08-06): las tandas quedaban con "0 OV" porque nunca se copiaban
+    // las líneas de productos_por_masa_ov del producto original a cada sub-masa
+    // (solo se copiaba a orden_masa_relacion, tabla en desuso desde la migración
+    // 039). Se traen una vez por producto y se reparten proporcional a la misma
+    // fracción de cada tanda, con el mismo patrón de residuo en la última ocurrencia.
+    const ovsOriginalesResult = await qr.query(
+      `SELECT sap_doc_entry, sap_doc_num, sap_line_num, sap_item_code, unidades_pedidas
+       FROM productos_por_masa_ov
+       WHERE producto_masa_id = $1`,
+      [productoMasaIdOriginal]
+    );
+    const ovsRestante = ovsOriginalesResult.rows.map(ov => ({
+      ...ov,
+      restante: parseInt(ov.unidades_pedidas) || 0,
+    }));
 
     for (let idx = 0; idx < ocurrencias.length; idx++) {
       const oc = ocurrencias[idx];
@@ -426,7 +442,22 @@ async function distribuirProductosPorTandas(tandas, subMasaIds, qr = db) {
       kgProgRestante = parseFloat((kgProgRestante - kgProg).toFixed(3));
 
       if (prog > 0) {
-        await insertarProductoEnMasa(subMasaIds[oc.tandaIdx], prod, prog, ped, kgPed, kgProg, qr);
+        const nuevoProductoMasaId = await insertarProductoEnMasa(subMasaIds[oc.tandaIdx], prod, prog, ped, kgPed, kgProg, qr);
+
+        for (const ov of ovsRestante) {
+          const cantidadOv = esUltima ? ov.restante : Math.floor((parseInt(ov.unidades_pedidas) || 0) * oc.fraccion);
+          ov.restante -= cantidadOv;
+          if (cantidadOv > 0) {
+            await qr.query(
+              `INSERT INTO productos_por_masa_ov
+                 (producto_masa_id, masa_id, sap_doc_entry, sap_doc_num, sap_line_num, sap_item_code, unidades_pedidas)
+               VALUES ($1,$2,$3,$4,$5,$6,$7)
+               ON CONFLICT (masa_id, sap_doc_entry, sap_line_num) DO UPDATE SET
+                 unidades_pedidas = productos_por_masa_ov.unidades_pedidas + EXCLUDED.unidades_pedidas`,
+              [nuevoProductoMasaId, subMasaIds[oc.tandaIdx], ov.sap_doc_entry, ov.sap_doc_num, ov.sap_line_num, ov.sap_item_code, cantidadOv]
+            );
+          }
+        }
       }
     }
   }
@@ -452,7 +483,7 @@ async function insertarProductoEnMasa(masaId, prod, unidadesProg, unidadesPedida
     : unidadesProg;
   const unidadesExcedente = unidadesAjustadas - unidadesProg;
 
-  await qr.query(`
+  const insertResult = await qr.query(`
     INSERT INTO productos_por_masa
       (masa_id, producto_codigo, producto_nombre, presentacion, gramaje_unitario,
        unidades_pedidas, unidades_programadas, unidades_producidas,
@@ -461,6 +492,7 @@ async function insertarProductoEnMasa(masaId, prod, unidadesProg, unidadesPedida
        tamanio, forma, multiplo_divisor, unidades_ajustadas, unidades_excedente,
        peso_masa_dividida)
     VALUES ($1,$2,$3,$4,$5,$6,$7,0,$8,$9,0,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+    RETURNING id
   `, [
     masaId,
     prod.producto_codigo,
@@ -482,6 +514,7 @@ async function insertarProductoEnMasa(masaId, prod, unidadesProg, unidadesPedida
     unidadesExcedente,
     prod.peso_masa_dividida || null,
   ]);
+  return insertResult.rows[0].id;
 }
 
 /**
