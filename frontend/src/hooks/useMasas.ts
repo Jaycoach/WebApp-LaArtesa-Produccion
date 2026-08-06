@@ -206,6 +206,20 @@ export const useAprobarMasa = () => {
 };
 
 /**
+ * Hook para aprobar múltiples masas de una vez (ADMIN/SUPERVISOR)
+ */
+export const useAprobarMasaBulk = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ids, fecha_vencimiento_sugerida, prioridad, hora_entrega }: { ids: number[]; fecha_vencimiento_sugerida?: string; prioridad?: boolean; hora_entrega?: string }) =>
+      masasService.aprobarMasaBulk(ids, fecha_vencimiento_sugerida, prioridad, hora_entrega),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: MASAS_QUERY_KEYS.all });
+    },
+  });
+};
+
+/**
  * Hook para marcar una masa como pendiente (ADMIN/SUPERVISOR)
  */
 export const useMarcarPendiente = () => {

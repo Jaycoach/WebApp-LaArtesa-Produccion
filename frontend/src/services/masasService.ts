@@ -129,6 +129,20 @@ export const masasService = {
     );
     return response.data!;
   },
+  /**
+   * Aprobar múltiples masas de una vez (una sola llamada, un solo correo resumen)
+   */
+  aprobarMasaBulk: async (ids: number[], fecha_vencimiento_sugerida?: string, prioridad?: boolean, hora_entrega?: string): Promise<{ aprobadas: number; fallidas: { id: number; error: string }[] }> => {
+    const body: Record<string, any> = { ids };
+    if (fecha_vencimiento_sugerida) body.fecha_vencimiento_sugerida = fecha_vencimiento_sugerida;
+    if (prioridad !== undefined) body.prioridad = prioridad;
+    if (hora_entrega) body.hora_entrega = hora_entrega;
+    const response = await apiService.patch<any>(
+      `/masas/aprobar-bulk`,
+      body
+    );
+    return response.data!;
+  },
 
   /**
    * Marcar una masa como pendiente (ADMIN/SUPERVISOR)

@@ -54,6 +54,14 @@ router.patch('/:masaId/productos/:productoId', checkRole(['admin', 'supervisor']
  * @access  Private (Admin/Supervisor only)
  */
 router.patch('/:id/aprobar', checkRole(['admin', 'supervisor']), masasController.aprobarMasa);
+/**
+ * @route   PATCH /api/masas/aprobar-bulk
+ * @desc    Aprobar múltiples masas de una vez (misma lógica que /:id/aprobar
+ *          por cada una), enviando UN solo correo resumen a Empaque en vez
+ *          de uno por masa.
+ * @access  Private (Admin/Supervisor only)
+ */
+router.patch('/aprobar-bulk', checkRole(['admin', 'supervisor']), masasController.aprobarMasaBulk);
 
 /**
  * @route   PATCH /api/masas/:id/pendiente

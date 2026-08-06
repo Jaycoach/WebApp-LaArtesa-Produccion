@@ -6,7 +6,7 @@ const db = require('../database/connection');
 const fasesModel = require('../models/fases.model');
 const sapService = require('../services/sap.service');
 const logger = require('../utils/logger');
-const { sendAprobacionMasaEmail } = require('../services/email.service');
+const { sendAprobacionMasaEmail, sendAprobacionMasaBulkEmail } = require('../services/email.service');
 const { devolverStockMasa } = require('./pesaje.controller');
 
 /**
@@ -278,105 +278,119 @@ const updateUnidadesProgramadas = async (req, res, next) => {
   }
 };
 
-const aprobarMasa = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const { ejecutarSubdivision } = require('./fases.controller');
+/**
+ * Lógica core de aprobación de una masa — reusada por el endpoint individual
+ * (aprobarMasa) y por el endpoint masivo (aprobarMasaBulk). No escribe en
+ * `res` directamente: retorna el resultado o lanza un Error con .statusCode.
+ * opts.enviarCorreoIndividual (default true) controla si dispara el correo
+ * de alistamiento de empaque por SÍ SOLA — en bulk se pasa false para que
+ * el endpoint bulk mande un único correo resumen al final.
+ */
+const aprobarMasaCore = async (id, userId, opts = {}) => {
+  const { fecha_vencimiento_sugerida, prioridad, hora_entrega, enviarCorreoIndividual = true } = opts;
+  const { ejecutarSubdivision } = require('./fases.controller');
 
-    const masa = await db.query(
-      `SELECT id, codigo_masa, estado, fase_actual, tipo_masa, fecha_produccion, total_kilos_con_merma
-       FROM masas_produccion WHERE id = $1`,
-      [id]
-    );
+  const masa = await db.query(
+    `SELECT id, codigo_masa, estado, fase_actual, tipo_masa, fecha_produccion, total_kilos_con_merma
+     FROM masas_produccion WHERE id = $1`,
+    [id]
+  );
 
-    if (masa.rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Masa no encontrada' });
-    }
+  if (masa.rows.length === 0) {
+    const err = new Error('Masa no encontrada');
+    err.statusCode = 404;
+    throw err;
+  }
 
-    if (!['PLANIFICACION', 'PENDIENTE'].includes(masa.rows[0].estado)) {
-      return res.status(400).json({
-        success: false,
-        message: `No se puede aprobar una masa en estado ${masa.rows[0].estado}`,
-      });
-    }
+  if (!['PLANIFICACION', 'PENDIENTE'].includes(masa.rows[0].estado)) {
+    const err = new Error(`No se puede aprobar una masa en estado ${masa.rows[0].estado}`);
+    err.statusCode = 400;
+    throw err;
+  }
 
-    // Marcar masa como APROBADA
-    const { fecha_vencimiento_sugerida, prioridad, hora_entrega } = req.body;
+  // Marcar masa como APROBADA
+  await db.query(
+    `UPDATE masas_produccion
+     SET estado = 'APROBADA',
+         aprobado_por = $2,
+         aprobado_en = NOW(),
+         prioridad = COALESCE($3, prioridad),
+         hora_entrega = $4,
+         updated_at = NOW()
+     WHERE id = $1`,
+    [id, userId, prioridad ?? null, hora_entrega || null]
+  );
 
-    await db.query(
-      `UPDATE masas_produccion
-       SET estado = 'APROBADA',
-           aprobado_por = $2,
-           aprobado_en = NOW(),
-           prioridad = COALESCE($3, prioridad),
-           hora_entrega = $4,
-           updated_at = NOW()
-       WHERE id = $1`,
-      [id, req.user.id, prioridad ?? null, hora_entrega || null]
-    );
-
-    // Fecha de vencimiento sugerida: si el usuario no la especificó manualmente,
-    // calcularla desde U_JZ_DiasExp (SAP) = fecha de aprobación + días de vencimiento
-    // del producto. Con varios productos por masa, se usa el más conservador (MIN días).
-    // Si ningún producto tiene U_JZ_DiasExp configurado, se deja igual que antes (vacío,
-    // el usuario la ingresa a mano en Empaque) — fallback preservado.
-    let fechaVencimientoFinal = fecha_vencimiento_sugerida || null;
-    if (!fechaVencimientoFinal) {
-      const diasR = await db.query(
-        `SELECT MIN(dias_vencimiento) AS dias_min
-         FROM productos_por_masa
-         WHERE masa_id = $1 AND dias_vencimiento IS NOT NULL`,
-        [id]
-      );
-      const diasMin = diasR.rows[0]?.dias_min;
-      if (diasMin != null) {
-        const fechaCalc = new Date();
-        fechaCalc.setDate(fechaCalc.getDate() + parseInt(diasMin));
-        fechaVencimientoFinal = fechaCalc.toISOString().split('T')[0];
-      }
-    }
-    if (fechaVencimientoFinal) {
-      await db.query(
-        `UPDATE progreso_fases
-         SET datos_fase = COALESCE(datos_fase, '{}'::jsonb) || $2::jsonb
-         WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
-        [id, JSON.stringify({ fecha_vencimiento_sugerida: fechaVencimientoFinal })]
-      );
-    }
-
-    // Aplicar delta por defecto (+2 paq) a productos que no fueron ajustados manualmente
-    // "no ajustado" = unidades_programadas == unidades_pedidas (nunca tocado por el usuario)
-    const prodsSinAjuste = await db.query(
-      `SELECT id, unidades_programadas, unidades_pedidas, unidades_por_paquete, multiplo_divisor
+  // Fecha de vencimiento sugerida: si el usuario no la especificó manualmente,
+  // calcularla desde U_JZ_DiasExp (SAP) = fecha de aprobación + días de vencimiento
+  // del producto. Con varios productos por masa, se usa el más conservador (MIN días).
+  // Si ningún producto tiene U_JZ_DiasExp configurado, se deja igual que antes (vacío,
+  // el usuario la ingresa a mano en Empaque) — fallback preservado.
+  let fechaVencimientoFinal = fecha_vencimiento_sugerida || null;
+  if (!fechaVencimientoFinal) {
+    const diasR = await db.query(
+      `SELECT MIN(dias_vencimiento) AS dias_min
        FROM productos_por_masa
-       WHERE masa_id = $1 AND delta_ajuste IS NULL`,
+       WHERE masa_id = $1 AND dias_vencimiento IS NOT NULL`,
       [id]
     );
-    const DELTA_DEFAULT_PAQ = 2;
-    for (const prod of prodsSinAjuste.rows) {
-      const divisor        = Math.max(0, Number(prod.multiplo_divisor) || 0);
-      const nuevasPaq      = Number(prod.unidades_programadas) + DELTA_DEFAULT_PAQ;
-      const nuevasAjustadas = (divisor > 0 && nuevasPaq % divisor !== 0)
-        ? (Math.floor(nuevasPaq / divisor) + 1) * divisor
-        : nuevasPaq;
-      const nuevasExcedente = nuevasAjustadas - nuevasPaq;
-      await db.query(
-        `UPDATE productos_por_masa
-         SET unidades_programadas = $1::integer,
-             kilos_programados    = gramaje_unitario * $1::integer / 1000.0,
-             cantidad_paquetes    = $1::integer,
-             delta_ajuste         = $3::integer,
-             unidades_ajustadas   = $4::integer,
-             unidades_excedente   = $5::integer,
-             updated_at           = NOW()
-         WHERE id = $2`,
-        [nuevasPaq, prod.id, DELTA_DEFAULT_PAQ, nuevasAjustadas, nuevasExcedente]
-      );
+    const diasMin = diasR.rows[0]?.dias_min;
+    if (diasMin != null) {
+      const fechaCalc = new Date();
+      fechaCalc.setDate(fechaCalc.getDate() + parseInt(diasMin));
+      fechaVencimientoFinal = fechaCalc.toISOString().split('T')[0];
     }
-    logger.info(`Masa ${id}: delta +${DELTA_DEFAULT_PAQ} paq aplicado a ${prodsSinAjuste.rows.length} productos sin ajuste manual.`);
+  }
+  if (fechaVencimientoFinal) {
+    await db.query(
+      `UPDATE progreso_fases
+       SET datos_fase = COALESCE(datos_fase, '{}'::jsonb) || $2::jsonb
+       WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
+      [id, JSON.stringify({ fecha_vencimiento_sugerida: fechaVencimientoFinal })]
+    );
+  }
 
-    // --- NOTIFICACIÓN EMPAQUE: después del delta, nombres desde BOM ---
-    // Se ejecuta en background (sin await) para no bloquear ni fallar la aprobación
+  // Aplicar delta por defecto (+2 paq) a productos que no fueron ajustados manualmente
+  // "no ajustado" = unidades_programadas == unidades_pedidas (nunca tocado por el usuario)
+  const prodsSinAjuste = await db.query(
+    `SELECT id, unidades_programadas, unidades_pedidas, unidades_por_paquete, multiplo_divisor
+     FROM productos_por_masa
+     WHERE masa_id = $1 AND delta_ajuste IS NULL`,
+    [id]
+  );
+  const DELTA_DEFAULT_PAQ = 2;
+  for (const prod of prodsSinAjuste.rows) {
+    const divisor        = Math.max(0, Number(prod.multiplo_divisor) || 0);
+    const nuevasPaq      = Number(prod.unidades_programadas) + DELTA_DEFAULT_PAQ;
+    const nuevasAjustadas = (divisor > 0 && nuevasPaq % divisor !== 0)
+      ? (Math.floor(nuevasPaq / divisor) + 1) * divisor
+      : nuevasPaq;
+    const nuevasExcedente = nuevasAjustadas - nuevasPaq;
+    await db.query(
+      `UPDATE productos_por_masa
+       SET unidades_programadas = $1::integer,
+           kilos_programados    = gramaje_unitario * $1::integer / 1000.0,
+           cantidad_paquetes    = $1::integer,
+           delta_ajuste         = $3::integer,
+           unidades_ajustadas   = $4::integer,
+           unidades_excedente   = $5::integer,
+           updated_at           = NOW()
+       WHERE id = $2`,
+      [nuevasPaq, prod.id, DELTA_DEFAULT_PAQ, nuevasAjustadas, nuevasExcedente]
+    );
+  }
+  logger.info(`Masa ${id}: delta +${DELTA_DEFAULT_PAQ} paq aplicado a ${prodsSinAjuste.rows.length} productos sin ajuste manual.`);
+
+  const totalPaquetesR = await db.query(
+    `SELECT COALESCE(SUM(unidades_programadas), 0) AS total
+     FROM productos_por_masa WHERE masa_id = $1`,
+    [id]
+  );
+  const totalPaquetes = totalPaquetesR.rows[0]?.total || 0;
+
+  // --- NOTIFICACIÓN EMPAQUE individual: solo si enviarCorreoIndividual !== false ---
+  // Se ejecuta en background (sin await) para no bloquear ni fallar la aprobación
+  if (enviarCorreoIndividual) {
     setImmediate(async () => {
       const clienteEmail = await db.getClient();
       try {
@@ -400,18 +414,12 @@ const aprobarMasa = async (req, res, next) => {
           [id]
         );
 
-        const totalPaquetes = await clienteEmail.query(
-          `SELECT COALESCE(SUM(unidades_programadas), 0) AS total
-           FROM productos_por_masa WHERE masa_id = $1`,
-          [id]
-        );
-
         await sendAprobacionMasaEmail({
           to: destinatarios.join(','),
           masa: {
             ...masa.rows[0],
             fecha_produccion: masa.rows[0].fecha_produccion || new Date(),
-            total_paquetes: totalPaquetes.rows[0]?.total || 0,
+            total_paquetes: totalPaquetes,
           },
           productosEmpaque: empaqueConNombre.rows,
         });
@@ -423,98 +431,186 @@ const aprobarMasa = async (req, res, next) => {
         clienteEmail.release();
       }
     });
-    // --- FIN NOTIFICACIÓN EMPAQUE ---
+  }
+  // --- FIN NOTIFICACIÓN EMPAQUE individual ---
 
-    // Intentar subdivisión (conPesaje=false → sub-masas arrancan en PLANIFICACION)
-    const resultadoSubdivision = await ejecutarSubdivision(id, req.user.id, false);
+  // Intentar subdivisión (conPesaje=false → sub-masas arrancan en PLANIFICACION)
+  const resultadoSubdivision = await ejecutarSubdivision(id, userId, false);
 
-    if (resultadoSubdivision && resultadoSubdivision.realizada) {
-      // Aprobar todas las sub-masas y desbloquear su PESAJE directamente
-      for (const subMasa of resultadoSubdivision.sub_masas) {
-        await db.query(
-          `UPDATE masas_produccion
-           SET estado = 'APROBADA',
-               aprobado_por = $2,
-               aprobado_en = NOW(),
-               updated_at = NOW()
-           WHERE id = $1`,
-          [subMasa.id, req.user.id]
-        );
-        // Completar PLANIFICACION (evita que quede EN_PROGRESO junto con PESAJE)
+  if (resultadoSubdivision && resultadoSubdivision.realizada) {
+    // Aprobar todas las sub-masas y desbloquear su PESAJE directamente
+    for (const subMasa of resultadoSubdivision.sub_masas) {
+      await db.query(
+        `UPDATE masas_produccion
+         SET estado = 'APROBADA',
+             aprobado_por = $2,
+             aprobado_en = NOW(),
+             updated_at = NOW()
+         WHERE id = $1`,
+        [subMasa.id, userId]
+      );
+      await db.query(
+        `UPDATE progreso_fases
+         SET estado = 'COMPLETADA'
+         WHERE masa_id = $1 AND fase = 'PLANIFICACION'`,
+        [subMasa.id]
+      );
+      await db.query(
+        `UPDATE progreso_fases
+         SET estado = 'EN_PROGRESO'
+         WHERE masa_id = $1 AND fase = 'PESAJE'`,
+        [subMasa.id]
+      );
+      await db.query(
+        `UPDATE progreso_fases
+         SET estado = 'PENDIENTE', updated_at = NOW()
+         WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
+        [subMasa.id]
+      );
+      if (fecha_vencimiento_sugerida) {
         await db.query(
           `UPDATE progreso_fases
-           SET estado = 'COMPLETADA'
-           WHERE masa_id = $1 AND fase = 'PLANIFICACION'`,
-          [subMasa.id]
-        );
-        await db.query(
-          `UPDATE progreso_fases
-           SET estado = 'EN_PROGRESO'
-           WHERE masa_id = $1 AND fase = 'PESAJE'`,
-          [subMasa.id]
-        );
-        await db.query(
-          `UPDATE progreso_fases
-           SET estado = 'PENDIENTE', updated_at = NOW()
+           SET datos_fase = COALESCE(datos_fase, '{}'::jsonb) || $2::jsonb
            WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
-          [subMasa.id]
+          [subMasa.id, JSON.stringify({ fecha_vencimiento_sugerida })]
         );
-        if (fecha_vencimiento_sugerida) {
-          await db.query(
-            `UPDATE progreso_fases
-             SET datos_fase = COALESCE(datos_fase, '{}'::jsonb) || $2::jsonb
-             WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
-            [subMasa.id, JSON.stringify({ fecha_vencimiento_sugerida })]
-          );
-        }
       }
+    }
 
-      logger.info(`Masa ${id} subdividida en ${resultadoSubdivision.n_tandas} tandas y aprobadas por usuario ${req.user.id}`);
+    logger.info(`Masa ${id} subdividida en ${resultadoSubdivision.n_tandas} tandas y aprobadas por usuario ${userId}`);
 
-      return res.json({
-        success: true,
-        message: `Masa subdividida en ${resultadoSubdivision.n_tandas} tandas. Cada tanda está aprobada y lista para pesaje.`,
-        subdivision: resultadoSubdivision,
+    return {
+      success: true,
+      message: `Masa subdividida en ${resultadoSubdivision.n_tandas} tandas. Cada tanda está aprobada y lista para pesaje.`,
+      subdivision: resultadoSubdivision,
+      masaInfo: masa.rows[0],
+      totalPaquetes,
+    };
+  }
+
+  // Sin subdivisión: flujo normal
+  const r1 = await db.query(
+    `UPDATE progreso_fases SET estado = 'COMPLETADA'
+     WHERE masa_id = $1 AND fase = 'PLANIFICACION'`, [id]
+  );
+  logger.info(`[APROBACION DEBUG] masa=${id} PLANIFICACION→COMPLETADA rows=${r1.rowCount}`);
+
+  const r2 = await db.query(
+    `UPDATE progreso_fases SET estado = 'EN_PROGRESO'
+     WHERE masa_id = $1 AND fase = 'PESAJE'`, [id]
+  );
+  logger.info(`[APROBACION DEBUG] masa=${id} PESAJE→EN_PROGRESO rows=${r2.rowCount}`);
+
+  const r3 = await db.query(
+    `UPDATE progreso_fases SET estado = 'PENDIENTE', updated_at = NOW()
+     WHERE masa_id = $1 AND fase = 'EMPAQUE'`, [id]
+  );
+  logger.info(`[APROBACION DEBUG] masa=${id} EMPAQUE→PENDIENTE rows=${r3.rowCount}`);
+
+  if (fecha_vencimiento_sugerida) {
+    await db.query(
+      `UPDATE progreso_fases
+       SET datos_fase = COALESCE(datos_fase, '{}'::jsonb) || $2::jsonb
+       WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
+      [id, JSON.stringify({ fecha_vencimiento_sugerida })]
+    );
+  }
+
+  logger.info(`Masa ${id} APROBADA por usuario ${userId}`);
+
+  return {
+    success: true,
+    message: 'Masa aprobada. Pesaje desbloqueado.',
+    subdivision: null,
+    masaInfo: masa.rows[0],
+    totalPaquetes,
+  };
+};
+
+const aprobarMasa = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const result = await aprobarMasaCore(id, req.user.id, { ...req.body, enviarCorreoIndividual: true });
+    return res.json(result);
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
+    logger.error('Error al aprobar masa:', error);
+    next(error);
+  }
+};
+
+/**
+ * Aprobación masiva — reusa aprobarMasaCore por cada id, SIN disparar el
+ * correo individual de cada una (enviarCorreoIndividual=false). Al final,
+ * si al menos una fue exitosa, dispara UN solo correo resumen a Empaque
+ * en vez de N correos (evita spam / uso excesivo de SES en lotes grandes).
+ */
+const aprobarMasaBulk = async (req, res, next) => {
+  try {
+    const { ids, fecha_vencimiento_sugerida, prioridad, hora_entrega } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, message: 'Debe enviar un arreglo "ids" con al menos una masa.' });
+    }
+
+    const exitosas = [];
+    const fallidas = [];
+
+    for (const id of ids) {
+      try {
+        const result = await aprobarMasaCore(id, req.user.id, {
+          fecha_vencimiento_sugerida,
+          prioridad,
+          hora_entrega,
+          enviarCorreoIndividual: false,
+        });
+        exitosas.push({ id, masaInfo: result.masaInfo, totalPaquetes: result.totalPaquetes });
+      } catch (error) {
+        fallidas.push({ id, error: error.message || 'Error desconocido' });
+      }
+    }
+
+    // Correo resumen único, en background (no bloquea la respuesta)
+    if (exitosas.length > 0) {
+      setImmediate(async () => {
+        const clienteEmail = await db.getClient();
+        try {
+          const correosCfg = await clienteEmail.query(
+            `SELECT valor FROM configuracion_sistema WHERE clave = 'correos_empaque'`
+          );
+          const correosStr = correosCfg.rows[0]?.valor || '';
+          const destinatarios = correosStr.split(',').map(e => e.trim()).filter(Boolean);
+          if (!destinatarios.length) return;
+
+          await sendAprobacionMasaBulkEmail({
+            to: destinatarios.join(','),
+            masas: exitosas.map(e => ({
+              codigo_masa: e.masaInfo.codigo_masa,
+              tipo_masa: e.masaInfo.tipo_masa,
+              total_paquetes: e.totalPaquetes,
+            })),
+          });
+
+          logger.info(`Notificación empaque BULK enviada (${exitosas.length} masas) a: ${destinatarios.join(', ')}`);
+        } catch (emailErr) {
+          logger.warn(`Notificación empaque bulk falló (no crítico): ${emailErr.message}`);
+        } finally {
+          clienteEmail.release();
+        }
       });
     }
 
-    // Sin subdivisión: flujo normal
-    const r1 = await db.query(
-      `UPDATE progreso_fases SET estado = 'COMPLETADA'
-       WHERE masa_id = $1 AND fase = 'PLANIFICACION'`, [id]
-    );
-    logger.info(`[APROBACION DEBUG] masa=${id} PLANIFICACION→COMPLETADA rows=${r1.rowCount}`);
-
-    const r2 = await db.query(
-      `UPDATE progreso_fases SET estado = 'EN_PROGRESO'
-       WHERE masa_id = $1 AND fase = 'PESAJE'`, [id]
-    );
-    logger.info(`[APROBACION DEBUG] masa=${id} PESAJE→EN_PROGRESO rows=${r2.rowCount}`);
-
-    const r3 = await db.query(
-      `UPDATE progreso_fases SET estado = 'PENDIENTE', updated_at = NOW()
-       WHERE masa_id = $1 AND fase = 'EMPAQUE'`, [id]
-    );
-    logger.info(`[APROBACION DEBUG] masa=${id} EMPAQUE→PENDIENTE rows=${r3.rowCount}`);
-
-    if (fecha_vencimiento_sugerida) {
-      await db.query(
-        `UPDATE progreso_fases
-         SET datos_fase = COALESCE(datos_fase, '{}'::jsonb) || $2::jsonb
-         WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
-        [id, JSON.stringify({ fecha_vencimiento_sugerida })]
-      );
-    }
-
-    logger.info(`Masa ${id} APROBADA por usuario ${req.user.id}`);
+    logger.info(`Aprobación bulk: ${exitosas.length} exitosas, ${fallidas.length} fallidas, por usuario ${req.user.id}`);
 
     return res.json({
       success: true,
-      message: 'Masa aprobada. Pesaje desbloqueado.',
-      subdivision: null,
+      aprobadas: exitosas.length,
+      fallidas,
     });
   } catch (error) {
-    logger.error('Error al aprobar masa:', error);
+    logger.error('Error en aprobación masiva:', error);
     next(error);
   }
 };
@@ -721,6 +817,7 @@ module.exports = {
   getComposicionByMasa,
   updateUnidadesProgramadas,
   aprobarMasa,
+  aprobarMasaBulk,
   marcarPendiente,
   getInfoCancelacionMasa,
   cancelarMasa,

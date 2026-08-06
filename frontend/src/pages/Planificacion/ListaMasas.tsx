@@ -7,6 +7,7 @@ import {
   useSincronizarSAP,
   useSincronizarBOM,
   useAprobarMasa,
+  useAprobarMasaBulk,
   useMarcarPendiente,
 } from '../../hooks/useMasas';
 import { useAuthStore } from '@/store';
@@ -29,11 +30,26 @@ export const ListaMasas: React.FC = () => {
   const [masaCancelarId, setMasaCancelarId] = useState<number | null>(null);
 
   const { data: masas, isLoading, error, refetch } = useMasasByFecha(fecha);
+  const [busqueda, setBusqueda] = useState('');
+  const masasFiltradas = (masas || []).filter((m: MasaProduccionResumen) => {
+    const q = busqueda.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      m.tipo_masa?.toLowerCase().includes(q) ||
+      m.nombre_masa?.toLowerCase().includes(q) ||
+      m.codigo_masa?.toLowerCase().includes(q)
+    );
+  });
   const sincronizarMutation = useSincronizarSAP();
   const sincronizarBOMMutation = useSincronizarBOM();
   const sincronizandoRef = useRef(false);
   const aprobarMutation = useAprobarMasa();
+  const aprobarBulkMutation = useAprobarMasaBulk();
   const pendienteMutation = useMarcarPendiente();
+  const [seleccionadas, setSeleccionadas] = useState<Set<number>>(new Set());
+  const [expandidas, setExpandidas] = useState<Set<number>>(new Set());
+  const [bulkModal, setBulkModal] = useState<{ fecha: string; prioridad: boolean; hora_entrega: string } | null>(null);
+  const [bulkResultado, setBulkResultado] = useState<{ aprobadas: number; fallidas: { id: number; error: string }[] } | null>(null);
 
   const handleSincronizar = async () => {
     if (sincronizandoRef.current || sincronizarMutation.isPending) return;
@@ -108,6 +124,67 @@ export const ListaMasas: React.FC = () => {
     } catch (error: any) {
       const msg = error?.message || 'Error desconocido al marcar como pendiente';
       alert(`⚠️ No se pudo marcar como pendiente:\n\n${msg}`);
+    }
+  };
+
+  // ── Selección múltiple / aprobación masiva (una sola llamada al backend) ──
+  // Nota: "aprobables" opera sobre masasFiltradas — si el usuario buscó "arabe",
+  // "seleccionar todas" solo selecciona las visibles, no las 40 del día completo.
+  const aprobables = masasFiltradas.filter((m: MasaProduccionResumen) =>
+    ['PLANIFICACION', 'PENDIENTE'].includes(m.estado)
+  );
+
+  const toggleSeleccion = (id: number) => {
+    setSeleccionadas(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSeleccionarTodas = () => {
+    setSeleccionadas(prev =>
+      prev.size === aprobables.length && aprobables.length > 0
+        ? new Set()
+        : new Set(aprobables.map((m: MasaProduccionResumen) => m.id))
+    );
+  };
+
+  const toggleExpandir = (id: number) => {
+    setExpandidas(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const todasExpandidas = masasFiltradas.length > 0 && masasFiltradas.every((m: MasaProduccionResumen) => expandidas.has(m.id));
+  const toggleExpandirTodo = () => {
+    setExpandidas(todasExpandidas ? new Set() : new Set(masasFiltradas.map((m: MasaProduccionResumen) => m.id)));
+  };
+
+  const abrirModalBulk = () => {
+    const sugerida = new Date();
+    sugerida.setDate(sugerida.getDate() + 4);
+    setBulkModal({ fecha: sugerida.toISOString().slice(0, 10), prioridad: false, hora_entrega: '' });
+  };
+
+  const confirmarAprobarBulk = async () => {
+    if (!bulkModal) return;
+    try {
+      const result = await aprobarBulkMutation.mutateAsync({
+        ids: Array.from(seleccionadas),
+        fecha_vencimiento_sugerida: bulkModal.fecha || undefined,
+        prioridad: bulkModal.prioridad || undefined,
+        hora_entrega: bulkModal.hora_entrega || undefined,
+      });
+      setBulkModal(null);
+      setSeleccionadas(new Set());
+      setBulkResultado(result);
+      refetch();
+    } catch (error: any) {
+      setBulkModal(null);
+      alert(`⚠️ Error en aprobación masiva:\n\n${error?.message || 'Error desconocido'}`);
     }
   };
 
@@ -302,8 +379,52 @@ export const ListaMasas: React.FC = () => {
 
         {/* Lista de masas */}
         {!isLoading && masas && masas.length > 0 && (
+          <>
+            <div className="flex items-center gap-2 mb-3 px-1 flex-wrap">
+              <div className="relative flex-1 min-w-[200px] max-w-xs">
+                <input
+                  type="text"
+                  value={busqueda}
+                  onChange={(e) => setBusqueda(e.target.value)}
+                  placeholder="🔍 Buscar masa (tipo, nombre, código)..."
+                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+                {busqueda && (
+                  <button
+                    onClick={() => setBusqueda('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs"
+                    title="Limpiar búsqueda"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+              {esSupervisor && aprobables.length > 0 && (
+                <>
+                  <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={seleccionadas.size === aprobables.length && aprobables.length > 0}
+                      onChange={toggleSeleccionarTodas}
+                      className="w-4 h-4 accent-green-600"
+                    />
+                    Seleccionar todas las aprobables ({aprobables.length})
+                  </label>
+                  <span className="text-gray-300">·</span>
+                  <button
+                    onClick={toggleExpandirTodo}
+                    className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+                  >
+                    {todasExpandidas ? '▾ Comprimir todo' : '▸ Expandir todo'}
+                  </button>
+                </>
+              )}
+            </div>
+            {busqueda && masasFiltradas.length === 0 && (
+              <div className="text-sm text-gray-400 px-1 mb-3">Sin resultados para "{busqueda}"</div>
+            )}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-6">
-            {[...masas].sort((a, b) => Number(b.es_repeticion) - Number(a.es_repeticion)).map((masa: MasaProduccionResumen) => (
+            {[...masasFiltradas].sort((a, b) => Number(b.es_repeticion) - Number(a.es_repeticion)).map((masa: MasaProduccionResumen) => (
               <div
                 key={masa.id}
                 className={`bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer border-l-4 ${
@@ -314,13 +435,22 @@ export const ListaMasas: React.FC = () => {
                     : masa.estado === 'PENDIENTE'
                     ? 'border-yellow-500'
                     : 'border-transparent'
-                }`}
+                } ${seleccionadas.has(masa.id) ? 'ring-2 ring-green-400' : ''}`}
                 onClick={() => handleVerDetalle(masa.id)}
               >
                 <div className="p-4 md:p-6">
                   {/* Header de la card */}
                   <div className="flex justify-between items-start mb-4">
                     <div className="flex-1 min-w-0">
+                      {esSupervisor && ['PLANIFICACION', 'PENDIENTE'].includes(masa.estado) && (
+                        <input
+                          type="checkbox"
+                          checked={seleccionadas.has(masa.id)}
+                          onChange={() => toggleSeleccion(masa.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-4 h-4 accent-green-600 mb-1"
+                        />
+                      )}
                       {masa.es_repeticion && (
                         <span className="inline-flex items-center gap-1 text-xs font-bold bg-red-600 text-white rounded px-2 py-0.5 mb-1">
                           🔴 REPETICIÓN — PRIORIDAD
@@ -397,6 +527,16 @@ export const ListaMasas: React.FC = () => {
                     </div>
                   </div>
                   {masa.productos_resumen && masa.productos_resumen.length > 0 && (
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => toggleExpandir(masa.id)}
+                        className="text-xs text-indigo-600 hover:text-indigo-800 font-medium mb-1"
+                      >
+                        {expandidas.has(masa.id) ? '▾ Ocultar productos' : `▸ Ver ${masa.productos_resumen.length} producto(s)`}
+                      </button>
+                    </div>
+                  )}
+                  {masa.productos_resumen && masa.productos_resumen.length > 0 && expandidas.has(masa.id) && (
                     <div className="mb-3 rounded-lg bg-gray-50 border border-gray-100 divide-y divide-gray-100">
                       {masa.productos_resumen.map((p, i) => (
                         <div key={i} className="flex items-center justify-between px-3 py-1.5">
@@ -455,6 +595,7 @@ export const ListaMasas: React.FC = () => {
               </div>
             ))}
           </div>
+          </>
         )}
       </div>
 
@@ -550,6 +691,117 @@ export const ListaMasas: React.FC = () => {
                 Cancelar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Barra sticky de aprobación masiva */}
+      {seleccionadas.size > 0 && !bulkModal && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-gray-200 shadow-lg px-4 py-3 flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-gray-700">
+              {seleccionadas.size} masa{seleccionadas.size !== 1 ? 's' : ''} seleccionada{seleccionadas.size !== 1 ? 's' : ''}
+            </span>
+            <button
+              onClick={toggleExpandirTodo}
+              className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+            >
+              {todasExpandidas ? '▾ Comprimir todo' : '▸ Expandir todo'}
+            </button>
+            <button
+              onClick={() => setSeleccionadas(new Set())}
+              className="text-sm text-gray-500 hover:text-gray-700"
+            >
+              Deseleccionar
+            </button>
+          </div>
+          <button
+            onClick={abrirModalBulk}
+            className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold"
+          >
+            ✓ Aprobar todo ({seleccionadas.size})
+          </button>
+        </div>
+      )}
+
+      {/* Modal aprobación masiva */}
+      {bulkModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">
+            <h3 className="font-bold text-lg mb-1">Aprobar {seleccionadas.size} masas</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Estos valores se aplicarán a todas las masas seleccionadas. Se enviará un solo correo resumen a Empaque.
+            </p>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Fecha de vencimiento sugerida
+              <span className="text-gray-400 font-normal ml-1">(opcional)</span>
+            </label>
+            <input
+              type="date"
+              value={bulkModal.fecha}
+              onChange={e => setBulkModal(prev => prev ? { ...prev, fecha: e.target.value } : null)}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm mb-3 focus:ring-2 focus:ring-green-400"
+            />
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-3">
+              <input
+                type="checkbox"
+                checked={bulkModal.prioridad}
+                onChange={e => setBulkModal(prev => prev ? { ...prev, prioridad: e.target.checked } : null)}
+                className="w-4 h-4 accent-red-600"
+              />
+              Marcar como prioritarias / repetición
+            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Hora de entrega
+              <span className="text-gray-400 font-normal ml-1">(opcional)</span>
+            </label>
+            <input
+              type="time"
+              value={bulkModal.hora_entrega}
+              onChange={e => setBulkModal(prev => prev ? { ...prev, hora_entrega: e.target.value } : null)}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm mb-4 focus:ring-2 focus:ring-green-400"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={confirmarAprobarBulk}
+                disabled={aprobarBulkMutation.isPending}
+                className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+              >
+                {aprobarBulkMutation.isPending ? 'Aprobando...' : '✓ Confirmar aprobación masiva'}
+              </button>
+              <button
+                onClick={() => setBulkModal(null)}
+                disabled={aprobarBulkMutation.isPending}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Resultado de aprobación masiva */}
+      {bulkResultado && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">
+            <h3 className="font-bold text-lg mb-2">
+              {bulkResultado.fallidas.length === 0 ? '✅ Listo' : '⚠️ Completado con errores'}
+            </h3>
+            <p className="text-sm text-gray-600 mb-2">{bulkResultado.aprobadas} masa(s) aprobada(s) correctamente.</p>
+            {bulkResultado.fallidas.length > 0 && (
+              <div className="mb-3 max-h-40 overflow-y-auto">
+                {bulkResultado.fallidas.map(f => (
+                  <p key={f.id} className="text-xs text-red-600">Masa #{f.id}: {f.error}</p>
+                ))}
+              </div>
+            )}
+            <button
+              onClick={() => setBulkResultado(null)}
+              className="w-full px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm font-medium"
+            >
+              Cerrar
+            </button>
           </div>
         </div>
       )}

@@ -402,10 +402,80 @@ const sendAprobacionMasaEmail = async ({ to, masa, productosEmpaque }) => {
   });
 };
 
+/**
+ * Correo RESUMEN de aprobación masiva — una sola notificación por lote en
+ * vez de un correo por masa (evita spam a Empaque y uso excesivo de SES).
+ */
+const sendAprobacionMasaBulkEmail = async ({ to, masas }) => {
+  const filas = masas.map(m => `
+    <tr>
+      <td style="padding:8px 12px;color:#1e293b;font-size:13px;border-bottom:1px solid #f1f5f9;">${m.codigo_masa}</td>
+      <td style="padding:8px 12px;color:#1e293b;font-size:13px;border-bottom:1px solid #f1f5f9;">${m.tipo_masa}</td>
+      <td style="padding:8px 12px;color:#1e293b;font-size:13px;border-bottom:1px solid #f1f5f9;text-align:right;">${m.total_paquetes} paq</td>
+    </tr>`).join('');
+
+  const html = `
+    <!DOCTYPE html>
+    <html lang="es">
+    <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+    <body style="margin:0;padding:0;background:#F5F0E4;font-family:Inter,Arial,sans-serif;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:#F5F0E4;padding:40px 0;">
+        <tr><td align="center">
+          <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+            <tr>
+              <td style="background:#dc2626;padding:32px 40px;text-align:center;">
+                <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;letter-spacing:-0.5px;">🍞 La Artesa Panadería</h1>
+                <p style="margin:8px 0 0;color:#fecaca;font-size:14px;">Sistema de Control de Producción</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:40px;">
+                <h2 style="margin:0 0 8px;color:#1e293b;font-size:20px;">📦 Alistamiento de empaque requerido — ${masas.length} masa${masas.length !== 1 ? 's' : ''} aprobada${masas.length !== 1 ? 's' : ''}</h2>
+                <p style="margin:0 0 24px;color:#475569;font-size:15px;line-height:1.6;">
+                  Se aprobaron ${masas.length} masas de producción en un solo lote. Revisa el detalle de materiales de cada una en Orbit.
+                </p>
+                <table width="100%" cellpadding="0" cellspacing="0"
+                       style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;margin-bottom:24px;">
+                  <thead>
+                    <tr style="background:#f1f5f9;">
+                      <th style="padding:10px 12px;text-align:left;color:#64748b;font-size:12px;font-weight:600;text-transform:uppercase;">Código masa</th>
+                      <th style="padding:10px 12px;text-align:left;color:#64748b;font-size:12px;font-weight:600;text-transform:uppercase;">Tipo</th>
+                      <th style="padding:10px 12px;text-align:right;color:#64748b;font-size:12px;font-weight:600;text-transform:uppercase;">Paquetes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${filas}
+                  </tbody>
+                </table>
+                <p style="margin:0;color:#94a3b8;font-size:13px;line-height:1.5;">
+                  Este aviso se generó automáticamente al aprobar el lote en el sistema de producción.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="background:#f8fafc;padding:20px 40px;text-align:center;">
+                <p style="margin:0;color:#94a3b8;font-size:12px;">© ${new Date().getFullYear()} La Artesa SAS — Bogotá, Colombia</p>
+              </td>
+            </tr>
+          </table>
+        </td></tr>
+      </table>
+    </body>
+    </html>
+  `;
+
+  return sendEmail({
+    to,
+    subject: `📦 Alistamiento empaque — ${masas.length} masas aprobadas`,
+    html,
+  });
+};
+
 module.exports = {
   sendEmail,
   sendVerificationEmail,
   sendPasswordResetEmail,
   sendPesajeCompletadoEmail,
   sendAprobacionMasaEmail,
+  sendAprobacionMasaBulkEmail,
 };
