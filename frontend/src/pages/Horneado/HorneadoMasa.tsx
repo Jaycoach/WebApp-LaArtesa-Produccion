@@ -6,9 +6,10 @@
  * Flujo: Iniciar horneado → [actualizar temperaturas/damper] → Completar → ir a Empaque
  */
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ModalMO } from '../../components/common/ModalMO';
+import { BarraNavegacionFases } from '../../components/common/BarraNavegacionFases';
 import { formatBogotaTime } from '../../utils/timezone';
 
 const getToken = () => {
@@ -38,7 +39,6 @@ type EtapaHorno = 'inicio' | 'en_progreso' | 'completado';
 
 export const HorneadoMasa: React.FC = () => {
   const { masaId } = useParams<{ masaId: string }>();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const [etapa, setEtapa] = useState<EtapaHorno>('inicio');
@@ -163,6 +163,17 @@ export const HorneadoMasa: React.FC = () => {
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-4xl mx-auto space-y-6">
 
+        <BarraNavegacionFases
+          masaId={masaId!}
+          codigoMasa={masa.codigo}
+          faseAnterior={{ label: 'Fermentación', ruta: `/fermentacion/${masaId}` }}
+          faseSiguiente={{
+            label: 'Empaque',
+            ruta: `/empaque/${masaId}`,
+            habilitada: etapa === 'completado',
+          }}
+        />
+
         {/* Header */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
           <div className="flex items-center justify-between">
@@ -176,7 +187,6 @@ export const HorneadoMasa: React.FC = () => {
               </div>
               <p className="text-gray-500 text-sm">{masa.codigo} — {masa.nombre}</p>
             </div>
-            <button onClick={() => navigate(`/planificacion/masas/${masaId}`)} className="text-sm text-gray-500 hover:text-gray-800">← Volver</button>
           </div>
         </div>
 
@@ -260,12 +270,6 @@ export const HorneadoMasa: React.FC = () => {
               className="w-full bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white font-semibold py-3 rounded-lg transition-colors"
             >
               {iniciarMutation.isPending ? 'Iniciando...' : '🔥 Iniciar Horneado'}
-            </button>
-            <button
-              onClick={() => navigate(`/planificacion/masas/${masaId}`)}
-              className="w-full px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-medium"
-            >
-              ← Volver al detalle
             </button>
           </div>
         )}
@@ -388,33 +392,9 @@ export const HorneadoMasa: React.FC = () => {
                 {completarMutation.isPending ? 'Completando...' : '✅ Completar Horneado → Ir a Empaque'}
               </button>
             </div>
-            <button
-              onClick={() => navigate(`/planificacion/masas/${masaId}`)}
-              className="w-full px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-medium"
-            >
-              ← Volver al detalle
-            </button>
             {showMO && <ModalMO masaId={Number(masaId)} fase="HORNEADO" onClose={() => setShowMO(false)} />}
           </div>
         )}
-
-        {/* Navegación entre fases */}
-        <div className="flex items-center justify-between">
-          <button
-            onClick={() => navigate(`/fermentacion/${masaId}`)}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 hover:border-blue-300 hover:bg-blue-50 text-gray-700 hover:text-blue-700 rounded-lg text-sm font-medium shadow-sm transition-colors"
-          >
-            ← Fermentación
-          </button>
-          {etapa === 'completado' && (
-            <button
-              onClick={() => navigate('/empaque')}
-              className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold shadow-sm transition-colors"
-            >
-              📦 Empaque →
-            </button>
-          )}
-        </div>
 
         {/* Completado */}
         {etapa === 'completado' && (
