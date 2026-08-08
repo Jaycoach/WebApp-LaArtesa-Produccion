@@ -14,17 +14,6 @@ import { useAuthStore } from '@/store';
 import { MasaProduccionResumen } from '../../types/api';
 import { ModalCancelarMasa } from '@/components/common/ModalCancelarMasa';
 
-const COLOR_FASE: Record<string, string> = {
-  PLANIFICACION: 'bg-gray-300',
-  PESAJE:        'bg-blue-500',
-  AMASADO:       'bg-purple-500',
-  DIVISION:      'bg-yellow-500',
-  FORMADO:       'bg-green-500',
-  FERMENTACION:  'bg-orange-500',
-  HORNEADO:      'bg-red-500',
-  EMPAQUE:       'bg-amber-500',
-};
-
 /**
  * Página: Lista de masas de producción del día
  */
@@ -198,6 +187,9 @@ export const ListaMasas: React.FC = () => {
       alert(`⚠️ Error en aprobación masiva:\n\n${error?.message || 'Error desconocido'}`);
     }
   };
+
+  // Estados que no son fases de progreso — se muestran tal cual, el resto usa fase_actual
+  const ESTADOS_NO_FASE = ['PENDIENTE', 'SUBDIVIDIDA', 'CANCELADA'];
 
   const getEstadoBadge = (estado: string) => {
     const badges: Record<string, string> = {
@@ -471,10 +463,6 @@ export const ListaMasas: React.FC = () => {
                     <span className="text-gray-400 text-xs w-3 shrink-0">{expandida ? '▾' : '▸'}</span>
 
                     <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
-                      <span
-                        className={`w-2.5 h-2.5 rounded-full shrink-0 ${COLOR_FASE[masa.fase_actual || 'PLANIFICACION'] || 'bg-gray-300'}`}
-                        title={`Fase: ${masa.fase_actual || 'PLANIFICACION'}`}
-                      />
                       {masa.es_repeticion && (
                         <span className="text-xs font-bold bg-red-600 text-white rounded px-1.5 py-0.5 shrink-0">🔴 PRIORIDAD</span>
                       )}
@@ -487,8 +475,8 @@ export const ListaMasas: React.FC = () => {
                       <span className="text-xs text-gray-400 truncate hidden sm:inline">{masa.nombre_masa}</span>
                     </div>
 
-                    <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${getEstadoBadge(masa.estado)}`}>
-                      {getEstadoLabel(masa.estado)}
+                    <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${getEstadoBadge(ESTADOS_NO_FASE.includes(masa.estado) ? masa.estado : (masa.fase_actual || masa.estado))}`}>
+                      {getEstadoLabel(ESTADOS_NO_FASE.includes(masa.estado) ? masa.estado : (masa.fase_actual || masa.estado))}
                     </span>
                     <span className="shrink-0 text-sm text-gray-600 w-20 text-right hidden md:inline">{kgMostrado} kg</span>
                     <span className="shrink-0 text-sm text-gray-600 w-16 text-right hidden lg:inline">{masa.total_ordenes} OV</span>
