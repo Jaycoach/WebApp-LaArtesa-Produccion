@@ -56,6 +56,7 @@ interface Masa {
   total_unidades_programadas: number;
   es_repeticion?: boolean;
   es_adicional?: boolean;
+  prioridad?: boolean;
 }
 
 const MasaCard = ({
@@ -68,7 +69,7 @@ const MasaCard = ({
   return (
     <div
       className={`rounded-lg border p-4 transition-all bg-white
-        ${masa.es_repeticion ? 'border-red-300 bg-red-50' : cfg.borderColor}
+        ${masa.es_repeticion ? 'border-red-300 bg-red-50' : masa.prioridad ? 'border-purple-300 bg-purple-50' : cfg.borderColor}
         ${canEdit ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5' : 'opacity-90'}`}
       onClick={() => canEdit && onNavigate(masa.id, faseKey)}
     >
@@ -79,6 +80,11 @@ const MasaCard = ({
             {masa.es_repeticion && (
               <span className="px-1.5 py-0.5 rounded text-xs font-bold bg-red-200 text-red-800">
                 REPETICIÓN
+              </span>
+            )}
+            {!masa.es_repeticion && masa.prioridad && (
+              <span className="px-1.5 py-0.5 rounded text-xs font-bold bg-purple-200 text-purple-800">
+                PRIORITARIA
               </span>
             )}
             {masa.es_adicional && (
@@ -153,8 +159,8 @@ const FaseListado = () => {
 
   const masasSinOrdenar: Masa[] = (data as any)?.data ?? (data as any) ?? [];
   const masas: Masa[] = [...masasSinOrdenar].sort((a, b) => {
-    const prioridadA = Number(a.es_repeticion) + Number(a.es_adicional);
-    const prioridadB = Number(b.es_repeticion) + Number(b.es_adicional);
+    const prioridadA = Number(a.es_repeticion) + Number(a.es_adicional) + Number(a.prioridad);
+    const prioridadB = Number(b.es_repeticion) + Number(b.es_adicional) + Number(b.prioridad);
     return prioridadB - prioridadA;
   });
 

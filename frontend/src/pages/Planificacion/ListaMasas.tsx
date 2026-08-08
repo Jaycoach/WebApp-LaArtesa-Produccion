@@ -466,10 +466,13 @@ export const ListaMasas: React.FC = () => {
                       {masa.es_repeticion && (
                         <span className="text-xs font-bold bg-red-600 text-white rounded px-1.5 py-0.5 shrink-0">🔴 PRIORIDAD</span>
                       )}
+                      {!masa.es_repeticion && masa.prioridad && (
+                        <span className="text-xs font-bold bg-purple-600 text-white rounded px-1.5 py-0.5 shrink-0">⭐ PRIORITARIA</span>
+                      )}
                       {masa.es_adicional && (
                         <span className="text-xs font-bold bg-orange-500 text-white rounded px-1.5 py-0.5 shrink-0 uppercase">ADICIONAL</span>
                       )}
-                      <span className={`font-semibold text-sm truncate ${masa.es_repeticion ? 'text-red-600' : 'text-gray-900'}`}>
+                      <span className={`font-semibold text-sm truncate ${masa.es_repeticion ? 'text-red-600' : masa.prioridad ? 'text-purple-600' : 'text-gray-900'}`}>
                         {masa.tipo_masa}
                       </span>
                       <span className="text-xs text-gray-400 truncate hidden sm:inline">{masa.nombre_masa}</span>

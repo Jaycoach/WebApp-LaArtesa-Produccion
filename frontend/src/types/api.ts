@@ -62,6 +62,7 @@ export interface MasaProduccionResumen {
   }[];
   es_repeticion: boolean;
   es_adicional?: boolean;
+  prioridad?: boolean;
   masa_adicional_referencia_id?: number | null;
   lote_produccion?: string;
 }
