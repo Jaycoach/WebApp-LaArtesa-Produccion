@@ -12,11 +12,19 @@ interface FaseSiguiente extends FaseAdyacente {
   onClick?: () => void; // si se define, se usa en vez de navigate(ruta) directo (ej: completar fase + navegar)
 }
 
+interface AccionExtra {
+  label: string;
+  onClick: () => void;
+  loading?: boolean;
+  disabled?: boolean;
+}
+
 interface BarraNavegacionFasesProps {
   masaId?: string | number;
   codigoMasa?: string;
   faseAnterior?: FaseAdyacente;
   faseSiguiente?: FaseSiguiente;
+  accionExtra?: AccionExtra;
 }
 
 /**
@@ -33,6 +41,7 @@ export const BarraNavegacionFases: React.FC<BarraNavegacionFasesProps> = ({
   codigoMasa,
   faseAnterior,
   faseSiguiente,
+  accionExtra,
 }) => {
   const navigate = useNavigate();
 
@@ -72,6 +81,15 @@ export const BarraNavegacionFases: React.FC<BarraNavegacionFasesProps> = ({
             className="flex items-center gap-1 px-4 py-2 bg-white border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 text-gray-600 hover:text-indigo-700 rounded-lg text-sm font-medium shadow-sm transition-colors"
           >
             ← {faseAnterior.label}
+          </button>
+        )}
+        {accionExtra && (
+          <button
+            onClick={accionExtra.onClick}
+            disabled={accionExtra.disabled || accionExtra.loading}
+            className="flex items-center gap-1 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold shadow-sm transition-colors"
+          >
+            {accionExtra.loading ? '⏳ Enviando a SAP...' : accionExtra.label}
           </button>
         )}
         {faseSiguiente && (

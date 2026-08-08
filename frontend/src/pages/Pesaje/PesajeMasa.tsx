@@ -366,6 +366,15 @@ export const PesajeMasa: React.FC = () => {
         <BarraNavegacionFases
           masaId={masaId!}
           codigoMasa={checklist.codigo_masa}
+          accionExtra={
+            checklist.todosPesados && !checklist.pesaje_completado
+              ? {
+                  label: '✅ Confirmar Pesaje Completo',
+                  onClick: handleConfirmar,
+                  loading: confirmarMutation.isPending || confirmando,
+                }
+              : undefined
+          }
           faseSiguiente={{
             label: 'Amasado',
             ruta: `/amasado/${masaId}`,
