@@ -877,6 +877,13 @@ const confirmarPesaje = async (req, res, next) => {
         [masaId]
       );
 
+      // Marca PESAJE como completada también en la masa original — sin esto,
+      // pesaje_completado queda en false para siempre y el botón "Confirmar Pesaje
+      // Completo" de la sticky reaparece incorrectamente en una masa ya subdividida.
+      await fasesModel.updateEstadoFase(
+        masaId, 'PESAJE', 'COMPLETADA', 100, req.user.id, { confirmado_en: new Date() }
+      );
+
       notificarPesajeCompletado(masaId); // fire-and-forget
       return res.json({
         success: true,

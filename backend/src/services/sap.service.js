@@ -5,7 +5,7 @@
 
 const axios = require('axios');
 const https = require('https');
-const logger = require('../utils/logger');
+const logger = require('../utils/logger').child({ service: 'SAP' });
 const config = require('../config');
 
 // Fallback: infiere tamaño/forma desde el nombre del producto cuando el UDF viene null en SAP.
