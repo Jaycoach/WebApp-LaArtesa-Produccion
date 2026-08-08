@@ -257,7 +257,7 @@ export const DetalleMasa: React.FC = () => {
                 {masa.fase_actual}
               </span>
               <p className="text-sm text-gray-500 mt-2">{masa.fecha_produccion}</p>
-              {esSupervisor && ['PLANIFICACION', 'PENDIENTE', 'APROBADA', 'SUBDIVIDIDA'].includes(masa.estado) && (
+              {esSupervisor && (['PLANIFICACION', 'PENDIENTE', 'SUBDIVIDIDA'].includes(masa.estado) || (masa.estado === 'APROBADA' && !masa.sap_doc_entry_pesaje)) && (
                 <button
                   onClick={() => setMostrarCancelar(true)}
                   className="mt-3 px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium ml-auto block"

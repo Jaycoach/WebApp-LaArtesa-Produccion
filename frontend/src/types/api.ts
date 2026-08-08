@@ -63,6 +63,7 @@ export interface MasaProduccionResumen {
   es_repeticion: boolean;
   es_adicional?: boolean;
   prioridad?: boolean;
+  sap_doc_entry_pesaje?: number | null;
   masa_adicional_referencia_id?: number | null;
   lote_produccion?: string;
 }

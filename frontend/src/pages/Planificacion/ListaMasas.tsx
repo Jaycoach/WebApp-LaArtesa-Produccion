@@ -506,13 +506,15 @@ export const ListaMasas: React.FC = () => {
                             ⏸
                           </button>
                         )}
-                        <button
-                          onClick={(e) => handleAbrirCancelar(e, masa.id)}
-                          className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white text-xs font-medium rounded"
-                          title="Cancelar"
-                        >
-                          ✕
-                        </button>
+                        {(['PLANIFICACION', 'PENDIENTE', 'SUBDIVIDIDA'].includes(masa.estado) || (masa.estado === 'APROBADA' && !masa.sap_doc_entry_pesaje)) && (
+                          <button
+                            onClick={(e) => handleAbrirCancelar(e, masa.id)}
+                            className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white text-xs font-medium rounded"
+                            title="Cancelar"
+                          >
+                            ✕
+                          </button>
+                        )}
                       </div>
                     )}
                     <button
