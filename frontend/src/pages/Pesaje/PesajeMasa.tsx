@@ -563,7 +563,7 @@ export const PesajeMasa: React.FC = () => {
                       <label className="flex items-center gap-2">
                         <input
                           type="checkbox"
-                          checked={ing.pesado}
+                          checked={ing.pesado || editando === ing.id}
                           onChange={() => handleRegistrarPesajeClick(ing)}
                           disabled={ing.sin_stock || ing.pesado}
                           className="w-5 h-5 disabled:opacity-50"
