@@ -867,6 +867,16 @@ const confirmarPesaje = async (req, res, next) => {
         }
       }
 
+      // Fija la línea base para detectar ajustes futuros — mismo motivo que el flujo estándar.
+      // Las filas de ingredientes_masa de la masa original siguen existiendo tras la subdivisión
+      // (distribuirIngredientes solo copia a las tandas, no borra ni mueve el original).
+      await db.query(
+        `UPDATE ingredientes_masa
+         SET peso_confirmado_sap = peso_real
+         WHERE masa_id = $1 AND pesado = true`,
+        [masaId]
+      );
+
       notificarPesajeCompletado(masaId); // fire-and-forget
       return res.json({
         success: true,
@@ -973,6 +983,16 @@ const confirmarPesaje = async (req, res, next) => {
        SET sap_doc_entry_pesaje = $1, sap_doc_num_pesaje = $2, updated_at = NOW()
        WHERE id = $3`,
       [sapResult.docEntry, sapResult.docNum, masaId]
+    );
+
+    // Fija la línea base para detectar ajustes futuros (ediciones post-transmisión).
+    // Sin esto, calcularAjustesPendientes excluye todo el checklist (peso_confirmado_sap IS NULL)
+    // y "Revisar ajustes pendientes SAP" queda ciego para cualquier masa transmitida.
+    await db.query(
+      `UPDATE ingredientes_masa
+       SET peso_confirmado_sap = peso_real
+       WHERE masa_id = $1 AND pesado = true`,
+      [masaId]
     );
 
     // Ahora sí: marcar PESAJE=COMPLETADA y desbloquear AMASADO

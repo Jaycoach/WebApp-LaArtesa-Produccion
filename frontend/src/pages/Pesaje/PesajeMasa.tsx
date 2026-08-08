@@ -899,15 +899,6 @@ export const PesajeMasa: React.FC = () => {
                 🔄 Revisar ajustes pendientes SAP
               </button>
             )}
-            {checklist.todosPesados && !checklist.pesaje_completado && (
-              <button
-                onClick={handleConfirmar}
-                disabled={confirmarMutation.isPending || confirmando}
-                className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-semibold"
-              >
-                {(confirmarMutation.isPending || confirmando) ? '⏳ Enviando a SAP...' : '✅ Confirmar Pesaje Completo'}
-              </button>
-            )}
             {checklist.pesaje_completado && (
               <div className="flex items-center gap-2 px-5 py-3 bg-green-50 border border-green-300 rounded-lg">
                 <span className="text-green-700 font-semibold text-sm">
