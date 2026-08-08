@@ -52,6 +52,7 @@ npm install
 npx vite build
 
 echo "[4/4] NGINX..."
+sudo rm -rf /var/www/artesa-frontend/dist/assets
 sudo cp -r dist/* /var/www/artesa-frontend/dist/
 sudo chmod 644 /var/www/artesa-frontend/dist/index.html
 sudo touch /var/www/artesa-frontend/dist/index.html
