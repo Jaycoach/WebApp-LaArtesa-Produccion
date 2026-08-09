@@ -417,7 +417,7 @@ async function distribuirProductosPorTandas(tandas, subMasaIds, qr = db) {
     // 039). Se traen una vez por producto y se reparten proporcional a la misma
     // fracción de cada tanda, con el mismo patrón de residuo en la última ocurrencia.
     const ovsOriginalesResult = await qr.query(
-      `SELECT sap_doc_entry, sap_doc_num, sap_line_num, sap_item_code, unidades_pedidas
+      `SELECT sap_doc_entry, sap_doc_num, sap_line_num, sap_item_code, unidades_pedidas, cantidad_abierta_sap
        FROM productos_por_masa_ov
        WHERE producto_masa_id = $1`,
       [productoMasaIdOriginal]
@@ -450,11 +450,12 @@ async function distribuirProductosPorTandas(tandas, subMasaIds, qr = db) {
           if (cantidadOv > 0) {
             await qr.query(
               `INSERT INTO productos_por_masa_ov
-                 (producto_masa_id, masa_id, sap_doc_entry, sap_doc_num, sap_line_num, sap_item_code, unidades_pedidas)
-               VALUES ($1,$2,$3,$4,$5,$6,$7)
+                 (producto_masa_id, masa_id, sap_doc_entry, sap_doc_num, sap_line_num, sap_item_code, unidades_pedidas, cantidad_abierta_sap)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
                ON CONFLICT (masa_id, sap_doc_entry, sap_line_num) DO UPDATE SET
-                 unidades_pedidas = productos_por_masa_ov.unidades_pedidas + EXCLUDED.unidades_pedidas`,
-              [nuevoProductoMasaId, subMasaIds[oc.tandaIdx], ov.sap_doc_entry, ov.sap_doc_num, ov.sap_line_num, ov.sap_item_code, cantidadOv]
+                 unidades_pedidas = productos_por_masa_ov.unidades_pedidas + EXCLUDED.unidades_pedidas,
+                 cantidad_abierta_sap = EXCLUDED.cantidad_abierta_sap`,
+              [nuevoProductoMasaId, subMasaIds[oc.tandaIdx], ov.sap_doc_entry, ov.sap_doc_num, ov.sap_line_num, ov.sap_item_code, cantidadOv, ov.cantidad_abierta_sap]
             );
           }
         }
