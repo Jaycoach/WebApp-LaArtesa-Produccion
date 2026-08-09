@@ -137,16 +137,38 @@ export const ModalCancelarMasa: React.FC<ModalCancelarMasaProps> = ({ masaId, is
         )}
 
         {resultadoSap && (
-          <div className="mt-2 p-3 bg-gray-50 border border-gray-200 rounded-lg">
-            <p className="text-xs font-semibold text-gray-700 mb-1">Resultado en SAP:</p>
-            <ul className="text-xs space-y-1">
-              {resultadoSap.map((r: any, i: number) => (
-                <li key={i} className={r.exitosa ? 'text-green-700' : 'text-red-700'}>
-                  {r.exitosa ? '✓' : '✗'} OV {r.doc_num} línea {r.line_num} ({r.item_code})
-                  {!r.exitosa && r.mensaje ? ` — ${r.mensaje}` : ''}
-                </li>
-              ))}
-            </ul>
+          <div className="mt-2 space-y-3">
+            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+              <p className="text-sm font-semibold text-green-800">✓ Masa cancelada correctamente</p>
+            </div>
+
+            {resultadoSap.length > 0 && (
+              <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                <p className="text-xs font-semibold text-gray-700 mb-2">Líneas de OV cerradas en SAP:</p>
+                <ul className="text-sm space-y-1.5">
+                  {resultadoSap.map((r: any, i: number) => (
+                    <li key={i} className={r.exitosa ? 'text-green-700' : 'text-red-700'}>
+                      {r.exitosa
+                        ? <>✓ OV <strong>{r.doc_num}</strong> — línea {r.line_num} ({r.item_code}) fue <strong>cancelada en SAP</strong> correctamente.</>
+                        : <>✗ OV <strong>{r.doc_num}</strong> — línea {r.line_num} ({r.item_code}) <strong>no se pudo cancelar</strong> en SAP{r.mensaje ? `: ${r.mensaje}` : '.'}</>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {lineas.length > resultadoSap.length && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <p className="text-xs font-semibold text-amber-800 mb-2">Líneas que quedaron abiertas en SAP (no se cerraron):</p>
+                <ul className="text-sm space-y-1 text-amber-700">
+                  {lineas
+                    .filter((l: any) => !resultadoSap.some((r: any) => r.doc_num === l.sap_doc_num && r.line_num === l.sap_line_num))
+                    .map((l: any, i: number) => (
+                      <li key={i}>• OV <strong>{l.sap_doc_num}</strong> — línea {l.sap_line_num} ({l.sap_item_code}) — puede volver a sincronizarse.</li>
+                    ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
 
