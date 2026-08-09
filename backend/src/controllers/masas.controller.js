@@ -764,7 +764,7 @@ const cancelarMasa = async (req, res, next) => {
          JOIN masas_produccion m ON m.id = ov.masa_id
          WHERE ov.sap_doc_entry = $1 AND ov.sap_line_num = $2
            AND ov.masa_id != $3
-           AND m.estado != 'CANCELADA'`,
+           AND m.estado NOT IN ('CANCELADA', 'SUBDIVIDIDA')`,
         [linea.sap_doc_entry, linea.sap_line_num, linea.masa_id]
       );
       const hayOtrasActivas = parseInt(otrasActivasResult.rows[0].unidades_otras) > 0;
