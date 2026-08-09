@@ -8,6 +8,7 @@ import { useVersionCheck } from '@/hooks/useVersionCheck';
 
 // Layouts
 import MainLayout from '@/components/layout/MainLayout';
+import ScrollToTop from '@/components/common/ScrollToTop';
 
 // Pages
 import Login from '@/pages/Login/Login';
@@ -44,6 +45,7 @@ function App() {
   const { hayNuevaVersion } = useVersionCheck();
   return (
     <BrowserRouter>
+      <ScrollToTop />
       {hayNuevaVersion && (
         <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-white text-center py-3 px-4 shadow-lg flex items-center justify-center gap-4">
           <span className="font-semibold text-sm">
