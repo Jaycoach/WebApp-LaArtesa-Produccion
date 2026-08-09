@@ -64,7 +64,6 @@ export const ModalCancelarMasa: React.FC<ModalCancelarMasaProps> = ({ masaId, is
       });
       setResultadoSap(respuesta.lineas_sap || []);
       setConfirmacionParcial(null);
-      onCancelada();
     } catch (error: any) {
       if (error?.status === 409 && error?.data?.requiere_confirmacion) {
         setConfirmacionParcial({
@@ -153,7 +152,7 @@ export const ModalCancelarMasa: React.FC<ModalCancelarMasaProps> = ({ masaId, is
 
         <div className="flex gap-3 mt-4">
           <button
-            onClick={onClose}
+            onClick={() => (resultadoSap ? onCancelada() : onClose())}
             className="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm font-medium"
           >
             {resultadoSap ? 'Cerrar' : 'Volver'}
