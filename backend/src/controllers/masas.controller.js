@@ -746,7 +746,7 @@ const cancelarMasa = async (req, res, next) => {
 
     const idsCancelables = new Set(cancelables.map(m => m.id));
     const todasLasLineas = info.lineas.filter(l => idsCancelables.has(l.masa_id));
-    const lineasACerrar = Array.isArray(lineas_seleccionadas) && lineas_seleccionadas.length > 0
+    const lineasACerrar = Array.isArray(lineas_seleccionadas)
       ? todasLasLineas.filter(l => lineas_seleccionadas.some(
           sel => sel.sap_doc_entry === l.sap_doc_entry && sel.sap_line_num === l.sap_line_num
         ))

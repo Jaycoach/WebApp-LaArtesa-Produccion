@@ -22,9 +22,9 @@ export const ModalCancelarMasa: React.FC<ModalCancelarMasaProps> = ({ masaId, is
   const [resultadoSap, setResultadoSap] = useState<any[] | null>(null);
 
   useEffect(() => {
-    if (info?.data?.lineas) {
+    if (info?.lineas) {
       const iniciales: Record<string, boolean> = {};
-      for (const l of info.data.lineas) {
+      for (const l of info.lineas) {
         iniciales[`${l.sap_doc_entry}-${l.sap_line_num}`] = true;
       }
       setLineasSeleccionadas(iniciales);
@@ -41,8 +41,8 @@ export const ModalCancelarMasa: React.FC<ModalCancelarMasaProps> = ({ masaId, is
 
   if (!isOpen) return null;
 
-  const lineas = info?.data?.lineas || [];
-  const masas = info?.data?.masas || [];
+  const lineas = info?.lineas || [];
+  const masas = info?.masas || [];
 
   const toggleLinea = (key: string) => {
     setLineasSeleccionadas(prev => ({ ...prev, [key]: !prev[key] }));
