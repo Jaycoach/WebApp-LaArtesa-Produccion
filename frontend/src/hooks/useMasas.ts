@@ -255,7 +255,17 @@ export const useCancelarMasa = () => {
     }) =>
       masasService.cancelarMasa(masaId, motivo, confirmarParcial, lineasSeleccionadas),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: MASAS_QUERY_KEYS.all });
+      // Invalida todo lo que empiece con 'masas' EXCEPTO 'cancelacion-info':
+      // esa query queda cacheada por cada masa que se abrió en el modal durante
+      // la sesión, y si se incluye en el invalidate masivo, vuelve a pedirse
+      // para masas ya CANCELADAS de pruebas anteriores, generando 404 en consola
+      // sin ningún propósito (una masa cancelada no necesita info de cancelación).
+      queryClient.invalidateQueries({
+        predicate: (query) => {
+          const key = query.queryKey as unknown[];
+          return key[0] === 'masas' && key[1] !== 'cancelacion-info';
+        },
+      });
     },
   });
 };
