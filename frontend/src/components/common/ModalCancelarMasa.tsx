@@ -149,7 +149,9 @@ export const ModalCancelarMasa: React.FC<ModalCancelarMasaProps> = ({ masaId, is
                   {resultadoSap.map((r: any, i: number) => (
                     <li key={i} className={r.exitosa ? 'text-green-700' : 'text-red-700'}>
                       {r.exitosa
-                        ? <>✓ OV <strong>{r.doc_num}</strong> línea {r.line_num} ({r.item_code}) — <strong className="uppercase">Cancelada</strong></>
+                        ? (r.tipo_accion === 'REDUCCION'
+                            ? <>✓ OV <strong>{r.doc_num}</strong> línea {r.line_num} ({r.item_code}) — <strong>Reducida</strong> (quedan {r.cantidad_restante_sap} und. abiertas para otras tandas)</>
+                            : <>✓ OV <strong>{r.doc_num}</strong> línea {r.line_num} ({r.item_code}) — <strong className="uppercase">Cancelada</strong></>)
                         : <>✗ OV <strong>{r.doc_num}</strong> — línea {r.line_num} ({r.item_code}) <strong>no se pudo cancelar</strong> en SAP{r.mensaje ? `: ${r.mensaje}` : '.'}</>}
                     </li>
                   ))}

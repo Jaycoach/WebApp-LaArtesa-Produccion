@@ -992,11 +992,11 @@ const sincronizarDesdeOV = async (req, res, next) => {
           // Registrar OV en productos_por_masa_ov — ON CONFLICT DO NOTHING garantiza idempotencia
           const ovInsert = await client.query(
             `INSERT INTO productos_por_masa_ov
-               (producto_masa_id, masa_id, sap_doc_entry, sap_doc_num, sap_line_num, sap_item_code, unidades_pedidas)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
+               (producto_masa_id, masa_id, sap_doc_entry, sap_doc_num, sap_line_num, sap_item_code, unidades_pedidas, cantidad_abierta_sap)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              ON CONFLICT (masa_id, sap_doc_entry, sap_line_num) DO NOTHING`,
             [productoMasaId, masaIdExistente, prod.docEntry, String(prod.docNum),
-             prod.lineNum ?? 0, prod.itemCode, prod.unidadesPedidas]
+             prod.lineNum ?? 0, prod.itemCode, prod.unidadesPedidas, prod.cantidadAbierta ?? prod.unidadesPedidas]
           );
           if (ovInsert.rowCount > 0) ovsNuevas++;
         }
@@ -1225,11 +1225,11 @@ const sincronizarDesdeOV = async (req, res, next) => {
         if (ppmRow.rows.length > 0) {
           await client.query(
             `INSERT INTO productos_por_masa_ov
-               (producto_masa_id, masa_id, sap_doc_entry, sap_doc_num, sap_line_num, sap_item_code, unidades_pedidas)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
+               (producto_masa_id, masa_id, sap_doc_entry, sap_doc_num, sap_line_num, sap_item_code, unidades_pedidas, cantidad_abierta_sap)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              ON CONFLICT (masa_id, sap_doc_entry, sap_line_num) DO NOTHING`,
             [ppmRow.rows[0].id, masaId, prod.docEntry, String(prod.docNum),
-             prod.lineNum ?? 0, prod.itemCode, prod.unidadesPedidas]
+             prod.lineNum ?? 0, prod.itemCode, prod.unidadesPedidas, prod.cantidadAbierta ?? prod.unidadesPedidas]
           );
         }
       }

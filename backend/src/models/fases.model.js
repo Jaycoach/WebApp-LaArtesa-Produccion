@@ -194,7 +194,7 @@ const getInfoCancelacion = async (masaId) => {
   if (idsRelacionados.length > 0) {
     const lineasResult = await db.query(
       `SELECT ov.masa_id, ov.sap_doc_entry, ov.sap_doc_num, ov.sap_line_num,
-              ov.sap_item_code, ov.unidades_pedidas
+              ov.sap_item_code, ov.unidades_pedidas, ov.cantidad_abierta_sap
        FROM productos_por_masa_ov ov
        WHERE ov.masa_id = ANY($1::int[])
        ORDER BY ov.sap_doc_num, ov.sap_line_num`,

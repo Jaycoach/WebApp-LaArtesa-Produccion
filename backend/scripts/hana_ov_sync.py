@@ -43,7 +43,7 @@ def main():
         # 1. Líneas de OV abiertas para la fecha (cabecera y línea ambas abiertas)
         cursor.execute(f'''
             SELECT R."DocEntry", O."DocNum", O."Series", R."LineNum",
-                   R."ItemCode", R."Dscription", R."Quantity"
+                   R."ItemCode", R."Dscription", R."Quantity", R."OpenQty"
             FROM "{schema}"."RDR1" R
             INNER JOIN "{schema}"."ORDR" O ON O."DocEntry" = R."DocEntry"
             WHERE O."DocDate" = ? AND O."DocStatus" = 'O' AND R."LineStatus" = 'O'
@@ -51,7 +51,7 @@ def main():
         filas = cursor.fetchall()
 
         lineas = []
-        for doc_entry, doc_num, series, line_num, item_code, dscription, quantity in filas:
+        for doc_entry, doc_num, series, line_num, item_code, dscription, quantity, open_qty in filas:
             desc_up = (dscription or '').upper()
             if 'COSTO DE ENVIO' in desc_up:
                 continue
@@ -67,6 +67,7 @@ def main():
                 'itemCode': item_code,
                 'itemDescription': dscription,
                 'quantity': float(quantity),
+                'openQty': float(open_qty) if open_qty is not None else float(quantity),
             })
 
         if not lineas:
@@ -131,6 +132,7 @@ def main():
                 'descripcion': art['itemName'] or linea['itemDescription'],
                 'tipoMasa': art['tipoMasa'],
                 'unidadesPedidas': unidades_pedidas,
+                'cantidadAbierta': linea['openQty'],
                 'unidadesPorPaquete': unidades_por_paquete,
                 'cantidadPaquetes': unidades_pedidas,
                 'gramaje': gramaje,

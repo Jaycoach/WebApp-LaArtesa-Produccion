@@ -754,14 +754,56 @@ const cancelarMasa = async (req, res, next) => {
 
     const resultadosSap = [];
     for (const linea of lineasACerrar) {
-      const resultado = await sapService.cerrarLineaOV(linea.sap_doc_entry, linea.sap_line_num);
-      resultadosSap.push({ ...linea, ...resultado });
+      // ¿Otras masas ACTIVAS (no canceladas, distintas a las que se cancelan
+      // ahora) siguen referenciando esta misma línea de OV? — típico de una
+      // masa subdividida donde solo se cancela una tanda y las hermanas
+      // siguen produciendo con la misma OV.
+      const otrasActivasResult = await db.query(
+        `SELECT COALESCE(SUM(ov.unidades_pedidas), 0) AS unidades_otras
+         FROM productos_por_masa_ov ov
+         JOIN masas_produccion m ON m.id = ov.masa_id
+         WHERE ov.sap_doc_entry = $1 AND ov.sap_line_num = $2
+           AND ov.masa_id != $3
+           AND m.estado != 'CANCELADA'`,
+        [linea.sap_doc_entry, linea.sap_line_num, linea.masa_id]
+      );
+      const hayOtrasActivas = parseInt(otrasActivasResult.rows[0].unidades_otras) > 0;
+      const cantidadActual = linea.cantidad_abierta_sap ?? linea.unidades_pedidas;
+      const nuevaCantidad = cantidadActual - linea.unidades_pedidas;
+
+      let resultado, tipoAccion, cantidadRestante;
+      if (hayOtrasActivas && nuevaCantidad > 0) {
+        // Quedan tandas hermanas activas usando la línea: solo reducir.
+        resultado = await sapService.reducirCantidadLineaOV(linea.sap_doc_entry, linea.sap_line_num, nuevaCantidad);
+        tipoAccion = 'REDUCCION';
+        cantidadRestante = nuevaCantidad;
+      } else {
+        // Nadie más la usa, o la resta da 0/negativo: cerrar completa.
+        resultado = await sapService.cerrarLineaOV(linea.sap_doc_entry, linea.sap_line_num);
+        tipoAccion = 'CIERRE';
+        cantidadRestante = 0;
+      }
+
+      if (resultado.exitosa) {
+        // Sincronizar cantidad_abierta_sap local en TODAS las filas que
+        // referencian esta línea (puede haber una fila por cada masa/tanda
+        // que la usa), para que el próximo cálculo parta del valor correcto.
+        await db.query(
+          `UPDATE productos_por_masa_ov
+           SET cantidad_abierta_sap = $1
+           WHERE sap_doc_entry = $2 AND sap_line_num = $3`,
+          [cantidadRestante, linea.sap_doc_entry, linea.sap_line_num]
+        );
+      }
+
+      resultadosSap.push({ ...linea, ...resultado, tipo_accion: tipoAccion, cantidad_restante_sap: cantidadRestante });
       await db.query(
         `INSERT INTO cancelaciones_ov_sap
-           (masa_id, sap_doc_entry, sap_doc_num, sap_line_num, sap_item_code, exitosa, mensaje_error, cancelado_por)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+           (masa_id, sap_doc_entry, sap_doc_num, sap_line_num, sap_item_code, exitosa, mensaje_error, cancelado_por, tipo_accion, cantidad_reducida, cantidad_restante_sap)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
         [linea.masa_id, linea.sap_doc_entry, linea.sap_doc_num, linea.sap_line_num,
-         linea.sap_item_code, resultado.exitosa, resultado.mensaje || null, req.user.id]
+         linea.sap_item_code, resultado.exitosa, resultado.mensaje || null, req.user.id,
+         tipoAccion, tipoAccion === 'REDUCCION' ? linea.unidades_pedidas : null, cantidadRestante]
       );
     }
     const fallidas = resultadosSap.filter(r => !r.exitosa);
@@ -801,6 +843,7 @@ const cancelarMasa = async (req, res, next) => {
         lineas_sap: resultadosSap.map(r => ({
           doc_num: r.sap_doc_num, line_num: r.sap_line_num, item_code: r.sap_item_code,
           exitosa: r.exitosa, mensaje: r.mensaje || null,
+          tipo_accion: r.tipo_accion, cantidad_restante_sap: r.cantidad_restante_sap,
         })),
       },
     });

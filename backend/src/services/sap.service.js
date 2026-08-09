@@ -366,6 +366,7 @@ class SAPService {
           itemCode: linea.ItemCode,
           itemDescription: linea.ItemDescription,
           quantity: linea.Quantity,
+          remainingOpenQuantity: linea.RemainingOpenQuantity ?? linea.Quantity,
         });
       }
     }
@@ -390,6 +391,28 @@ class SAPService {
     } catch (error) {
       const mensaje = error.response?.data?.error?.message?.value || error.message;
       logger.error(`SAP: error cerrando línea ${lineNum} de OV DocEntry ${docEntry}: ${mensaje}`);
+      return { exitosa: false, mensaje };
+    }
+  }
+
+  /**
+   * Reduce la cantidad (Quantity) de una línea de OV, SIN cerrarla — para
+   * cancelaciones parciales cuando otras tandas de una masa subdividida
+   * todavía usan la misma línea. SAP recalcula RemainingOpenQuantity solo,
+   * y auto-cierra la línea si la nueva cantidad llega a 0 (comportamiento
+   * nativo de SAP, no hace falta forzarlo).
+   */
+  async reducirCantidadLineaOV(docEntry, lineNum, nuevaCantidad) {
+    try {
+      await this.ensureSession();
+      await this.client.patch(`/Orders(${docEntry})`, {
+        DocumentLines: [{ LineNum: lineNum, Quantity: nuevaCantidad }],
+      });
+      logger.info(`SAP: línea ${lineNum} de OV DocEntry ${docEntry} reducida a ${nuevaCantidad} unidades`);
+      return { exitosa: true };
+    } catch (error) {
+      const mensaje = error.response?.data?.error?.message?.value || error.message;
+      logger.error(`SAP: error reduciendo línea ${lineNum} de OV DocEntry ${docEntry}: ${mensaje}`);
       return { exitosa: false, mensaje };
     }
   }
@@ -496,6 +519,7 @@ class SAPService {
         descripcion: art.itemName || linea.itemDescription,
         tipoMasa: art.tipoMasa,
         unidadesPedidas,
+        cantidadAbierta: linea.remainingOpenQuantity,
         unidadesPorPaquete,
         cantidadPaquetes,
         gramaje,
