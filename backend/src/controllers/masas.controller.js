@@ -149,8 +149,13 @@ const getComposicionByMasa = async (req, res, next) => {
     }
 
     // 2. Fallback: construir composición desde BOM SAP (masa en PLANIFICACION)
+    // FIX 2026-08-10: usar unidades_ajustadas (cantidad real que se va a pesar,
+    // ya redondeada al multiplo del divisor) en vez de unidades_programadas —
+    // este preview tiene que coincidir exactamente con lo que completarFase()
+    // va a guardar en ingredientes_masa al iniciar pesaje.
     const productosResult = await db.query(
-      `SELECT sap_item_code, producto_nombre, unidades_programadas
+      `SELECT sap_item_code, producto_nombre,
+              COALESCE(unidades_ajustadas, unidades_programadas) AS unidades_programadas
        FROM productos_por_masa
        WHERE masa_id = $1 AND sap_item_code IS NOT NULL AND sap_item_code <> ''`,
       [id]
@@ -409,7 +414,7 @@ const aprobarMasaCore = async (id, userId, opts = {}) => {
         const empaqueConNombre = await clienteEmail.query(
           `SELECT bc.item_code_comp AS item_code,
                   bc.item_name_comp AS item_name,
-                  SUM(bc.cantidad * pm.unidades_programadas) AS cantidad_total,
+                  SUM(bc.cantidad * COALESCE(pm.unidades_ajustadas, pm.unidades_programadas)) AS cantidad_total,
                   bc.uom
            FROM sap_bom_componentes bc
            JOIN productos_por_masa pm ON pm.sap_item_code = bc.item_code_padre

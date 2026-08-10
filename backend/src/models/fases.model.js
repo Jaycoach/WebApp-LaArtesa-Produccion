@@ -74,8 +74,11 @@ const getMasasByFecha = async (fecha, fase = null) => {
       (SELECT array_agg(ov.sap_doc_num::text ORDER BY ov.sap_doc_num) FROM (SELECT DISTINCT sap_doc_num FROM productos_por_masa_ov WHERE masa_id = m.id) ov) as numeros_ov,
       COUNT(pm.id) as total_productos,
       SUM(pm.unidades_pedidas) as total_unidades_pedidas,
-      SUM(pm.unidades_programadas) as total_unidades_programadas,
-      SUM(pm.cantidad_paquetes) as total_panes,
+      SUM(COALESCE(pm.unidades_ajustadas, pm.unidades_programadas)) as total_unidades_programadas,
+      -- FIX 2026-08-10: pese al nombre, esto sumaba cantidad_paquetes (no panes
+      -- reales) sobre la base sin ajustar. Se deja el mismo criterio de paquetes
+      -- pero ahora contra unidades_ajustadas, coherente con el resto del fix.
+      SUM(COALESCE(pm.unidades_ajustadas, pm.cantidad_paquetes)) as total_panes,
       BOOL_AND(COALESCE(pm.division_completada, false)) as division_completada_total,
       SUM(CASE WHEN pm.division_completada THEN pm.unidades_producidas ELSE NULL END) as total_panes_cortados,
       json_agg(

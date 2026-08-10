@@ -1094,7 +1094,7 @@ exports.getResumenVariedad = async (req, res) => {
          ppm.gramaje_unitario,
          ppm.unidades_por_paquete,
          ppm.unidades_pan_por_paquete,
-         SUM(ppm.unidades_programadas)  AS total_unidades,
+         SUM(COALESCE(ppm.unidades_ajustadas, ppm.unidades_programadas))  AS total_unidades,
          SUM(ppm.cantidad_paquetes)     AS total_paquetes,
          COUNT(DISTINCT mp.id)          AS cant_masas,
          STRING_AGG(DISTINCT mp.tipo_masa, ', ' ORDER BY mp.tipo_masa) AS tipos_masa,
@@ -1105,7 +1105,7 @@ exports.getResumenVariedad = async (req, res) => {
        WHERE mp.fecha_produccion = $1
          AND pf.estado IN ('PENDIENTE', 'EN_PROGRESO')
          AND mp.estado != 'CANCELADA'
-         AND ppm.unidades_programadas > 0
+         AND COALESCE(ppm.unidades_ajustadas, ppm.unidades_programadas) > 0
        GROUP BY
          ppm.sap_item_code,
          ppm.producto_nombre,
