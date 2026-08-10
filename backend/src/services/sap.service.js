@@ -437,7 +437,7 @@ class SAPService {
       const response = await this.client.get('/Items', {
         params: {
           $filter: filterParts,
-          $select: 'ItemCode,ItemName,SalesQtyPerPackUnit,U_JZ_Tipos_Masa,SalesUnitWeight1,U_JZ_MultiploDivisor,U_JZ_Tamanio,U_JZ_Forma,U_JZ_PesMasDiv,U_JZ_DiasExp,Valid,Frozen',
+          $select: 'ItemCode,ItemName,U_JZ_PanesPorBolsa,U_JZ_Tipos_Masa,SalesUnitWeight1,U_JZ_MultiploDivisor,U_JZ_Tamanio,U_JZ_Forma,U_JZ_PesMasDiv,U_JZ_DiasExp,Valid,Frozen',
           $top: BATCH,
         },
       });
@@ -450,7 +450,7 @@ class SAPService {
         const fallbackAtributos = inferirTamanioForma(item.ItemName);
         resultado[item.ItemCode] = {
           itemName:            item.ItemName,
-          salesQtyPerPackUnit: item.SalesQtyPerPackUnit || 1,
+          salesQtyPerPackUnit: item.U_JZ_PanesPorBolsa || 1,
           tipoMasa:            item.U_JZ_Tipos_Masa || 'SIN_CLASIFICAR',
           gramaje:             item.SalesUnitWeight1 || 0,
           multiploDivisor:     item.U_JZ_MultiploDivisor != null ? Math.round(item.U_JZ_MultiploDivisor) : 0,
@@ -595,7 +595,7 @@ class SAPService {
       const response = await this.client.get('/Items', {
         params: {
           $filter: "U_JZ_Tipos_Masa ne null and U_JZ_Tipos_Masa ne '' and Valid eq 'tYES' and Frozen eq 'tNO'",
-          $select: 'ItemCode,ItemName,U_JZ_Tipos_Masa,SalesQtyPerPackUnit,SalesUnitWeight1,U_JZ_MultiploDivisor,U_JZ_Tamanio,U_JZ_Forma,U_JZ_PesMasDiv,U_JZ_DiasExp,Valid,Frozen',
+          $select: 'ItemCode,ItemName,U_JZ_Tipos_Masa,U_JZ_PanesPorBolsa,SalesUnitWeight1,U_JZ_MultiploDivisor,U_JZ_Tamanio,U_JZ_Forma,U_JZ_PesMasDiv,U_JZ_DiasExp,Valid,Frozen',
           $top: top,
           $skip: skip,
         },
@@ -615,7 +615,7 @@ class SAPService {
         itemCode:        item.ItemCode,
         itemName:        item.ItemName,
         tipoMasa:        item.U_JZ_Tipos_Masa,
-        salesQtyPerPack: item.SalesQtyPerPackUnit || 1,
+        salesQtyPerPack: item.U_JZ_PanesPorBolsa || 1,
         gramaje:         item.SalesUnitWeight1 || 0,
         multiploDivisor: item.U_JZ_MultiploDivisor != null ? Math.round(item.U_JZ_MultiploDivisor) : 0,
         tamanio:         item.U_JZ_Tamanio || fallbackAtributos.tamanio,

@@ -78,7 +78,7 @@ def main():
         item_codes = list({l['itemCode'] for l in lineas})
         placeholders = ','.join(['?'] * len(item_codes))
         cursor.execute(f'''
-            SELECT "ItemCode", "ItemName", "U_JZ_Tipos_Masa", "SalPackUn",
+            SELECT "ItemCode", "ItemName", "U_JZ_Tipos_Masa", "U_JZ_PanesPorBolsa",
                    "SWeight1", "U_JZ_MultiploDivisor", "validFor", "frozenFor",
                    "U_JZ_Tamanio", "U_JZ_Forma", "U_JZ_PesMasDiv", "U_JZ_DiasExp"
             FROM "{schema}"."OITM"
@@ -86,7 +86,7 @@ def main():
         ''', item_codes)
 
         articulos = {}
-        for item_code, item_name, tipo_masa, sal_pack_un, sweight1, multiplo, valid_for, frozen_for, tamanio, forma, peso_masa_dividida, dias_vencimiento in cursor.fetchall():
+        for item_code, item_name, tipo_masa, panes_por_bolsa, sweight1, multiplo, valid_for, frozen_for, tamanio, forma, peso_masa_dividida, dias_vencimiento in cursor.fetchall():
             if valid_for == 'N' or frozen_for == 'Y':
                 continue
             if not tipo_masa:
@@ -94,7 +94,7 @@ def main():
             articulos[item_code] = {
                 'itemName': item_name,
                 'tipoMasa': tipo_masa,
-                'salPackUn': float(sal_pack_un) if sal_pack_un is not None else 1,
+                'salPackUn': float(panes_por_bolsa) if panes_por_bolsa is not None else 1,
                 'gramaje': float(sweight1) if sweight1 is not None else 0,
                 'multiploDivisor': round(float(multiplo)) if multiplo is not None else 0,
                 'tamanio': tamanio or None,

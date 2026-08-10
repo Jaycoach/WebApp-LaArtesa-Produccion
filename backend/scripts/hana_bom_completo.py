@@ -51,7 +51,7 @@ def main():
         cursor.execute(f'''
             SELECT
               P."ItemCode", P."ItemName", P."U_JZ_Tipos_Masa",
-              P."SalPackUn", P."SWeight1", P."U_JZ_MultiploDivisor",
+              P."U_JZ_PanesPorBolsa", P."SWeight1", P."U_JZ_MultiploDivisor",
               P."U_JZ_Tamanio", P."U_JZ_Forma", P."U_JZ_PesMasDiv", P."U_JZ_DiasExp",
               L."Code", L."ItemName", L."Quantity", L."Warehouse",
               L."IssueMthd", L."VisOrder",
