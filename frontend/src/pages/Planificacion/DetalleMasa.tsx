@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card } from '@/components/common';
-import { useMasaDetail, useProductos, useComposicion } from '../../hooks/useMasas';
+import { useMasaDetail, useProductos, useComposicion, MASAS_QUERY_KEYS } from '../../hooks/useMasas';
 import { useFases } from '../../hooks/useFases';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { fasesService } from '../../services/fasesService';
@@ -110,7 +110,7 @@ export const DetalleMasa: React.FC = () => {
     try {
       await masasService.updateUnidadesProgramadas(masaId, productoId, delta, ajuste.motivo || undefined);
       setAjustes(prev => ({ ...prev, [productoId]: { ...prev[productoId], guardando: false, error: null } }));
-      queryClient.invalidateQueries({ queryKey: ['productos', masaId] });
+      queryClient.invalidateQueries({ queryKey: MASAS_QUERY_KEYS.productos(masaId) });
     } catch (e: any) {
       setAjustes(prev => ({ ...prev, [productoId]: { ...getAjuste(productoId), guardando: false, error: e?.message || 'Error al guardar' } }));
     }
@@ -120,7 +120,7 @@ export const DetalleMasa: React.FC = () => {
   const iniciarPesajeMutation = useMutation({
     mutationFn: () => fasesService.completarFase(id!, 'planificacion'),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['masa', masaId] });
+      queryClient.invalidateQueries({ queryKey: MASAS_QUERY_KEYS.detail(masaId) });
       queryClient.invalidateQueries({ queryKey: ['fases', id] });
       navigate(`/pesaje/${masaId}`);
     },
