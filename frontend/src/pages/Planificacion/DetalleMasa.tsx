@@ -111,6 +111,10 @@ export const DetalleMasa: React.FC = () => {
       await masasService.updateUnidadesProgramadas(masaId, productoId, delta, ajuste.motivo || undefined);
       setAjustes(prev => ({ ...prev, [productoId]: { ...prev[productoId], guardando: false, error: null } }));
       queryClient.invalidateQueries({ queryKey: MASAS_QUERY_KEYS.productos(masaId) });
+      // FIX 2026-08-10: la Composicion de Ingredientes (preview del BOM en
+      // Planificacion) tiene su propia queryKey y nunca se invalidaba al
+      // guardar el delta -- seguia mostrando la cantidad base sin ajustar.
+      queryClient.invalidateQueries({ queryKey: MASAS_QUERY_KEYS.composicion(masaId) });
     } catch (e: any) {
       setAjustes(prev => ({ ...prev, [productoId]: { ...getAjuste(productoId), guardando: false, error: e?.message || 'Error al guardar' } }));
     }
