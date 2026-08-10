@@ -117,9 +117,21 @@ const getComposicionByMasa = async (req, res, next) => {
   try {
     const { id } = req.params;
     const db = require('../database/connection');
+    // FIX 2026-08-10: la condicion "fases posteriores a PLANIFICACION" del
+    // comentario original nunca se implemento -- solo se verificaba si
+    // ingredientes_masa tenia filas, sin mirar fase_actual. Como
+    // sincronizarDesdeOV ya puebla ingredientes_masa al crear la masa (con
+    // unidades_pedidas, sin multiplo_divisor), esta rama devolvia siempre
+    // ese snapshot viejo, incluso en PLANIFICACION con delta ya editado.
+    const masaFaseResult = await db.query(
+      `SELECT fase_actual FROM masas_produccion WHERE id = $1`,
+      [id]
+    );
+    const faseActualMasa = masaFaseResult.rows[0]?.fase_actual;
 
     // 1. Buscar ingredientes ya generados (fases posteriores a PLANIFICACION)
-    const ingredientesResult = await db.query(
+    const ingredientesResult = faseActualMasa && faseActualMasa !== 'PLANIFICACION'
+      ? await db.query(
       `SELECT
          im.id,
          im.ingrediente_sap_code,
@@ -142,7 +154,8 @@ const getComposicionByMasa = async (req, res, next) => {
        WHERE im.masa_id = $1
        ORDER BY im.orden_visualizacion`,
       [id]
-    );
+    )
+      : { rows: [] };
 
     if (ingredientesResult.rows.length > 0) {
       return res.json({ success: true, data: ingredientesResult.rows });
