@@ -199,7 +199,10 @@ const getComposicionByMasa = async (req, res, next) => {
             id: comp.item_code_comp,
             ingrediente_sap_code: comp.item_code_comp,
             ingrediente_nombre: comp.item_name_comp,
-            orden_visualizacion: comp.visual_order || 99,
+            // FIX 2026-08-10: comp.visual_order || 99 mandaba al final cualquier
+            // ingrediente con visual_order=0 (ej. HARINA NATURAL), porque 0 es
+            // falsy en JS. ?? solo cae al default si es null/undefined, no si es 0.
+            orden_visualizacion: comp.visual_order ?? 99,
             es_harina: nombreLower.includes('harina'),
             es_agua: nombreLower.includes('agua'),
             es_prefermento: comp.warehouse === 'PRODPROC',
