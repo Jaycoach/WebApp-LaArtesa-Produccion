@@ -1024,8 +1024,14 @@ const sincronizarDesdeOV = async (req, res, next) => {
             return m ? parseInt(m[1]) : 1;
           })();
           const cantidadPaquetes = unidadesPorPaquete > 0 ? totalUnidades / unidadesPorPaquete : totalUnidades;
-          const unidadesAjustadas = (multiploDivisor > 0 && totalUnidades % multiploDivisor !== 0)
-            ? (Math.floor(totalUnidades / multiploDivisor) + 1) * multiploDivisor
+          // FIX 2026-08-10: mismo criterio que en la creación de masa — el divisor
+          // es de panes, no de paquetes.
+          const panesTotal = totalUnidades * unidadesPorPaquete;
+          const panesAjustados = (multiploDivisor > 0 && panesTotal % multiploDivisor !== 0)
+            ? (Math.floor(panesTotal / multiploDivisor) + 1) * multiploDivisor
+            : panesTotal;
+          const unidadesAjustadas = multiploDivisor > 0
+            ? Math.round(panesAjustados / unidadesPorPaquete)
             : totalUnidades;
           const unidadesExcedente = unidadesAjustadas - totalUnidades;
 
@@ -1145,14 +1151,22 @@ const sincronizarDesdeOV = async (req, res, next) => {
       for (const prod of grupo.productos) {
         const unidadesPedidas = prod.unidadesPedidas || prod.cantidadPaquetes || 0;
         const multiploDivisor = prod.multiploDivisor || 0;
-
-        // Calcular múltiplo superior: si pedidas no es múltiplo exacto del divisor,
-        // redondear hacia arriba al siguiente múltiplo.
-        // Ej: pedidas=5, divisor=10 → ajustadas=10, excedente=5
-        // Ej: pedidas=20, divisor=20 → ajustadas=20, excedente=0
-        // Ej: pedidas=7, divisor=5  → ajustadas=10, excedente=3
-        const unidadesAjustadas = (multiploDivisor > 0 && unidadesPedidas % multiploDivisor !== 0)
-          ? (Math.floor(unidadesPedidas / multiploDivisor) + 1) * multiploDivisor
+        // FIX 2026-08-10: el multiplo_divisor es un divisor de PANES (piezas), no de
+        // paquetes. Hay que llevar paquetes -> panes, redondear panes al multiplo,
+        // y volver a paquetes. Validado contra 55 combinaciones reales: divisor
+        // siempre es multiplo exacto de unidadesPorPaquete, asi que el resultado
+        // siempre es un entero.
+        const unidadesPorPaqueteCalc = (() => {
+          if (prod.unidadesPorPaquete && prod.unidadesPorPaquete > 1) return prod.unidadesPorPaquete;
+          const m = prod.descripcion?.match(/ X ?(\d+)/i);
+          return m ? parseInt(m[1]) : 1;
+        })();
+        const panesPedidos = unidadesPedidas * unidadesPorPaqueteCalc;
+        const panesAjustados = (multiploDivisor > 0 && panesPedidos % multiploDivisor !== 0)
+          ? (Math.floor(panesPedidos / multiploDivisor) + 1) * multiploDivisor
+          : panesPedidos;
+        const unidadesAjustadas = multiploDivisor > 0
+          ? Math.round(panesAjustados / unidadesPorPaqueteCalc)
           : unidadesPedidas;
         const unidadesExcedente = unidadesAjustadas - unidadesPedidas;
 
@@ -1177,15 +1191,27 @@ const sincronizarDesdeOV = async (req, res, next) => {
              kilos_programados    = productos_por_masa.kilos_programados    + EXCLUDED.kilos_programados,
              multiplo_divisor     = EXCLUDED.multiplo_divisor,
              unidades_ajustadas   = CASE
-               WHEN EXCLUDED.multiplo_divisor > 0 AND
-                    (productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas) % EXCLUDED.multiplo_divisor != 0
-               THEN (FLOOR((productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas)::float / EXCLUDED.multiplo_divisor) + 1) * EXCLUDED.multiplo_divisor
+               WHEN EXCLUDED.multiplo_divisor > 0 AND EXCLUDED.unidades_por_paquete > 0 THEN
+                 ROUND(
+                   (
+                     CEIL(
+                       ((productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas) * EXCLUDED.unidades_por_paquete)
+                       / EXCLUDED.multiplo_divisor::numeric
+                     ) * EXCLUDED.multiplo_divisor
+                   ) / EXCLUDED.unidades_por_paquete
+                 )
                ELSE (productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas)
              END,
              unidades_excedente   = CASE
-               WHEN EXCLUDED.multiplo_divisor > 0 AND
-                    (productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas) % EXCLUDED.multiplo_divisor != 0
-               THEN ((FLOOR((productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas)::float / EXCLUDED.multiplo_divisor) + 1) * EXCLUDED.multiplo_divisor) - (productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas)
+               WHEN EXCLUDED.multiplo_divisor > 0 AND EXCLUDED.unidades_por_paquete > 0 THEN
+                 ROUND(
+                   (
+                     CEIL(
+                       ((productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas) * EXCLUDED.unidades_por_paquete)
+                       / EXCLUDED.multiplo_divisor::numeric
+                     ) * EXCLUDED.multiplo_divisor
+                   ) / EXCLUDED.unidades_por_paquete
+                 ) - (productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas)
                ELSE 0
              END`,
           [

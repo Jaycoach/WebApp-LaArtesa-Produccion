@@ -711,9 +711,12 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false)
      ORDER BY orden_visualizacion`,
     [masaId]
   );
-  // Usar unidades_pedidas como base BOM (el BOM SAP se calculó sobre pedidos, no sobre programados)
+  // FIX 2026-08-10: usar unidades_ajustadas como base — es la misma base que ahora
+  // usa completarFase() para calcular emp.cantidad_kilos (punto 6 de este mismo
+  // fix), asi que hay que usar la misma aqui para que las proporciones cuadren.
+  // Fallback a unidades_programadas para masas historicas con el campo en NULL.
   const prodMadreResult = await client.query(
-    `SELECT COALESCE(SUM(unidades_pedidas), 0) AS total_paq FROM productos_por_masa WHERE masa_id = $1`,
+    `SELECT COALESCE(SUM(COALESCE(unidades_ajustadas, unidades_programadas)), 0) AS total_paq FROM productos_por_masa WHERE masa_id = $1`,
     [masaId]
   );
   const totalPaqMadre = parseFloat(prodMadreResult.rows[0].total_paq) || 1;
@@ -721,7 +724,7 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false)
   // Esto nos da la cantidad de cada material de empaque por paquete producido
   for (const subMasaId of subMasaIds) {
     const prodSubResult = await client.query(
-      `SELECT COALESCE(SUM(unidades_programadas), 0) AS paq FROM productos_por_masa WHERE masa_id = $1`,
+      `SELECT COALESCE(SUM(COALESCE(unidades_ajustadas, unidades_programadas)), 0) AS paq FROM productos_por_masa WHERE masa_id = $1`,
       [subMasaId]
     );
     const paqSubMasa = parseFloat(prodSubResult.rows[0].paq) || 0;
@@ -918,8 +921,11 @@ const completarFase = async (req, res, next) => {
       }
 
       // Obtener productos con sap_item_code
+      // FIX 2026-08-10: se agrega unidades_ajustadas — es la cantidad REAL de
+      // paquetes que va a salir de Division (redondeada al multiplo_divisor de
+      // panes), la receta tiene que alcanzar para eso, no para unidades_programadas.
       const productosResult = await db.query(
-        `SELECT sap_item_code, producto_nombre, unidades_programadas,
+        `SELECT sap_item_code, producto_nombre, unidades_programadas, unidades_ajustadas,
                 producto_codigo, presentacion, gramaje_unitario,
                 unidades_pedidas, kilos_pedidos, kilos_programados
          FROM productos_por_masa
@@ -952,7 +958,10 @@ const completarFase = async (req, res, next) => {
         }
 
         for (const comp of bomResult.rows) {
-          const cantTotal = parseFloat(comp.cantidad) * parseFloat(prod.unidades_programadas);
+          // FIX 2026-08-10: usar unidades_ajustadas (con fallback si viniera NULL
+          // en datos historicos) en vez de unidades_programadas.
+          const paquetesReales = parseFloat(prod.unidades_ajustadas) || parseFloat(prod.unidades_programadas);
+          const cantTotal = parseFloat(comp.cantidad) * paquetesReales;
           const tipo      = clasificarComponente(comp.uom, comp.grupo_sap);
 
           if (tipo === 'empaque') {

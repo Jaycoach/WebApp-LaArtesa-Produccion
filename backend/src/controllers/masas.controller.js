@@ -361,10 +361,15 @@ const aprobarMasaCore = async (id, userId, opts = {}) => {
   const DELTA_DEFAULT_PAQ = 2;
   for (const prod of prodsSinAjuste.rows) {
     const divisor        = Math.max(0, Number(prod.multiplo_divisor) || 0);
+    const upq             = Math.max(1, Number(prod.unidades_por_paquete) || 1);
     const nuevasPaq      = Number(prod.unidades_programadas) + DELTA_DEFAULT_PAQ;
-    const nuevasAjustadas = (divisor > 0 && nuevasPaq % divisor !== 0)
-      ? (Math.floor(nuevasPaq / divisor) + 1) * divisor
-      : nuevasPaq;
+    // FIX 2026-08-10: el divisor es de panes, no de paquetes — llevar a panes,
+    // redondear, y volver a paquetes (validado: siempre da entero).
+    const panes           = nuevasPaq * upq;
+    const panesAjustados   = (divisor > 0 && panes % divisor !== 0)
+      ? (Math.floor(panes / divisor) + 1) * divisor
+      : panes;
+    const nuevasAjustadas = divisor > 0 ? Math.round(panesAjustados / upq) : nuevasPaq;
     const nuevasExcedente = nuevasAjustadas - nuevasPaq;
     await db.query(
       `UPDATE productos_por_masa

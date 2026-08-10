@@ -215,6 +215,10 @@ const updateUnidadesProgramadas = async (productoId, unidades, userId, motivo = 
   if (!anterior.rows[0]) return null;
 
   const deltaAjuste = Number(unidades) - Number(anterior.rows[0].unidades_pedidas);
+  // FIX 2026-08-10: recalcular unidades_ajustadas/unidades_excedente al guardar el
+  // delta manual — antes solo se recalculaban al aprobar (y solo para productos
+  // nunca tocados), dejando el ajuste manual con el multiplo_divisor congelado
+  // desde la sincronizacion de OV.
   const result = await db.query(`
     UPDATE productos_por_masa
     SET
@@ -222,6 +226,22 @@ const updateUnidadesProgramadas = async (productoId, unidades, userId, motivo = 
       kilos_programados = gramaje_unitario * ($1::integer * unidades_por_paquete) / 1000.0,
       cantidad_paquetes = $1::integer,
       delta_ajuste = $3::integer,
+      unidades_ajustadas = CASE
+        WHEN multiplo_divisor > 0 AND unidades_por_paquete > 0 THEN
+          ROUND(
+            (CEIL(($1::integer * unidades_por_paquete) / multiplo_divisor::numeric) * multiplo_divisor)
+            / unidades_por_paquete
+          )
+        ELSE $1::integer
+      END,
+      unidades_excedente = CASE
+        WHEN multiplo_divisor > 0 AND unidades_por_paquete > 0 THEN
+          ROUND(
+            (CEIL(($1::integer * unidades_por_paquete) / multiplo_divisor::numeric) * multiplo_divisor)
+            / unidades_por_paquete
+          ) - $1::integer
+        ELSE 0
+      END,
       updated_at = NOW()
     WHERE id = $2
     RETURNING *

@@ -212,7 +212,7 @@ export const DetalleMasa: React.FC = () => {
           masaId={masaId}
           codigoMasa={masa.codigo_masa}
           faseSiguiente={masa.fase_actual === 'PLANIFICACION' ? {
-            label: 'Pesaje',
+            label: 'Iniciar Pesaje',
             ruta: `/pesaje/${masaId}`,
             habilitada: masa.estado === 'APROBADA',
             loading: iniciandoPesaje,
@@ -430,7 +430,7 @@ export const DetalleMasa: React.FC = () => {
                     const deltaNum = parseInt(ajuste.delta, 10);
                     const usuarioCambio = ajustes[producto.id] !== undefined;
                     const panesPreview = usuarioCambio && !isNaN(deltaNum)
-                      ? (paqAProducir + deltaNum) * upq
+                      ? (paqPedidos + deltaNum) * upq
                       : null;
 
                     return (
