@@ -499,13 +499,12 @@ const aprobarMasaCore = async (id, userId, opts = {}) => {
      WHERE masa_id = $1 AND fase = 'PLANIFICACION'`, [id]
   );
   logger.info(`[APROBACION DEBUG] masa=${id} PLANIFICACION→COMPLETADA rows=${r1.rowCount}`);
-
-  const r2 = await db.query(
-    `UPDATE progreso_fases SET estado = 'EN_PROGRESO'
-     WHERE masa_id = $1 AND fase = 'PESAJE'`, [id]
-  );
-  logger.info(`[APROBACION DEBUG] masa=${id} PESAJE→EN_PROGRESO rows=${r2.rowCount}`);
-
+  // FIX 2026-08-10: NO forzar PESAJE a EN_PROGRESO aqui. Eso desincroniza
+  // progreso_fases contra masas_produccion.fase_actual (que sigue en
+  // PLANIFICACION hasta el clic explicito en "Iniciar Pesaje"). Quien debe
+  // marcar PESAJE como EN_PROGRESO es desbloquearSiguienteFase(), disparada
+  // por completarFase('planificacion') -- la misma funcion que tambien
+  // actualiza fase_actual, de forma atomica y consistente.
   const r3 = await db.query(
     `UPDATE progreso_fases SET estado = 'PENDIENTE', updated_at = NOW()
      WHERE masa_id = $1 AND fase = 'EMPAQUE'`, [id]

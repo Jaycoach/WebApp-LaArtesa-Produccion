@@ -468,8 +468,8 @@ export const DetalleMasa: React.FC = () => {
                               <span className="line-through text-gray-400 text-sm mr-1">
                                 {paqAProducir.toLocaleString('es-CO')}
                               </span>
-                              <span className={`text-sm font-bold ${(paqAProducir + deltaNum) >= paqPedidos ? 'text-indigo-700' : 'text-red-600'}`}>
-                                {(paqAProducir + deltaNum).toLocaleString('es-CO')}
+                              <span className={`text-sm font-bold ${(paqPedidos + deltaNum) >= paqPedidos ? 'text-indigo-700' : 'text-red-600'}`}>
+                                {(paqPedidos + deltaNum).toLocaleString('es-CO')}
                               </span>
                             </>
                           ) : (

@@ -427,7 +427,15 @@ export const ListaMasas: React.FC = () => {
               <div className="text-sm text-gray-400 px-1 mb-3">Sin resultados para "{busqueda}"</div>
             )}
           <div className="bg-white rounded-lg shadow-sm divide-y divide-gray-100 overflow-hidden">
-            {[...masasFiltradas].sort((a, b) => Number(b.es_repeticion) - Number(a.es_repeticion)).map((masa: MasaProduccionResumen) => {
+            {[...masasFiltradas].sort((a, b) => {
+              // Repeticion primero (tratamiento especial, siempre arriba),
+              // luego prioritaria, luego alfabetico por tipo_masa.
+              const repDiff = Number(b.es_repeticion) - Number(a.es_repeticion);
+              if (repDiff !== 0) return repDiff;
+              const prioDiff = Number(b.prioridad) - Number(a.prioridad);
+              if (prioDiff !== 0) return prioDiff;
+              return (a.tipo_masa || '').localeCompare(b.tipo_masa || '', 'es');
+            }).map((masa: MasaProduccionResumen) => {
               const expandida = expandidas.has(masa.id);
               const totalMostrado = masa.division_completada_total && Number(masa.total_panes_cortados) > 0
                 ? `${Number(masa.total_panes_cortados).toLocaleString('es-CO')} panes`
