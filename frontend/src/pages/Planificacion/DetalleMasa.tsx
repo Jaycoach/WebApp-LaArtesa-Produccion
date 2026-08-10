@@ -423,15 +423,29 @@ export const DetalleMasa: React.FC = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {(productos as any[]).map((producto: any) => {
                     const upq = Math.max(1, Number(producto.unidades_por_paquete) || 1);
+                    const divisor = Math.max(0, Number(producto.multiplo_divisor) || 0);
                     const paqPedidos = Number(producto.unidades_pedidas);
                     const paqAProducir = Number(producto.unidades_programadas);
-                    const panes = paqAProducir * upq;
+                    // FIX 2026-08-10: unidades_ajustadas es la cantidad REAL que se va a
+                    // cortar (ya redondeada al multiplo del divisor por el backend, en
+                    // panes -- no en paquetes). Es la fuente de verdad para "a producir"
+                    // y "panes", no unidades_programadas.
+                    const paqAjustado = Number(producto.unidades_ajustadas) || paqAProducir;
+                    const panes = paqAjustado * upq;
                     const ajuste = getAjuste(producto.id, producto.delta_ajuste ?? null);
                     const deltaNum = parseInt(ajuste.delta, 10);
                     const usuarioCambio = ajustes[producto.id] !== undefined;
+                    // Preview en vivo: misma formula que el backend (paquetes -> panes,
+                    // redondear panes al multiplo, volver a paquetes) para que lo que
+                    // ves mientras escribes coincida con lo que se va a guardar.
+                    const paqPreviewCrudo = paqPedidos + deltaNum;
+                    const panesPreviewCrudo = paqPreviewCrudo * upq;
                     const panesPreview = usuarioCambio && !isNaN(deltaNum)
-                      ? (paqPedidos + deltaNum) * upq
+                      ? (divisor > 0 && panesPreviewCrudo % divisor !== 0
+                          ? (Math.floor(panesPreviewCrudo / divisor) + 1) * divisor
+                          : panesPreviewCrudo)
                       : null;
+                    const paqPreview = panesPreview !== null ? Math.round(panesPreview / upq) : null;
 
                     return (
                       <tr key={producto.id} className="hover:bg-gray-50">
@@ -461,28 +475,28 @@ export const DetalleMasa: React.FC = () => {
                           {paqPedidos.toLocaleString('es-CO')}
                         </td>
 
-                        {/* Paq. a Producir — preview en tiempo real mientras el usuario escribe */}
+                        {/* Paq. a Producir — muestra unidades_ajustadas (real, al multiplo del divisor) */}
                         <td className="px-4 py-3 text-right">
-                          {panesPreview !== null ? (
+                          {paqPreview !== null ? (
                             <>
                               <span className="line-through text-gray-400 text-sm mr-1">
-                                {paqAProducir.toLocaleString('es-CO')}
+                                {paqAjustado.toLocaleString('es-CO')}
                               </span>
-                              <span className={`text-sm font-bold ${(paqPedidos + deltaNum) >= paqPedidos ? 'text-indigo-700' : 'text-red-600'}`}>
-                                {(paqPedidos + deltaNum).toLocaleString('es-CO')}
+                              <span className={`text-sm font-bold ${paqPreview >= paqPedidos ? 'text-indigo-700' : 'text-red-600'}`}>
+                                {paqPreview.toLocaleString('es-CO')}
                               </span>
                             </>
                           ) : (
-                            <span className={`text-sm font-bold ${paqAProducir > paqPedidos ? 'text-indigo-700' : 'text-gray-900'}`}>
-                              {paqAProducir.toLocaleString('es-CO')}
-                              {paqAProducir > paqPedidos && (
-                                <span className="ml-1 text-xs text-indigo-500">(+{paqAProducir - paqPedidos})</span>
+                            <span className={`text-sm font-bold ${paqAjustado > paqPedidos ? 'text-indigo-700' : 'text-gray-900'}`}>
+                              {paqAjustado.toLocaleString('es-CO')}
+                              {paqAjustado > paqPedidos && (
+                                <span className="ml-1 text-xs text-indigo-500">(+{paqAjustado - paqPedidos})</span>
                               )}
                             </span>
                           )}
                         </td>
 
-                        {/* Panes totales — preview en tiempo real */}
+                        {/* Panes totales — real, ya al multiplo del divisor */}
                         <td className="px-4 py-3 text-right">
                           <span className="text-sm font-bold text-emerald-700">
                             {panesPreview !== null
@@ -542,8 +556,10 @@ export const DetalleMasa: React.FC = () => {
                 <span className="text-xl font-bold text-emerald-700">
                   {(productos as any[]).reduce((sum: number, p: any) => {
                     const upq = Math.max(1, Number(p.unidades_por_paquete) || 1);
-                    const paqProgramados = Number(p.unidades_programadas) || 0;
-                    return sum + paqProgramados * upq;
+                    // FIX 2026-08-10: sumar panes reales (unidades_ajustadas), no
+                    // unidades_programadas -- coherente con las columnas de arriba.
+                    const paqAjust = Number(p.unidades_ajustadas) || Number(p.unidades_programadas) || 0;
+                    return sum + paqAjust * upq;
                   }, 0).toLocaleString('es-CO')} panes
                 </span>
               </div>
