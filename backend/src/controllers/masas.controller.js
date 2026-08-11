@@ -324,7 +324,6 @@ const updateUnidadesProgramadas = async (req, res, next) => {
  */
 const aprobarMasaCore = async (id, userId, opts = {}) => {
   const { fecha_vencimiento_sugerida, prioridad, hora_entrega, enviarCorreoIndividual = true } = opts;
-  const { ejecutarSubdivision } = require('./fases.controller');
 
   const masa = await db.query(
     `SELECT id, codigo_masa, estado, fase_actual, tipo_masa, fecha_produccion, total_kilos_con_merma
@@ -475,61 +474,13 @@ const aprobarMasaCore = async (id, userId, opts = {}) => {
   }
   // --- FIN NOTIFICACIÓN EMPAQUE individual ---
 
-  // Intentar subdivisión (conPesaje=false → sub-masas arrancan en PLANIFICACION)
-  const resultadoSubdivision = await ejecutarSubdivision(id, userId, false);
-
-  if (resultadoSubdivision && resultadoSubdivision.realizada) {
-    // Aprobar todas las sub-masas y desbloquear su PESAJE directamente
-    for (const subMasa of resultadoSubdivision.sub_masas) {
-      await db.query(
-        `UPDATE masas_produccion
-         SET estado = 'APROBADA',
-             aprobado_por = $2,
-             aprobado_en = NOW(),
-             updated_at = NOW()
-         WHERE id = $1`,
-        [subMasa.id, userId]
-      );
-      await db.query(
-        `UPDATE progreso_fases
-         SET estado = 'COMPLETADA'
-         WHERE masa_id = $1 AND fase = 'PLANIFICACION'`,
-        [subMasa.id]
-      );
-      await db.query(
-        `UPDATE progreso_fases
-         SET estado = 'EN_PROGRESO'
-         WHERE masa_id = $1 AND fase = 'PESAJE'`,
-        [subMasa.id]
-      );
-      await db.query(
-        `UPDATE progreso_fases
-         SET estado = 'PENDIENTE', updated_at = NOW()
-         WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
-        [subMasa.id]
-      );
-      if (fecha_vencimiento_sugerida) {
-        await db.query(
-          `UPDATE progreso_fases
-           SET datos_fase = COALESCE(datos_fase, '{}'::jsonb) || $2::jsonb
-           WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
-          [subMasa.id, JSON.stringify({ fecha_vencimiento_sugerida })]
-        );
-      }
-    }
-
-    logger.info(`Masa ${id} subdividida en ${resultadoSubdivision.n_tandas} tandas y aprobadas por usuario ${userId}`);
-
-    return {
-      success: true,
-      message: `Masa subdividida en ${resultadoSubdivision.n_tandas} tandas. Cada tanda está aprobada y lista para pesaje.`,
-      subdivision: resultadoSubdivision,
-      masaInfo: masa.rows[0],
-      totalPaquetes,
-    };
-  }
-
-  // Sin subdivisión: flujo normal
+  // v5 2026-08-11: la subdivisión YA NO se ejecuta al aprobar. Aprobar solo
+  // fija estado, fecha de vencimiento, hora de entrega y delta default; deja
+  // la masa en PLANIFICACION para que el delta manual (updateUnidadesProgramadas)
+  // pueda seguir editándose. La subdivisión real ocurre en pesaje.controller.js
+  // (confirmarPesaje → ejecutarSubdivision(..., conPesaje=true)), después de que
+  // completarFase('PLANIFICACION') ya consolidó ingredientes_masa con
+  // unidades_ajustadas. Ver ALCANCE_FIXES / conversación 2026-08-11.
   const r1 = await db.query(
     `UPDATE progreso_fases SET estado = 'COMPLETADA'
      WHERE masa_id = $1 AND fase = 'PLANIFICACION'`, [id]

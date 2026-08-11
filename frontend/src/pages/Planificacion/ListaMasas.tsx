@@ -88,17 +88,15 @@ export const ListaMasas: React.FC = () => {
   const confirmarAprobar = async () => {
     if (!aprobarModal) return;
     try {
-      const result = await aprobarMutation.mutateAsync({
+      await aprobarMutation.mutateAsync({
         masaId: aprobarModal.masaId,
         fecha_vencimiento_sugerida: aprobarModal.fecha || undefined,
         prioridad: aprobarModal.prioridad || undefined,
         hora_entrega: aprobarModal.hora_entrega || undefined,
       });
       setAprobarModal(null);
-      if (result?.subdivision?.realizada) {
-        const n = result.subdivision.n_tandas;
-        alert(`✅ Masa subdividida en ${n} tandas. Cada tanda está aprobada y lista para pesaje.`);
-      }
+      // v5 2026-08-11: la subdivisión ya no ocurre al aprobar, sino al confirmar
+      // pesaje. aprobarMasa ya no devuelve `subdivision`.
     } catch (error) {
       console.error('Error aprobando masa:', error);
       setAprobarModal(null);
