@@ -266,6 +266,21 @@ const updateUnidadesProgramadas = async (req, res, next) => {
       });
     }
 
+    // fase_actual solo cambia cuando el pesaje se CONFIRMA con éxito — durante el
+    // pesaje activo (ingredientes ya pesados, aún sin confirmar) sigue en
+    // PLANIFICACION. Este chequeo cierra ese hueco: si ya hay algo pesado, no se
+    // puede tocar el delta, sin importar qué diga fase_actual.
+    const yaPesado = await db.query(
+      `SELECT COUNT(*) AS total FROM ingredientes_masa WHERE masa_id = $1 AND pesado = true`,
+      [masaId]
+    );
+    if (parseInt(yaPesado.rows[0].total) > 0) {
+      return res.status(409).json({
+        success: false,
+        message: 'No se puede ajustar el delta: ya hay ingredientes pesados en esta masa.',
+      });
+    }
+
     const productoActual = await db.query(
       'SELECT id, unidades_programadas, unidades_pedidas, unidades_por_paquete FROM productos_por_masa WHERE id = $1 AND masa_id = $2',
       [productoId, masaId]
