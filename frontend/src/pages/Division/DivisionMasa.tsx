@@ -497,7 +497,7 @@ export const DivisionMasa: React.FC = () => {
                           Divisor
                         </th>
                         <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
-                          Peso Total Masa
+                          Peso Total del Corte
                         </th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
                           Unidades cortadas <span className="text-red-500">*</span>
@@ -514,7 +514,7 @@ export const DivisionMasa: React.FC = () => {
                         const esCorrecto = cantidad > 0 && !error;
                         // Peso unitario: U_JZ_PesMasDiv con respaldo en gramaje_unitario — misma fuente que la columna "Peso Unitario Masa"
                         const pesoUnitario     = parseFloat(producto.peso_masa_dividida || producto.gramaje_unitario || 0);
-                        // Peso Total Masa = Divisor Masa (SAP) × Peso Neto Masa Dividida — reemplaza al antiguo "Excedente"
+                        // Peso Total del Corte = Divisor Masa (SAP) × Peso Neto Masa Dividida — peso de la pieza que sale de la máquina antes de subdividir a mano
                         const pesoTotalMasa    = divisor > 0 && pesoUnitario > 0 ? divisor * pesoUnitario : 0;
                         // Peso Total División = Peso Unitario Masa × Unidades Cortadas ingresadas por el usuario
                         const pesoTotalDivision = cantidad > 0 && pesoUnitario > 0 ? cantidad * pesoUnitario : 0;
@@ -605,7 +605,7 @@ export const DivisionMasa: React.FC = () => {
                               )}
                             </td>
 
-                            {/* Peso Total Masa — Divisor Masa (SAP) × Peso Neto Masa Dividida */}
+                            {/* Peso Total del Corte — Divisor Masa (SAP) × Peso Neto Masa Dividida */}
                             <td className="px-4 py-3 text-center">
                               {pesoTotalMasa > 0 ? (
                                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
@@ -673,7 +673,7 @@ export const DivisionMasa: React.FC = () => {
                     <span className="font-semibold">Paquetes</span> = unidades en la orden de venta.{' '}
                     <span className="font-semibold">Panes sugeridos a cortar</span> = total de panes a producir (paquetes × unidades por paquete), ajustado al múltiplo del divisor de la máquina.{' '}
                     <span className="font-semibold">Peso Unitario Masa</span> = peso individual de cada pan a dividir (campo SAP U_JZ_PesMasDiv); es el dato que usa la divisora. Si no está configurado en SAP, se muestra el Gramaje unitario como respaldo (marcado con *).{' '}
-                    <span className="font-semibold">Peso Total Masa</span> = Divisor × Peso Unitario Masa — el peso de la pieza que sale de la máquina antes de subdividir a mano.{' '}
+                    <span className="font-semibold">Peso Total del Corte</span> = Divisor × Peso Unitario Masa — el peso de la pieza que sale de la máquina antes de subdividir a mano.{' '}
                     <span className="font-semibold">Peso Total División</span> (bajo el campo de Unidades cortadas) = Peso Unitario Masa × las unidades que se registren.
                     Los productos con <span className="inline-flex items-center px-1 rounded bg-orange-100 text-orange-800 text-xs font-semibold">×N</span> deben cortarse en múltiplos exactos.
                   </p>

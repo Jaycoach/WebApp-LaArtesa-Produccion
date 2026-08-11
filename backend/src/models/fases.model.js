@@ -307,7 +307,7 @@ const updateIngredienteChecklist = async (ingredienteId, data) => {
 
       // Obtener masa_id e item_code del ingrediente
       const ingRow = await client.query(
-        `SELECT masa_id, ingrediente_sap_code FROM ingredientes_masa WHERE id = $1`,
+        `SELECT masa_id, ingrediente_sap_code FROM ingredientes_masa WHERE id = $1 FOR UPDATE`,
         [ingredienteId]
       );
       if (!ingRow.rows[0]) throw Object.assign(new Error('Ingrediente no encontrado'), { status: 404 });
