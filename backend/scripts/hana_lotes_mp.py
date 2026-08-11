@@ -57,7 +57,7 @@ def main():
             WHERE "OBTQ"."WhsCode" = 'ALMP' AND "OBTQ"."Quantity" > 0
               AND "OBTN"."ItemCode" IN ({placeholders})
         '''
-        cursor.execute(query, item_codes)
+        cursor.execute(query, tuple(item_codes))
 
         resultado = {}
         for row in cursor.fetchall():
