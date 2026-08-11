@@ -118,7 +118,9 @@ const getChecklist = async (req, res, next) => {
     const ingredientesConStock = ingredientes.map(ing => {
       const esExcluido = excluidos.includes(ing.ingrediente_sap_code);
       const inv = inventarioMap[ing.ingrediente_sap_code] || null;
-      const stockDisponible = inv ? parseFloat(inv.stock_almp) - parseFloat(inv.committed_almp) : null;
+      // Disponibilidad real = solo stock_almp. committed_almp (OV abiertas comprometiendo
+      // el ítem) es informativo — no debe bloquear el pesaje: si hay stock físico, hay.
+      const stockDisponible = inv ? parseFloat(inv.stock_almp) : null;
       const cantidadRequerida = parseFloat(ing.cantidad_kilos) || 0;
       // Excluidos (agua) solo se libran de manejo de LOTE hacia SAP — el stock
       // real SIEMPRE se valida igual que cualquier otro ingrediente.
@@ -692,18 +694,13 @@ const confirmarPesaje = async (req, res, next) => {
       [masaId]
     );
 
-    // Leer excluidos de validación de stock
-    const configExcluidosConf = await db.query(
-      `SELECT valor FROM configuracion_sistema WHERE clave = 'ingredientes_excluir_stock_validacion'`
-    );
-    const excluidosConf = configExcluidosConf.rows.length > 0
-      ? configExcluidosConf.rows[0].valor.split(',').map(c => c.trim()).filter(Boolean)
-      : [];
-
     const sinStock = ingResult.rows.filter(ing => {
-      if (excluidosConf.includes(ing.ingrediente_sap_code)) return false; // excluidos: nunca bloquear
+      // Excluidos (agua) solo se libran de manejo de LOTE — el stock real se
+      // valida igual que cualquier otro ingrediente.
       if (!ing.stock_almp && ing.stock_almp !== 0) return false; // sin datos SAP: no bloquear
-      const disponible = parseFloat(ing.stock_almp) - parseFloat(ing.committed_almp || 0);
+      // Disponibilidad real = solo stock_almp. committed_almp (OV abiertas
+      // comprometiendo el ítem) es informativo — no bloquea: si hay stock, hay.
+      const disponible = parseFloat(ing.stock_almp);
       return disponible < parseFloat(ing.cantidad_kilos);
     });
 
@@ -715,7 +712,7 @@ const confirmarPesaje = async (req, res, next) => {
           ingredientes_sin_stock: sinStock.map(i => ({
             nombre: i.ingrediente_nombre,
             requerido_kg: parseFloat(i.cantidad_kilos),
-            disponible_kg: Math.max(0, parseFloat(i.stock_almp) - parseFloat(i.committed_almp || 0)),
+            disponible_kg: Math.max(0, parseFloat(i.stock_almp)),
           })),
         },
       });
