@@ -414,14 +414,14 @@ export const ListaMasas: React.FC = () => {
                     Seleccionar todas las aprobables ({aprobables.length})
                   </label>
                   <span className="text-gray-300">·</span>
-                  <button
-                    onClick={toggleExpandirTodo}
-                    className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
-                  >
-                    {todasExpandidas ? '▾ Comprimir todo' : '▸ Expandir todo'}
-                  </button>
                 </>
               )}
+              <button
+                onClick={toggleExpandirTodo}
+                className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+              >
+                {todasExpandidas ? '▾ Comprimir todo' : '▸ Expandir todo'}
+              </button>
             </div>
             {busqueda && masasFiltradas.length === 0 && (
               <div className="text-sm text-gray-400 px-1 mb-3">Sin resultados para "{busqueda}"</div>
