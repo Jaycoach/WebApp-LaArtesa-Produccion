@@ -2112,17 +2112,11 @@ const sincronizarLotesItem = async (req, res, next) => {
       return inv && inv.manageBatchNumbers === true;
     });
     const itemCodesSinBatch = itemCodesValidos.filter(code => !itemCodesConBatch.includes(code));
-
-    if (itemCodesConBatch.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({
-        success: false,
-        message: 'Ninguno de los ítems válidos maneja lotes (manage_batch_numbers=false)',
-        data: { itemCodesInvalidos, itemCodesSinBatch },
-      });
-    }
-
-    const { lotes: lotesMap, itemsFallidos: lotesFallidos } = await sapService.getLotesMateriaPrima(itemCodesConBatch, stocks);
+    // Ítems sin lote (ej: agua) NO son un error — solo no tienen la parte de
+    // lotes que sincronizar. El stock general (más abajo) sí se persiste igual.
+    const { lotes: lotesMap, itemsFallidos: lotesFallidos } = itemCodesConBatch.length > 0
+      ? await sapService.getLotesMateriaPrima(itemCodesConBatch, stocks)
+      : { lotes: {}, itemsFallidos: [] };
 
     for (const code of itemCodesValidos) {
       const datos = stocks[code];

@@ -524,7 +524,7 @@ export const PesajeMasa: React.FC = () => {
                     <div className="flex flex-wrap gap-3 mt-1 text-xs text-gray-500">
                       {ing.excluido_stock && (
                         <span className="text-gray-400 italic">
-                          Sin validación de stock (insumo propio)
+                          Sin manejo de lote — stock validado igual que los demás insumos
                         </span>
                       )}
                       {ing.lotes && ing.lotes.length > 0 && (
