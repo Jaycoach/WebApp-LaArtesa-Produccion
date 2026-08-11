@@ -120,9 +120,9 @@ const getChecklist = async (req, res, next) => {
       const inv = inventarioMap[ing.ingrediente_sap_code] || null;
       const stockDisponible = inv ? parseFloat(inv.stock_almp) - parseFloat(inv.committed_almp) : null;
       const cantidadRequerida = parseFloat(ing.cantidad_kilos) || 0;
-      // Excluidos nunca bloquean por stock (ej: agua no requiere lote), pero el costo
-      // SIEMPRE viene de SAP (costo_promedio) — nunca de configuración manual.
-      const sinStock = esExcluido ? false : (inv !== null && stockDisponible < cantidadRequerida);
+      // Excluidos (agua) solo se libran de manejo de LOTE hacia SAP — el stock
+      // real SIEMPRE se valida igual que cualquier otro ingrediente.
+      const sinStock = (inv !== null && stockDisponible < cantidadRequerida);
       const costoUnitario = inv ? parseFloat(inv.costo_promedio) : null;
       // Lotes ordenados por expiration_date ASC (FEFO) → el primero es el sugerido
       const lotes = lotesMap[ing.ingrediente_sap_code] || [];
@@ -130,7 +130,7 @@ const getChecklist = async (req, res, next) => {
         ...ing,
         stock_almp:          inv ? parseFloat(inv.stock_almp) : null,
         committed_almp:      inv ? parseFloat(inv.committed_almp) : null,
-        stock_disponible:    esExcluido ? null : stockDisponible,
+        stock_disponible:    stockDisponible,
         costo_unitario_sap:  costoUnitario,
         inventario_sync:     inv ? inv.ultimo_sync : null,
         sin_stock:           sinStock,
