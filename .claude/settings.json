@@ -22,7 +22,9 @@
       "Bash(node --check src/controllers/masas.controller.js)",
       "Bash(python3 -m py_compile scripts/hana_ov_sync.py)",
       "Bash(node --check backend/src/controllers/masas.controller.js)",
-      "Bash(node --check backend/src/controllers/fases.controller.js)"
+      "Bash(node --check backend/src/controllers/fases.controller.js)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }
