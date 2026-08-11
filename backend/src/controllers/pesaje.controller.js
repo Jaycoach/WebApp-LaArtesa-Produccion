@@ -1114,30 +1114,17 @@ const enviarCorreoEmpaque = async (req, res, next) => {
  * Llamar al cancelar o rechazar una masa que tenga pesaje en progreso.
  */
 const devolverStockMasa = async (masaId) => {
-  const lotes = await db.query(
-    `SELECT item_code, batch, SUM(cantidad_kg) as total_kg
-     FROM pesaje_lotes_consumo
-     WHERE masa_id = $1 AND confirmado_sap = false AND liberado_en IS NULL
-     GROUP BY item_code, batch`,
-    [masaId]
-  );
-  for (const l of lotes.rows) {
-    await db.query(
-      `UPDATE sap_lotes_mp
-       SET cantidad_disponible = cantidad_disponible + $1, ultimo_sync = NOW()
-       WHERE item_code = $2 AND batch = $3`,
-      [l.total_kg, l.item_code, l.batch]
-    );
-  }
+  // cantidad_disponible es el stock real de SAP — las reservas nunca lo
+  // restaron, así que al cancelar no hay nada que "devolver" ahí. Solo se
+  // marca liberado_en para que quede claro que la reserva ya no es activa.
   // No se elimina el registro: se conserva para auditoría y reportes de OVs
-  // canceladas. Solo se marca liberado_en para que el sync no lo siga
-  // contando como reservado.
-  await db.query(
+  // canceladas.
+  const liberados = await db.query(
     `UPDATE pesaje_lotes_consumo SET liberado_en = NOW()
      WHERE masa_id = $1 AND confirmado_sap = false AND liberado_en IS NULL`,
     [masaId]
   );
-  logger.info(`Stock devuelto para masa cancelada ${masaId}: ${lotes.rows.length} lotes liberados`);
+  logger.info(`Stock devuelto para masa cancelada ${masaId}: ${liberados.rowCount} lotes liberados`);
 };
 
 /**

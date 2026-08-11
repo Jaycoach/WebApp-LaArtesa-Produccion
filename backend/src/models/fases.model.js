@@ -313,19 +313,8 @@ const updateIngredienteChecklist = async (ingredienteId, data) => {
       if (!ingRow.rows[0]) throw Object.assign(new Error('Ingrediente no encontrado'), { status: 404 });
       const { masa_id, ingrediente_sap_code } = ingRow.rows[0];
 
-      // Devolver stock previo de este ingrediente (si ya tenía lotes reservados)
-      const previos = await client.query(
-        `SELECT batch, cantidad_kg FROM pesaje_lotes_consumo WHERE ingrediente_id = $1`,
-        [ingredienteId]
-      );
-      for (const p of previos.rows) {
-        await client.query(
-          `UPDATE sap_lotes_mp
-           SET cantidad_disponible = cantidad_disponible + $1, ultimo_sync = NOW()
-           WHERE item_code = $2 AND batch = $3`,
-          [p.cantidad_kg, ingrediente_sap_code, p.batch]
-        );
-      }
+      // Ya no se "devuelve" stock aquí — cantidad_disponible es el stock real
+      // de SAP y las reservas nunca lo restan. Solo se limpia la reserva previa.
       await client.query(
         `DELETE FROM pesaje_lotes_consumo WHERE ingrediente_id = $1`,
         [ingredienteId]
@@ -359,12 +348,8 @@ const updateIngredienteChecklist = async (ingredienteId, data) => {
             { status: 409, lote: lc.batch, disponible: disponibleLote, lotes_actuales: lotesActuales.rows }
           );
         }
-        await client.query(
-          `UPDATE sap_lotes_mp
-           SET cantidad_disponible = cantidad_disponible - $1, ultimo_sync = NOW()
-           WHERE item_code = $2 AND batch = $3`,
-          [lc.cantidad_kg, ingrediente_sap_code, lc.batch]
-        );
+        // La reserva ya NO descuenta cantidad_disponible (stock real) — solo queda
+        // registrada en pesaje_lotes_consumo, informativa, sin bloquear a otras masas.
         await client.query(
           `INSERT INTO pesaje_lotes_consumo
              (ingrediente_id, masa_id, item_code, batch, cantidad_kg, usuario_id)
