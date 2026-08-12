@@ -134,6 +134,13 @@ export const useAmasadoras = () => {
     staleTime: 1000 * 60 * 5,
   });
 };
+export const useMaquinasCorte = () => {
+  return useQuery({
+    queryKey: ['maquinas-corte'],
+    queryFn: () => configService.getMaquinasCorte(),
+    staleTime: 1000 * 60 * 5,
+  });
+};
 export const useUpdateTipoMasaFormado = () => {
   const queryClient = useQueryClient();
   return useMutation({

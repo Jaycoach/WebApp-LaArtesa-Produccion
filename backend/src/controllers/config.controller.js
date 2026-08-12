@@ -414,3 +414,15 @@ exports.getAmasadoras = async (req, res, next) => {
     res.json({ success: true, data: r.rows });
   } catch (e) { next(e); }
 };
+
+exports.getMaquinasCorte = async (req, res, next) => {
+  try {
+    const r = await db.query(
+      `SELECT id, nombre, codigo, capacidad_kg, tipo, activa
+       FROM maquinas_corte
+       WHERE activa = true
+       ORDER BY id`
+    );
+    res.json({ success: true, data: r.rows });
+  } catch (e) { next(e); }
+};

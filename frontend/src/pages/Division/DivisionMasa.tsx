@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { Card } from '@/components/common';
 import { useMasaDetail, useProductos } from '../../hooks/useMasas';
 import { useCompletarFase } from '../../hooks/useFases';
+import { useMaquinasCorte } from '../../hooks/useConfig';
 import { ModalMO } from '../../components/common/ModalMO';
 import { BarraNavegacionFases } from '../../components/common/BarraNavegacionFases';
 
@@ -12,11 +13,12 @@ export const DivisionMasa: React.FC = () => {
 
   const { data: masa, isLoading: loadingMasa } = useMasaDetail(masaIdNum);
   const { data: productos, isLoading: loadingProductos } = useProductos(masaIdNum);
+  const { data: maquinasCorte } = useMaquinasCorte();
   const completarMutation = useCompletarFase();
 
   const [showMO, setShowMO] = useState(false);
   const [formData, setFormData] = useState({
-    maquina_corte_id: '1',
+    maquina_corte_id: '',
     temperatura_entrada: '',
     requiere_reposo: false,
     hora_inicio_reposo: '',
@@ -40,6 +42,16 @@ export const DivisionMasa: React.FC = () => {
       });
     }
   }, [masa?.fase_actual, productos]);
+
+  // Preseleccionar la primera máquina del catálogo al cargar, sin pisar una
+  // selección que el usuario ya haya hecho.
+  useEffect(() => {
+    if (maquinasCorte && maquinasCorte.length > 0) {
+      setFormData(prev =>
+        prev.maquina_corte_id ? prev : { ...prev, maquina_corte_id: String(maquinasCorte[0].id) }
+      );
+    }
+  }, [maquinasCorte]);
 
   // ── Helpers ────────────────────────────────────────────────────
 
@@ -344,7 +356,8 @@ export const DivisionMasa: React.FC = () => {
               <div className="bg-gray-50 rounded-lg p-3">
                 <p className="text-xs text-gray-400 uppercase font-medium mb-1">Máquina de corte</p>
                 <p className="font-semibold text-gray-800">
-                  {formData.maquina_corte_id === '1' ? 'Conic (Automática, 100 kg)' : 'Divisora Manual (50 kg)'}
+                  {(maquinasCorte || []).find((m: any) => String(m.id) === formData.maquina_corte_id)?.nombre
+                    || `Máquina #${formData.maquina_corte_id}`}
                 </p>
               </div>
               <div className="bg-gray-50 rounded-lg p-3">
@@ -389,8 +402,11 @@ export const DivisionMasa: React.FC = () => {
                     onChange={(e) => setFormData({ ...formData, maquina_corte_id: e.target.value })}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="1">Conic (Automática, 100 kg)</option>
-                    <option value="2">Divisora Manual (50 kg)</option>
+                    {(maquinasCorte || []).map((m: any) => (
+                      <option key={m.id} value={String(m.id)}>
+                        {m.nombre} ({m.tipo === 'MANUAL' ? 'Manual' : 'Automática'}, {parseFloat(m.capacidad_kg)} kg)
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div>

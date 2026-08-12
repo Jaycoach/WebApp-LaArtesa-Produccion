@@ -48,6 +48,8 @@ router.put('/catalogo-tipos-masa/:id', checkRole(['admin', 'supervisor']), c.upd
 
 // Amasadoras
 router.get('/amasadoras',                    c.getAmasadoras);
+// Máquinas de corte/división
+router.get('/maquinas-corte',                c.getMaquinasCorte);
 // Sync precios empaque SAP
 router.post('/sync-empaque',     checkRole(['admin', 'supervisor']), c.syncPreciosEmpaque);
 
