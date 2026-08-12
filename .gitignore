@@ -132,3 +132,5 @@ deployment/aws-staging/aws-deployment-config.env
 backend/.env
 frontend/.env.production
 docs/schema/
+.claude/settings.json
+.claude/settings.local.json
