@@ -280,8 +280,8 @@ const ModalFaltantes: React.FC<{
 // de navegar de vuelta a la lista. Sin esto, el usuario no tiene forma confiable
 // de confirmar que el producto terminado y el consumo de materiales sí llegaron a SAP.
 const ModalResumenEmpaque: React.FC<{
-  docEntrada?: number | null;
-  docSalida?: number | null;
+  docEntrada?: string | null;
+  docSalida?: string | null;
   onAceptar: () => void;
 }> = ({ docEntrada, docSalida, onAceptar }) => {
   return (
@@ -294,11 +294,11 @@ const ModalResumenEmpaque: React.FC<{
         <div className="bg-green-50 border border-green-200 rounded p-3 mb-4 space-y-2 text-sm">
           <div className="flex justify-between">
             <span className="text-gray-600">Producto terminado registrado en SAP</span>
-            <span className="font-mono font-semibold text-gray-800">{docEntrada ? `DocEntry ${docEntrada}` : '—'}</span>
+            <span className="font-mono font-semibold text-gray-800">{docEntrada ? `DocNum ${docEntrada}` : '—'}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-gray-600">Consumo de materiales de empaque en SAP</span>
-            <span className="font-mono font-semibold text-gray-800">{docSalida ? `DocEntry ${docSalida}` : '—'}</span>
+            <span className="font-mono font-semibold text-gray-800">{docSalida ? `DocNum ${docSalida}` : '—'}</span>
           </div>
         </div>
         <button
@@ -646,7 +646,7 @@ const PanelEmpaqueMasa: React.FC<{
   const [msg, setMsg] = useState<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
   const [modalMO, setModalMO] = useState(false);
   const [modalFaltantes, setModalFaltantes] = useState<{ faltantes: any[] } | null>(null);
-  const [modalResumen, setModalResumen] = useState<{ docEntrada?: number | null; docSalida?: number | null } | null>(null);
+  const [modalResumen, setModalResumen] = useState<{ docEntrada?: string | null; docSalida?: string | null } | null>(null);
   const [etiquetaData, setEtiquetaData] = useState<any>(null);
   const [guardadoIds, setGuardadoIds] = useState<Set<number>>(new Set());
 
@@ -727,8 +727,8 @@ const PanelEmpaqueMasa: React.FC<{
       } else {
         // No navegar automáticamente — esperar el "Aceptar" explícito del usuario en el modal.
         setModalResumen({
-          docEntrada: resultado?.data?.sap_entrada?.doc_entry,
-          docSalida: resultado?.data?.sap_salida?.doc_entry,
+          docEntrada: resultado?.sap_doc_num_entrada,
+          docSalida: resultado?.sap_doc_num_salida,
         });
       }
     } catch (e: any) {
