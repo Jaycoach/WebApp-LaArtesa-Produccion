@@ -513,10 +513,10 @@ export const DivisionMasa: React.FC = () => {
                           Peso Total del Corte
                         </th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                          Unidades cortadas <span className="text-red-500">*</span>
+                          Cantidad de divisiones
                         </th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                          Cantidad de divisiones
+                          Unidades cortadas <span className="text-red-500">*</span>
                         </th>
                       </tr>
                     </thead>
@@ -625,6 +625,17 @@ export const DivisionMasa: React.FC = () => {
                               )}
                             </td>
 
+                            {/* Cantidad de divisiones = Panes sugeridos ÷ Divisor */}
+                            <td className="px-4 py-3 text-right">
+                              {divisor > 0 ? (
+                                <span className="text-sm font-semibold text-gray-700">
+                                  {Math.ceil(getPanesSugeridos(producto) / divisor)}
+                                </span>
+                              ) : (
+                                <span className="text-gray-300 text-xs">—</span>
+                              )}
+                            </td>
+
                             {/* Input cantidad cortada — editable solo si fase es DIVISION */}
                             <td className="px-4 py-3 text-sm text-right">
                               {masa.fase_actual !== 'DIVISION' ? (
@@ -666,17 +677,6 @@ export const DivisionMasa: React.FC = () => {
                                     ) : null;
                                   })()}
                                 </div>
-                              )}
-                            </td>
-
-                            {/* Cantidad de divisiones = Panes sugeridos ÷ Divisor */}
-                            <td className="px-4 py-3 text-right">
-                              {divisor > 0 ? (
-                                <span className="text-sm font-semibold text-gray-700">
-                                  {Math.ceil(getPanesSugeridos(producto) / divisor)}
-                                </span>
-                              ) : (
-                                <span className="text-gray-300 text-xs">—</span>
                               )}
                             </td>
                           </tr>
