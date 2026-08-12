@@ -4,7 +4,7 @@
  * Actualizado 2026-03-02
  */
 import React, { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ModalMO } from '../../components/common/ModalMO';
 import { BarraNavegacionFases } from '../../components/common/BarraNavegacionFases';
@@ -50,6 +50,7 @@ const fetchFormado = async (masaId: string): Promise<FormadoInfo> => {
 // ─────────────────────────────────────────────
 export const FormadoMasa: React.FC = () => {
   const { masaId } = useParams<{ masaId: string }>();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const [maquinaId, setMaquinaId] = useState<number | null>(null);
@@ -116,6 +117,39 @@ export const FormadoMasa: React.FC = () => {
     return (
       <div className="flex justify-center items-center min-h-screen">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div>
+      </div>
+    );
+  }
+
+  if ((data as any)?.no_requiere_formado) {
+    const info = (data as any);
+    return (
+      <div className="min-h-screen bg-gray-50 p-6">
+        <div className="max-w-4xl mx-auto space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+            <div className="flex items-center gap-3 mb-2">
+              <span className="text-2xl">ℹ️</span>
+              <h2 className="text-lg font-semibold text-gray-800">Esta masa no requiere formado</h2>
+            </div>
+            <p className="text-gray-500 text-sm">
+              {info.masa.codigo} — {info.masa.nombre}. Puedes continuar directamente a la siguiente fase.
+            </p>
+          </div>
+          <div className="sticky bottom-4 flex justify-end gap-3 bg-white border border-gray-200 rounded-xl shadow-md p-4">
+            <button
+              onClick={() => navigate(`/planificacion/masas/${masaId}`)}
+              className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-medium"
+            >
+              ← Volver al detalle
+            </button>
+            <button
+              onClick={() => navigate(`/fermentacion/${masaId}`)}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg transition-colors"
+            >
+              Ir a Fermentación →
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

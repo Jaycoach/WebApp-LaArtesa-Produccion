@@ -114,6 +114,8 @@ interface Producto {
   fecha_vencimiento: string | null;
   costo_mp_total_prod: number;
   costo_unitario_final: number;
+  unidades_divididas?: number;
+  unidades_horneadas?: number;
 }
 interface MaterialEmpaque {
   item_code_padre: string;
@@ -877,19 +879,19 @@ const PanelEmpaqueMasa: React.FC<{
           <div className="text-xs text-orange-500">Horneadas</div>
         </div>
         <div className={`rounded-lg p-3 text-center ${
-          masa.estado_empaque === 'COMPLETADA'
+          estadoEmpaqueActual === 'COMPLETADA'
             ? (totalEmpacadas >= totalHorneadas ? 'bg-green-50' : 'bg-amber-50')
             : 'bg-gray-100'
         }`}>
           <div className={`text-xl font-bold ${
-            masa.estado_empaque === 'COMPLETADA'
+            estadoEmpaqueActual === 'COMPLETADA'
               ? (totalEmpacadas >= totalHorneadas ? 'text-green-700' : 'text-amber-700')
               : 'text-gray-400'
           }`}>
-            {masa.estado_empaque === 'COMPLETADA' ? totalEmpacadas : '—'}
+            {estadoEmpaqueActual === 'COMPLETADA' ? totalEmpacadas : '—'}
           </div>
           <div className={`text-xs ${
-            masa.estado_empaque === 'COMPLETADA' ? 'text-green-500' : 'text-gray-400'
+            estadoEmpaqueActual === 'COMPLETADA' ? 'text-green-500' : 'text-gray-400'
           }`}>Empacadas</div>
         </div>
       </div>
@@ -1008,12 +1010,14 @@ const PanelEmpaqueMasa: React.FC<{
                             }))}
                             className="w-20 border border-gray-300 rounded px-2 py-1 text-right text-sm focus:ring-1 focus:ring-blue-400"
                           />
+                        ) : empaque_iniciado ? (
+                          <span className="font-mono text-sm text-gray-700">{empacadas}</span>
                         ) : (
                           <span className="text-gray-400 font-mono">—</span>
                         )}
                       </td>
                       <td className="p-2 text-right">
-                        {empaque_iniciado && puedeOperar ? (
+                        {empaque_iniciado ? (
                           <span className={`font-mono font-medium text-sm ${mermaCalculada > 0 ? 'text-red-600' : 'text-gray-500'}`}>
                             {mermaCalculada > 0 ? mermaCalculada : 0}
                           </span>
@@ -1022,7 +1026,7 @@ const PanelEmpaqueMasa: React.FC<{
                         )}
                       </td>
                       <td className="p-2 text-right">
-                        {empaque_iniciado && puedeOperar ? (
+                        {empaque_iniciado ? (
                           <span className={`font-mono text-sm font-bold ${
                             faltante > 0 ? 'text-red-600' : faltante < 0 ? 'text-blue-600' : 'text-green-600'
                           }`}>
@@ -1731,6 +1735,10 @@ export const EmpaqueMasa: React.FC = () => {
         || (m.empaque_datos_fase as any)?.fecha_vencimiento_sugerida
         || m.fecha_vencimiento_sugerida
         || null,
+      sap_doc_entry_entrada: registro?.sap_doc_entry_entrada || null,
+      sap_doc_entry_salida: registro?.sap_doc_entry_salida || null,
+      sap_error_entrada: registro?.sap_error_entrada || null,
+      sap_error_salida: registro?.sap_error_salida || null,
       materiales_alistamiento: directMasaData?.data?.materiales_alistamiento || [],
       ovs,
     };
@@ -1778,7 +1786,9 @@ export const EmpaqueMasa: React.FC = () => {
           unidades_merma: (() => {
             const prod = ov?.productos?.find((p: any) => p.id === productoId);
             const emp = parseInt(vals.emp) || 0;
-            const base = prod ? (prod.unidades_divididas > 0 ? prod.unidades_divididas : prod.unidades_horneadas) : 0;
+            const divididas = prod?.unidades_divididas ?? 0;
+            const horneadas = prod?.unidades_horneadas ?? 0;
+            const base = divididas > 0 ? divididas : horneadas;
             return Math.max(0, base - emp);
           })(),
         }),
@@ -2074,7 +2084,9 @@ export const EmpaqueMasa: React.FC = () => {
                             const empacadasEdit = parseInt(edit.emp) || 0; // paquetes, no panes
                             const panesPorPaqueteOV = Number(p.unidades_por_paquete) > 0 ? Number(p.unidades_por_paquete) : 1;
                             const panesEmpacadosOV = empacadasEdit * panesPorPaqueteOV;
-                            const mermaCalculadaOV = (p.unidades_divididas > 0 ? p.unidades_divididas : p.unidades_horneadas) - panesEmpacadosOV;
+                            const divididasOV = p.unidades_divididas ?? 0;
+                            const horneadasOV = p.unidades_horneadas ?? 0;
+                            const mermaCalculadaOV = (divididasOV > 0 ? divididasOV : horneadasOV) - panesEmpacadosOV;
                             const faltantes = p.unidades_ajustadas - empacadasEdit; // esto sí compara paquetes contra paquetes, queda igual
                             return (
                               <tr key={p.id} className="border-b hover:bg-gray-50">

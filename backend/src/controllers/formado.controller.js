@@ -44,11 +44,23 @@ exports.getFormadoInfo = async (req, res) => {
 
     const masa = masaResult.rows[0];
 
-    // Verificar que la masa requiere formado
+    // Si la masa no requiere formado, no es un error — informar la fase siguiente
+    // para que el frontend muestre un CTA directo en vez de un mensaje de error sin salida.
     if (!masa.requiere_formado) {
-      return res.status(400).json({
-        success: false,
-        message: 'Esta masa no requiere proceso de formado'
+      return res.json({
+        success: true,
+        data: {
+          no_requiere_formado: true,
+          masa: {
+            id: masa.id,
+            codigo: masa.codigo_masa,
+            tipo: masa.tipo_masa,
+            nombre: masa.nombre_masa,
+            estado: masa.estado,
+            fase_actual: masa.fase_actual,
+          },
+          siguiente_fase: 'FERMENTACION',
+        }
       });
     }
 

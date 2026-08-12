@@ -488,9 +488,6 @@ export const DivisionMasa: React.FC = () => {
                           Panes sugeridos a cortar
                         </th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                          Gramaje unitario
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
                           Peso Unitario Masa
                         </th>
                         <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
@@ -501,6 +498,9 @@ export const DivisionMasa: React.FC = () => {
                         </th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
                           Unidades cortadas <span className="text-red-500">*</span>
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                          Cantidad de divisiones
                         </th>
                       </tr>
                     </thead>
@@ -561,13 +561,6 @@ export const DivisionMasa: React.FC = () => {
                                   </span>
                                 );
                               })()}
-                            </td>
-
-                            {/* Gramaje unitario (BOM) */}
-                            <td className="px-4 py-3 text-right">
-                              <span className="text-sm text-gray-600">
-                                {producto.gramaje_unitario ? `${parseFloat(producto.gramaje_unitario).toFixed(0)} g` : '—'}
-                              </span>
                             </td>
 
                             {/* Peso Unitario Masa — U_JZ_PesMasDiv, es el dato que usa el divisor */}
@@ -659,6 +652,17 @@ export const DivisionMasa: React.FC = () => {
                                 </div>
                               )}
                             </td>
+
+                            {/* Cantidad de divisiones = Panes sugeridos ÷ Divisor */}
+                            <td className="px-4 py-3 text-right">
+                              {divisor > 0 ? (
+                                <span className="text-sm font-semibold text-gray-700">
+                                  {Math.ceil(getPanesSugeridos(producto) / divisor)}
+                                </span>
+                              ) : (
+                                <span className="text-gray-300 text-xs">—</span>
+                              )}
+                            </td>
                           </tr>
                         );
                       })}
@@ -674,7 +678,8 @@ export const DivisionMasa: React.FC = () => {
                     <span className="font-semibold">Panes sugeridos a cortar</span> = total de panes a producir (paquetes × unidades por paquete), ajustado al múltiplo del divisor de la máquina.{' '}
                     <span className="font-semibold">Peso Unitario Masa</span> = peso individual de cada pan a dividir (campo SAP U_JZ_PesMasDiv); es el dato que usa la divisora. Si no está configurado en SAP, se muestra el Gramaje unitario como respaldo (marcado con *).{' '}
                     <span className="font-semibold">Peso Total del Corte</span> = Divisor × Peso Unitario Masa — el peso de la pieza que sale de la máquina antes de subdividir a mano.{' '}
-                    <span className="font-semibold">Peso Total División</span> (bajo el campo de Unidades cortadas) = Peso Unitario Masa × las unidades que se registren.
+                    <span className="font-semibold">Peso Total División</span> (bajo el campo de Unidades cortadas) = Peso Unitario Masa × las unidades que se registren.{' '}
+                    <span className="font-semibold">Cantidad de divisiones</span> = Panes sugeridos a cortar ÷ Divisor — el número de cortes que debe hacer la máquina.
                     Los productos con <span className="inline-flex items-center px-1 rounded bg-orange-100 text-orange-800 text-xs font-semibold">×N</span> deben cortarse en múltiplos exactos.
                   </p>
                 </div>
