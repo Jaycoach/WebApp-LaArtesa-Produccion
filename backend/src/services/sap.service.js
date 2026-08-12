@@ -20,6 +20,30 @@ function inferirTamanioForma(itemName) {
   return { tamanio, forma };
 }
 
+// Fallbacks defensivos cuando SAP trae el UDF en NULL (o U_JZ_MultiploDivisor
+// en 0, que causaría división por cero en Formado/División más adelante).
+// Cada vez que se aplica uno queda logueado con el ItemCode afectado para
+// poder auditar después qué artículos siguen incompletos en SAP.
+function aplicarFallbacksAtributos(itemCode, { tamanio, forma, pesoMasaDividida, multiploDivisor }) {
+  if (!tamanio) {
+    logger.warn(`SAP: ${itemCode} sin tamaño (UDF y nombre) — fallback a PEQUEÑO`);
+    tamanio = 'PEQUEÑO';
+  }
+  if (!forma) {
+    logger.warn(`SAP: ${itemCode} sin forma (UDF y nombre) — fallback a RECTANGULAR`);
+    forma = 'RECTANGULAR';
+  }
+  if (pesoMasaDividida == null) {
+    logger.warn(`SAP: ${itemCode} sin U_JZ_PesMasDiv — fallback a 100g`);
+    pesoMasaDividida = 100;
+  }
+  if (!multiploDivisor) {
+    logger.warn(`SAP: ${itemCode} con U_JZ_MultiploDivisor NULL o 0 — fallback a 1 (evita división por cero)`);
+    multiploDivisor = 1;
+  }
+  return { tamanio, forma, pesoMasaDividida, multiploDivisor };
+}
+
 class SAPService {
   constructor() {
     this.baseURL = config.sap.url;
@@ -437,7 +461,7 @@ class SAPService {
       const response = await this.client.get('/Items', {
         params: {
           $filter: filterParts,
-          $select: 'ItemCode,ItemName,U_JZ_PanesPorBolsa,U_JZ_Tipos_Masa,SalesUnitWeight1,U_JZ_MultiploDivisor,U_JZ_Tamanio,U_JZ_Forma,U_JZ_PesMasDiv,U_JZ_DiasExp,Valid,Frozen',
+          $select: 'ItemCode,ItemName,U_JZ_PanesPorBolsa,U_JZ_Tipos_Masa,SalesUnitWeight1,U_JZ_MultiploDivisor,U_JZ_Tamanio,U_JZ_Forma,U_JZ_PesMasDiv,U_JZ_DiasExp,U_JZ_Formado,Valid,Frozen',
           $top: BATCH,
         },
       });
@@ -448,16 +472,23 @@ class SAPService {
           continue;
         }
         const fallbackAtributos = inferirTamanioForma(item.ItemName);
+        const atributos = aplicarFallbacksAtributos(item.ItemCode, {
+          tamanio:          item.U_JZ_Tamanio || fallbackAtributos.tamanio,
+          forma:            item.U_JZ_Forma || fallbackAtributos.forma,
+          pesoMasaDividida: item.U_JZ_PesMasDiv != null ? Number(item.U_JZ_PesMasDiv) : null,
+          multiploDivisor:  item.U_JZ_MultiploDivisor != null ? Math.round(item.U_JZ_MultiploDivisor) : 0,
+        });
         resultado[item.ItemCode] = {
           itemName:            item.ItemName,
           salesQtyPerPackUnit: item.U_JZ_PanesPorBolsa || 1,
           tipoMasa:            item.U_JZ_Tipos_Masa || 'SIN_CLASIFICAR',
           gramaje:             item.SalesUnitWeight1 || 0,
-          multiploDivisor:     item.U_JZ_MultiploDivisor != null ? Math.round(item.U_JZ_MultiploDivisor) : 0,
-          tamanio:             item.U_JZ_Tamanio || fallbackAtributos.tamanio,
-          forma:               item.U_JZ_Forma || fallbackAtributos.forma,
-          pesoMasaDividida:    item.U_JZ_PesMasDiv != null ? Number(item.U_JZ_PesMasDiv) : null,
+          multiploDivisor:     atributos.multiploDivisor,
+          tamanio:             atributos.tamanio,
+          forma:               atributos.forma,
+          pesoMasaDividida:    atributos.pesoMasaDividida,
           diasVencimiento:     item.U_JZ_DiasExp != null ? Math.round(Number(item.U_JZ_DiasExp)) : null,
+          esFormado:           String(item.U_JZ_Formado || '').trim().toUpperCase() === 'SI',
         };
       }
     }
@@ -595,7 +626,7 @@ class SAPService {
       const response = await this.client.get('/Items', {
         params: {
           $filter: "U_JZ_Tipos_Masa ne null and U_JZ_Tipos_Masa ne '' and Valid eq 'tYES' and Frozen eq 'tNO'",
-          $select: 'ItemCode,ItemName,U_JZ_Tipos_Masa,U_JZ_PanesPorBolsa,SalesUnitWeight1,U_JZ_MultiploDivisor,U_JZ_Tamanio,U_JZ_Forma,U_JZ_PesMasDiv,U_JZ_DiasExp,Valid,Frozen',
+          $select: 'ItemCode,ItemName,U_JZ_Tipos_Masa,U_JZ_PanesPorBolsa,SalesUnitWeight1,U_JZ_MultiploDivisor,U_JZ_Tamanio,U_JZ_Forma,U_JZ_PesMasDiv,U_JZ_DiasExp,U_JZ_Formado,Valid,Frozen',
           $top: top,
           $skip: skip,
         },
@@ -611,17 +642,24 @@ class SAPService {
 
     return todos.map(item => {
       const fallbackAtributos = inferirTamanioForma(item.ItemName);
+      const atributos = aplicarFallbacksAtributos(item.ItemCode, {
+        tamanio:          item.U_JZ_Tamanio || fallbackAtributos.tamanio,
+        forma:            item.U_JZ_Forma || fallbackAtributos.forma,
+        pesoMasaDividida: item.U_JZ_PesMasDiv != null ? Number(item.U_JZ_PesMasDiv) : null,
+        multiploDivisor:  item.U_JZ_MultiploDivisor != null ? Math.round(item.U_JZ_MultiploDivisor) : 0,
+      });
       return {
         itemCode:        item.ItemCode,
         itemName:        item.ItemName,
         tipoMasa:        item.U_JZ_Tipos_Masa,
         salesQtyPerPack: item.U_JZ_PanesPorBolsa || 1,
         gramaje:         item.SalesUnitWeight1 || 0,
-        multiploDivisor: item.U_JZ_MultiploDivisor != null ? Math.round(item.U_JZ_MultiploDivisor) : 0,
-        tamanio:         item.U_JZ_Tamanio || fallbackAtributos.tamanio,
-        forma:           item.U_JZ_Forma || fallbackAtributos.forma,
-        pesoMasaDividida: item.U_JZ_PesMasDiv != null ? Number(item.U_JZ_PesMasDiv) : null,
+        multiploDivisor: atributos.multiploDivisor,
+        tamanio:         atributos.tamanio,
+        forma:           atributos.forma,
+        pesoMasaDividida: atributos.pesoMasaDividida,
         diasVencimiento:  item.U_JZ_DiasExp != null ? Math.round(Number(item.U_JZ_DiasExp)) : null,
+        esFormado:        String(item.U_JZ_Formado || '').trim().toUpperCase() === 'SI',
       };
     });
   }
