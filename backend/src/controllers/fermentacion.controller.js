@@ -43,6 +43,11 @@ exports.getFermentacionInfo = async (req, res) => {
 
     const masa = masaResult.rows[0];
 
+    // Catálogo de cámaras disponibles (no hardcoded)
+    const camarasResult = await db.query(
+      `SELECT id, nombre, tipo FROM camaras_fermentacion WHERE activa = true ORDER BY nombre`
+    );
+
     // Obtener registro de fermentación existente
     const registroQuery = `
       SELECT
@@ -62,7 +67,9 @@ exports.getFermentacionInfo = async (req, res) => {
         rf.usuario_id,
         rf.usuario_nombre,
         rf.observaciones,
-        rf.fecha_registro
+        rf.fecha_registro,
+        rf.camara_id,
+        rf.camara_nombre
       FROM registros_fermentacion rf
       WHERE rf.masa_id = $1
       ORDER BY rf.fecha_registro DESC
@@ -100,6 +107,7 @@ exports.getFermentacionInfo = async (req, res) => {
           requiere_camara_frio: masa.requiere_camara_frio,
           tiempo_fermentacion_estandar_minutos: masa.tiempo_fermentacion_estandar_minutos
         },
+        camaras_disponibles: camarasResult.rows,
         registro_actual: registroResult.rows[0] || null,
         productos: productosResult.rows
       }
@@ -127,12 +135,25 @@ exports.registrarEntradaCamara = async (req, res) => {
       temperatura_camara,
       humedad_camara,
       observaciones,
-      hora_entrada_real
+      hora_entrada_real,
+      camara_id
     } = req.body;
 
     const usuario = req.user;
 
     await client.query('BEGIN');
+
+    let camaraNombre = null;
+    if (camara_id) {
+      const camR = await client.query(
+        `SELECT nombre FROM camaras_fermentacion WHERE id = $1 AND activa = true`, [camara_id]
+      );
+      if (!camR.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ success: false, message: 'Cámara no encontrada o inactiva' });
+      }
+      camaraNombre = camR.rows[0].nombre;
+    }
 
     // Verificar que la fase anterior (FORMADO o DIVISION) está completada
     const faseQuery = `
@@ -181,7 +202,9 @@ exports.registrarEntradaCamara = async (req, res) => {
         requiere_camara_frio,
         usuario_id,
         usuario_nombre,
-        observaciones
+        observaciones,
+        camara_id,
+        camara_nombre
       ) VALUES (
         $1,
         COALESCE($9::timestamptz, NOW()),
@@ -192,7 +215,9 @@ exports.registrarEntradaCamara = async (req, res) => {
         $5,
         $6,
         $7,
-        $8
+        $8,
+        $10,
+        $11
       )
       RETURNING *
     `;
@@ -206,7 +231,9 @@ exports.registrarEntradaCamara = async (req, res) => {
       usuario.id,
       usuario.nombre_completo,
       observaciones || null,
-      hora_entrada_real || null
+      hora_entrada_real || null,
+      camara_id || null,
+      camaraNombre
     ]);
 
     // Actualizar progreso de fase FERMENTACION a EN_PROGRESO

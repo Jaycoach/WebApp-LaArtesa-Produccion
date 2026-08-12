@@ -46,7 +46,8 @@ exports.getEmpaqueByOV = async (req, res) => {
                 mp.costo_mo_total,
                 pf_h.estado AS estado_horneado,
                 pf_e.estado AS estado_empaque,
-                re.sap_doc_entry_entrada
+                re.sap_doc_entry_entrada, re.sap_doc_num_entrada,
+                re.sap_doc_entry_salida, re.sap_doc_num_salida
          FROM masas_produccion mp
          LEFT JOIN progreso_fases pf_h ON pf_h.masa_id = mp.id AND pf_h.fase = 'HORNEADO'
          LEFT JOIN progreso_fases pf_e ON pf_e.masa_id = mp.id AND pf_e.fase = 'EMPAQUE'
@@ -863,9 +864,16 @@ exports.completarEmpaque = async (req, res) => {
 
     await client.query('COMMIT');
 
+    const docsFinales = await db.query(
+      `SELECT sap_doc_num_entrada, sap_doc_num_salida FROM registros_empaque WHERE id = $1`,
+      [empaqueId]
+    );
+
     res.json({
       success: true,
       sap_advertencias: sapAdvertencias,
+      sap_doc_num_entrada: docsFinales.rows[0]?.sap_doc_num_entrada || null,
+      sap_doc_num_salida: docsFinales.rows[0]?.sap_doc_num_salida || null,
       message: sapAdvertencias.length > 0
         ? `Empaque completado con advertencias SAP. Revisar: ${sapAdvertencias.join(' | ')}`
         : 'Empaque completado. Producción finalizada.',

@@ -94,6 +94,7 @@ interface SubMasa {
   estado_empaque: string;
   total_kilos_con_merma: number;
   sap_doc_entry_entrada: number | null;
+  sap_doc_num_entrada: string | null;
 }
 interface Producto {
   id: number;
@@ -1807,7 +1808,12 @@ export const EmpaqueMasa: React.FC = () => {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['empaque-ov', docNumBuscar] });
       const c = data.data?.costos;
-      if (c) mostrarMsg('ok', `Completado — Costo total: $${COP(c.total)} | $/ud: $${COP(c.unitario)}`);
+      const docsTxt = [
+        data.sap_doc_num_entrada && `Entrada ${data.sap_doc_num_entrada}`,
+        data.sap_doc_num_salida && `Salida ${data.sap_doc_num_salida}`,
+      ].filter(Boolean).join(' / ');
+      const costoTxt = c ? `Costo total: $${COP(c.total)} | $/ud: $${COP(c.unitario)}` : '';
+      mostrarMsg('ok', ['Completado', costoTxt, docsTxt && `SAP: ${docsTxt}`].filter(Boolean).join(' — '));
     },
     onError: (e: any) => {
       // 409 = entrada ya enviada a SAP — bloquear sin mensaje de error genérico
@@ -2050,7 +2056,7 @@ export const EmpaqueMasa: React.FC = () => {
                             onClick={() => completarMut.mutate(sm.id)}
                             disabled={completarMut.isPending || !!sm.sap_doc_entry_entrada}
                             className="text-xs px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
-                            title={sm.sap_doc_entry_entrada ? `Entrada SAP ya registrada (DocEntry ${sm.sap_doc_entry_entrada})` : undefined}
+                            title={sm.sap_doc_entry_entrada ? `Entrada SAP ya registrada (DocNum ${sm.sap_doc_num_entrada})` : undefined}
                           >
                             {completarMut.isPending ? 'Completando...' : 'Completar empaque'}
                           </button>

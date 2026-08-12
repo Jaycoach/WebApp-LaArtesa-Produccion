@@ -52,6 +52,7 @@ export const FermentacionMasa: React.FC = () => {
   const [subEtapa, setSubEtapa] = useState<SubEtapa>('entrada_camara');
   const [temperatura, setTemperatura] = useState('');
   const [humedad, setHumedad] = useState('');
+  const [camaraId, setCamaraId] = useState('');
   const [observaciones, setObservaciones] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [horaEntradaReal, setHoraEntradaReal] = useState('');
@@ -108,6 +109,7 @@ export const FermentacionMasa: React.FC = () => {
   const masa = data?.masa || {};
   const registro = data?.registro_actual;
   const productos = data?.productos || [];
+  const camarasDisponibles = data?.camaras_disponibles || [];
   // Columna real del controller: hora_salida_camara_sugerida
   const horaSalidaSugerida = registro?.hora_salida_camara_sugerida;
   // requiere_camara_frio viene dentro de data.masa (no en data directamente)
@@ -225,6 +227,21 @@ export const FermentacionMasa: React.FC = () => {
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
                 />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Cámara <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={camaraId}
+                  onChange={e => setCamaraId(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                >
+                  <option value="">Seleccionar cámara...</option>
+                  {camarasDisponibles.map((c: any) => (
+                    <option key={c.id} value={c.id}>{c.nombre}</option>
+                  ))}
+                </select>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Temperatura °C</label>
@@ -247,8 +264,9 @@ export const FermentacionMasa: React.FC = () => {
                   temperatura_camara: parseFloat(temperatura) || null,
                   humedad_camara: parseFloat(humedad) || null,
                   hora_entrada_real: datetimeLocalToBogotaISO(horaEntradaReal),
+                  camara_id: camaraId ? Number(camaraId) : null,
                 })}
-                disabled={mutacion.isPending}
+                disabled={mutacion.isPending || !camaraId}
                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-semibold py-3 rounded-lg transition-colors"
               >
                 {mutacion.isPending ? 'Registrando...' : '🌡️ Registrar Entrada a Cámara'}
@@ -384,6 +402,12 @@ export const FermentacionMasa: React.FC = () => {
                     <div className="bg-white rounded-lg p-3 border border-green-100">
                       <div className="text-xs text-gray-500 mb-0.5">Temperatura</div>
                       <div className="font-semibold text-gray-800">{registro.temperatura_camara}°C</div>
+                    </div>
+                  )}
+                  {registro.camara_nombre && (
+                    <div className="bg-white rounded-lg p-3 border border-green-100">
+                      <div className="text-xs text-gray-500 mb-0.5">Cámara</div>
+                      <div className="font-semibold text-gray-800">{registro.camara_nombre}</div>
                     </div>
                   )}
                   {registro.humedad_camara != null && (
