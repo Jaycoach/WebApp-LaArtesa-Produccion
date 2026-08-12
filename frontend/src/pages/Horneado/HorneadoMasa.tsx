@@ -157,6 +157,7 @@ export const HorneadoMasa: React.FC = () => {
   const hornos = data?.hornos_disponibles || [];
   const programas = data?.programas_todos || [];
 
+  const hornoSeleccionado = hornos.find((h: any) => h.id === tipoHornoId);
   const programaSeleccionado = programas.find((p: any) => p.id === programaId);
 
   return (
@@ -205,7 +206,15 @@ export const HorneadoMasa: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Horno</label>
-                <select value={tipoHornoId || ''} onChange={e => setTipoHornoId(Number(e.target.value))}
+                <select value={tipoHornoId || ''} onChange={e => {
+                    const id = Number(e.target.value);
+                    setTipoHornoId(id);
+                    const horno = hornos.find((h: any) => h.id === id);
+                    if (horno?.tipo === 'PISO') {
+                      const programaUno = programas.find((p: any) => p.numero_programa === 1);
+                      setProgramaId(programaUno ? programaUno.id : null);
+                    }
+                  }}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-400">
                   <option value="">Seleccionar horno...</option>
                   {hornos.map((h: any) => (
@@ -216,12 +225,18 @@ export const HorneadoMasa: React.FC = () => {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Programa</label>
                 <select value={programaId || ''} onChange={e => setProgramaId(Number(e.target.value))}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-400">
+                  disabled={hornoSeleccionado?.tipo === 'PISO'}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-400 disabled:bg-gray-100 disabled:text-gray-500">
                   <option value="">Seleccionar programa...</option>
                   {programas.map((p: any) => (
                     <option key={p.id} value={p.id}>Programa {p.numero_programa}</option>
                   ))}
                 </select>
+                {hornoSeleccionado?.tipo === 'PISO' && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Horno tipo Piso — Programa fijo en 1
+                  </p>
+                )}
               </div>
             </div>
 

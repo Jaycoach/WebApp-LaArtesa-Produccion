@@ -343,6 +343,15 @@ exports.iniciarHorneado = async (req, res) => {
       }
     }
 
+    // Horno tipo PISO solo admite Programa 1 — Fase 2, 12-ago-2026
+    if (horno.tipo === 'PISO' && numeroPrograma !== 1) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        message: `El horno ${horno.nombre} es de tipo PISO y solo admite el Programa 1`
+      });
+    }
+
     // Validar uso de damper si el horno no lo tiene
     if (!horno.tiene_damper && uso_damper_real) {
       await client.query('ROLLBACK');
