@@ -124,7 +124,11 @@ const getChecklist = async (req, res, next) => {
       const cantidadRequerida = parseFloat(ing.cantidad_kilos) || 0;
       // Excluidos (agua) solo se libran de manejo de LOTE hacia SAP — el stock
       // real SIEMPRE se valida igual que cualquier otro ingrediente.
-      const sinStock = (inv !== null && stockDisponible < cantidadRequerida);
+      // Una vez pesado, el ingrediente ya se consumió físicamente — no se
+      // vuelve a marcar sin_stock aunque el stock global caiga después
+      // (ej: otra masa consume el mismo ítem). El bloqueo por stock
+      // insuficiente solo aplica mientras pesado = false.
+      const sinStock = !ing.pesado && (inv !== null && stockDisponible < cantidadRequerida);
       const costoUnitario = inv ? parseFloat(inv.costo_promedio) : null;
       // Lotes ordenados por expiration_date ASC (FEFO) → el primero es el sugerido
       const lotes = lotesMap[ing.ingrediente_sap_code] || [];
