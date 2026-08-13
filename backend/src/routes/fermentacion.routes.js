@@ -18,31 +18,24 @@ router.use(verifyToken);
 router.get('/:masaId', fermentacionController.getFermentacionInfo);
 
 /**
- * @route   POST /api/fermentacion/:masaId/camara/entrada
- * @desc    Registrar entrada a cámara de fermentación
+ * @route   POST /api/fermentacion/:masaId/camara/entrada/:productoId
+ * @desc    Registrar entrada a cámara de una línea (producto) de fermentación
  * @access  Private
  */
-router.post('/:masaId/camara/entrada', fermentacionController.registrarEntradaCamara);
+router.post('/:masaId/camara/entrada/:productoId', fermentacionController.registrarEntradaCamara);
 
 /**
- * @route   POST /api/fermentacion/:masaId/camara/salida
- * @desc    Registrar salida de cámara de fermentación
+ * @route   POST /api/fermentacion/:masaId/camara/salida/:productoId
+ * @desc    Registrar salida de cámara de una línea (producto) de fermentación
  * @access  Private
  */
-router.post('/:masaId/camara/salida', fermentacionController.registrarSalidaCamara);
+router.post('/:masaId/camara/salida/:productoId', fermentacionController.registrarSalidaCamara);
 
 /**
- * @route   POST /api/fermentacion/:masaId/frio/entrada
- * @desc    Registrar entrada a cámara de frío
+ * @route   POST /api/fermentacion/:masaId/completar
+ * @desc    Completar fermentación (exige todas las líneas con salida registrada) y desbloquear HORNEADO
  * @access  Private
  */
-router.post('/:masaId/frio/entrada', fermentacionController.registrarEntradaFrio);
-
-/**
- * @route   POST /api/fermentacion/:masaId/frio/salida
- * @desc    Registrar salida de cámara de frío
- * @access  Private
- */
-router.post('/:masaId/frio/salida', fermentacionController.registrarSalidaFrio);
+router.post('/:masaId/completar', fermentacionController.completarFermentacion);
 
 module.exports = router;

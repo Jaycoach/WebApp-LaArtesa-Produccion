@@ -1,6 +1,11 @@
 /**
  * Controlador para el proceso de FERMENTACIÓN
  * Basado en reunión 23/01/2026
+ * Fase 6 (13-ago-2026): fermentación por producto/línea — cada producto
+ * puede ir a una cámara distinta (camaras_fermentacion, migración 053),
+ * con su propia hora de entrada/salida. Ver fermentacion_detalles
+ * (migración 057). La cámara fría ya no es un paso condicional aparte:
+ * es una fila más del catálogo elegible en la entrada de cualquier línea.
  */
 
 const db = require('../database/connection');
@@ -15,7 +20,6 @@ exports.getFermentacionInfo = async (req, res) => {
   try {
     const { masaId } = req.params;
 
-    // Obtener info de la masa y su configuración
     const masaQuery = `
       SELECT
         mp.id,
@@ -25,7 +29,6 @@ exports.getFermentacionInfo = async (req, res) => {
         mp.nombre_masa,
         mp.estado,
         mp.fase_actual,
-        ctm.requiere_camara_frio,
         ctm.tiempo_fermentacion_estandar_minutos
       FROM masas_produccion mp
       LEFT JOIN catalogo_tipos_masa ctm ON mp.tipo_masa = ctm.tipo_masa
@@ -43,33 +46,22 @@ exports.getFermentacionInfo = async (req, res) => {
 
     const masa = masaResult.rows[0];
 
-    // Catálogo de cámaras disponibles (no hardcoded)
+    // Catálogo de cámaras disponibles (migración 053) — incluye la fría,
+    // ya no es un flujo condicional aparte (Fase 6)
     const camarasResult = await db.query(
       `SELECT id, nombre, tipo FROM camaras_fermentacion WHERE activa = true ORDER BY nombre`
     );
 
-    // Obtener registro de fermentación existente
+    // Registro de fermentación (header de sesión — Fase 6 lo simplifica,
+    // el detalle por línea vive en fermentacion_detalles)
     const registroQuery = `
       SELECT
         rf.id,
         rf.uuid,
-        rf.hora_entrada_camara,
-        rf.hora_salida_camara_sugerida,
-        rf.hora_salida_camara_real,
-        rf.tiempo_fermentacion_minutos,
-        rf.temperatura_camara,
-        rf.humedad_camara,
-        rf.requiere_camara_frio,
-        rf.hora_entrada_frio,
-        rf.hora_salida_frio,
-        rf.tiempo_frio_minutos,
-        rf.temperatura_frio,
         rf.usuario_id,
         rf.usuario_nombre,
         rf.observaciones,
-        rf.fecha_registro,
-        rf.camara_id,
-        rf.camara_nombre
+        rf.fecha_registro
       FROM registros_fermentacion rf
       WHERE rf.masa_id = $1
       ORDER BY rf.fecha_registro DESC
@@ -93,6 +85,19 @@ exports.getFermentacionInfo = async (req, res) => {
     `;
     const productosResult = await db.query(productosQuery, [masaId]);
 
+    // Detalle por línea (Fase 6) — solo si ya hay un registro de sesión
+    const detallesResult = registroResult.rows[0]
+      ? await db.query(
+          `SELECT fd.id, fd.producto_masa_id, fd.camara_id, fd.camara_nombre,
+                  fd.hora_entrada_camara, fd.hora_salida_camara,
+                  fd.tiempo_fermentacion_minutos, fd.temperatura_camara, fd.humedad_camara,
+                  fd.fecha_actualizacion
+           FROM fermentacion_detalles fd
+           WHERE fd.registro_fermentacion_id = $1`,
+          [registroResult.rows[0].id]
+        )
+      : { rows: [] };
+
     res.json({
       success: true,
       data: {
@@ -104,12 +109,12 @@ exports.getFermentacionInfo = async (req, res) => {
           nombre: masa.nombre_masa,
           estado: masa.estado,
           fase_actual: masa.fase_actual,
-          requiere_camara_frio: masa.requiere_camara_frio,
           tiempo_fermentacion_estandar_minutos: masa.tiempo_fermentacion_estandar_minutos
         },
         camaras_disponibles: camarasResult.rows,
         registro_actual: registroResult.rows[0] || null,
-        productos: productosResult.rows
+        productos: productosResult.rows,
+        detalles: detallesResult.rows
       }
     });
   } catch (error) {
@@ -123,18 +128,18 @@ exports.getFermentacionInfo = async (req, res) => {
 };
 
 /**
- * Registrar entrada a cámara de fermentación
- * POST /api/fermentacion/:masaId/camara/entrada
+ * Registrar entrada a cámara de una línea (producto) de fermentación.
+ * Crea el registro de sesión (header) si es la primera línea de la masa.
+ * POST /api/fermentacion/:masaId/camara/entrada/:productoId
  */
 exports.registrarEntradaCamara = async (req, res) => {
   const client = await db.getClient();
 
   try {
-    const { masaId } = req.params;
+    const { masaId, productoId } = req.params;
     const {
       temperatura_camara,
       humedad_camara,
-      observaciones,
       hora_entrada_real,
       camara_id
     } = req.body;
@@ -142,6 +147,16 @@ exports.registrarEntradaCamara = async (req, res) => {
     const usuario = req.user;
 
     await client.query('BEGIN');
+
+    // El producto debe pertenecer a esta masa
+    const productoCheck = await client.query(
+      `SELECT id FROM productos_por_masa WHERE id = $1 AND masa_id = $2`,
+      [productoId, masaId]
+    );
+    if (!productoCheck.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Producto no encontrado en esta masa' });
+    }
 
     let camaraNombre = null;
     if (camara_id) {
@@ -155,117 +170,97 @@ exports.registrarEntradaCamara = async (req, res) => {
       camaraNombre = camR.rows[0].nombre;
     }
 
-    // Verificar que la fase anterior (FORMADO o DIVISION) está completada
-    const faseQuery = `
-      SELECT estado, fase
-      FROM progreso_fases
-      WHERE masa_id = $1
-        AND fase IN ('FORMADO', 'DIVISION')
-        AND estado = 'COMPLETADA'
-      ORDER BY
-        CASE fase
-          WHEN 'FORMADO' THEN 1
-          WHEN 'DIVISION' THEN 2
-        END
-      LIMIT 1
-    `;
-    const faseResult = await client.query(faseQuery, [masaId]);
+    // Buscar registro de sesión existente; si no hay, esta es la primera
+    // línea que entra — validar fase anterior y crear el header
+    let registroResult = await client.query(
+      `SELECT id FROM registros_fermentacion WHERE masa_id = $1 ORDER BY fecha_registro DESC LIMIT 1`,
+      [masaId]
+    );
 
-    if (faseResult.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({
-        success: false,
-        message: 'Debe completar FORMADO o DIVISION antes de iniciar FERMENTACION'
-      });
+    let registroFermentacionId;
+
+    if (registroResult.rows.length === 0) {
+      // Verificar que la fase anterior (FORMADO o DIVISION) está completada
+      const faseQuery = `
+        SELECT estado, fase
+        FROM progreso_fases
+        WHERE masa_id = $1
+          AND fase IN ('FORMADO', 'DIVISION')
+          AND estado = 'COMPLETADA'
+        ORDER BY
+          CASE fase
+            WHEN 'FORMADO' THEN 1
+            WHEN 'DIVISION' THEN 2
+          END
+        LIMIT 1
+      `;
+      const faseResult = await client.query(faseQuery, [masaId]);
+
+      if (faseResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          message: 'Debe completar FORMADO o DIVISION antes de iniciar FERMENTACION'
+        });
+      }
+
+      const insertHeaderQuery = `
+        INSERT INTO registros_fermentacion (masa_id, usuario_id, usuario_nombre)
+        VALUES ($1, $2, $3)
+        RETURNING id
+      `;
+      const headerResult = await client.query(insertHeaderQuery, [
+        masaId, usuario.id, usuario.nombre_completo
+      ]);
+      registroFermentacionId = headerResult.rows[0].id;
+
+      const updateFaseQuery = `
+        UPDATE progreso_fases
+        SET estado = 'EN_PROGRESO', fecha_inicio = NOW(), usuario_responsable = $2
+        WHERE masa_id = $1 AND fase = 'FERMENTACION'
+      `;
+      await client.query(updateFaseQuery, [masaId, usuario.id]);
+
+      const updateMasaQuery = `
+        UPDATE masas_produccion SET fase_actual = 'FERMENTACION' WHERE id = $1
+      `;
+      await client.query(updateMasaQuery, [masaId]);
+    } else {
+      registroFermentacionId = registroResult.rows[0].id;
     }
 
-    // Obtener tiempo estándar de fermentación
-    const tiempoQuery = `
-      SELECT ctm.tiempo_fermentacion_estandar_minutos, ctm.requiere_camara_frio
-      FROM masas_produccion mp
-      JOIN catalogo_tipos_masa ctm ON mp.tipo_masa = ctm.tipo_masa
-      WHERE mp.id = $1
-    `;
-    const tiempoResult = await client.query(tiempoQuery, [masaId]);
-    const tiempoEstandar = tiempoResult.rows[0]?.tiempo_fermentacion_estandar_minutos || 40;
-    const requiereFrio = tiempoResult.rows[0]?.requiere_camara_frio || false;
-
-    // Calcular hora de salida sugerida
-    const insertQuery = `
-      INSERT INTO registros_fermentacion (
-        masa_id,
-        hora_entrada_camara,
-        hora_salida_camara_sugerida,
-        tiempo_fermentacion_minutos,
-        temperatura_camara,
-        humedad_camara,
-        requiere_camara_frio,
-        usuario_id,
-        usuario_nombre,
-        observaciones,
-        camara_id,
-        camara_nombre
-      ) VALUES (
-        $1,
-        COALESCE($9::timestamptz, NOW()),
-        COALESCE($9::timestamptz, NOW()) + INTERVAL '${tiempoEstandar} minutes',
-        $2,
-        $3,
-        $4,
-        $5,
-        $6,
-        $7,
-        $8,
-        $10,
-        $11
-      )
+    // Registrar/actualizar la línea (permite corregir si el operario se equivoca)
+    const upsertQuery = `
+      INSERT INTO fermentacion_detalles (
+        registro_fermentacion_id, producto_masa_id, camara_id, camara_nombre,
+        hora_entrada_camara, temperatura_camara, humedad_camara
+      ) VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, NOW()), $6, $7)
+      ON CONFLICT (registro_fermentacion_id, producto_masa_id) DO UPDATE SET
+        camara_id = EXCLUDED.camara_id,
+        camara_nombre = EXCLUDED.camara_nombre,
+        hora_entrada_camara = EXCLUDED.hora_entrada_camara,
+        temperatura_camara = EXCLUDED.temperatura_camara,
+        humedad_camara = EXCLUDED.humedad_camara,
+        fecha_actualizacion = NOW()
       RETURNING *
     `;
-
-    const result = await client.query(insertQuery, [
-      masaId,
-      tiempoEstandar,
-      temperatura_camara || null,
-      humedad_camara || null,
-      requiereFrio,
-      usuario.id,
-      usuario.nombre_completo,
-      observaciones || null,
-      hora_entrada_real || null,
+    const result = await client.query(upsertQuery, [
+      registroFermentacionId,
+      productoId,
       camara_id || null,
-      camaraNombre
+      camaraNombre,
+      hora_entrada_real || null,
+      temperatura_camara || null,
+      humedad_camara || null
     ]);
-
-    // Actualizar progreso de fase FERMENTACION a EN_PROGRESO
-    const updateFaseQuery = `
-      UPDATE progreso_fases
-      SET
-        estado = 'EN_PROGRESO',
-        fecha_inicio = NOW(),
-        usuario_responsable = $2,
-        datos_fase = jsonb_build_object(
-          'entrada_camara', COALESCE($3::timestamptz, NOW()),
-          'salida_sugerida', COALESCE($3::timestamptz, NOW()) + INTERVAL '${tiempoEstandar} minutes'
-        )
-      WHERE masa_id = $1 AND fase = 'FERMENTACION'
-    `;
-    await client.query(updateFaseQuery, [masaId, usuario.id, hora_entrada_real || null]);
-
-    // Actualizar fase_actual de la masa
-    const updateMasaQuery = `
-      UPDATE masas_produccion
-      SET fase_actual = 'FERMENTACION'
-      WHERE id = $1
-    `;
-    await client.query(updateMasaQuery, [masaId]);
 
     await client.query('COMMIT');
 
-    logger.info(`Fermentación iniciada (entrada a cámara) para masa ${masaId} por usuario ${usuario.username}`);
+    logger.info(`Entrada a cámara registrada — masa ${masaId}, producto ${productoId}, por usuario ${usuario.username}`);
 
     res.json({
       success: true,
-      message: 'Entrada a cámara de fermentación registrada correctamente',
+      message: 'Entrada a cámara registrada correctamente',
       data: result.rows[0]
     });
   } catch (error) {
@@ -282,99 +277,70 @@ exports.registrarEntradaCamara = async (req, res) => {
 };
 
 /**
- * Registrar salida de cámara de fermentación
- * POST /api/fermentacion/:masaId/camara/salida
+ * Registrar salida de cámara de una línea (producto) de fermentación.
+ * Calcula y guarda el tiempo real de fermentación de esa línea.
+ * POST /api/fermentacion/:masaId/camara/salida/:productoId
  */
 exports.registrarSalidaCamara = async (req, res) => {
   const client = await db.getClient();
 
   try {
-    const { masaId } = req.params;
-    const { observaciones, hora_salida_real } = req.body;
+    const { masaId, productoId } = req.params;
+    const { hora_salida_real } = req.body;
 
     const usuario = req.user;
 
-    // Bloqueo: no se puede completar si hay ajustes de pesaje pendientes de SAP
-    const ajustesPendientes = await calcularAjustesPendientes(masaId);
-    if (ajustesPendientes.length > 0) {
-      return res.status(409).json({
-        success: false,
-        message: `No se puede completar FERMENTACION: hay ${ajustesPendientes.length} ajuste(s) de pesaje pendientes de transmitir a SAP. Ve a Pesaje y confirma los ajustes antes de continuar.`,
-        data: { ajustes_pendientes: ajustesPendientes },
-      });
-    }
-
     await client.query('BEGIN');
 
-    // Obtener registro de fermentación actual
-    const registroQuery = `
-      SELECT id, hora_entrada_camara, requiere_camara_frio
-      FROM registros_fermentacion
-      WHERE masa_id = $1
-      ORDER BY fecha_registro DESC
-      LIMIT 1
-    `;
-    const registroResult = await client.query(registroQuery, [masaId]);
-
+    const registroResult = await client.query(
+      `SELECT id FROM registros_fermentacion WHERE masa_id = $1 ORDER BY fecha_registro DESC LIMIT 1`,
+      [masaId]
+    );
     if (registroResult.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(400).json({
         success: false,
-        message: 'No se encontró un registro de entrada a cámara'
+        message: 'No hay una fermentación iniciada para esta masa'
+      });
+    }
+    const registroFermentacionId = registroResult.rows[0].id;
+
+    const detalleResult = await client.query(
+      `SELECT id, hora_entrada_camara FROM fermentacion_detalles
+       WHERE registro_fermentacion_id = $1 AND producto_masa_id = $2`,
+      [registroFermentacionId, productoId]
+    );
+    if (detalleResult.rows.length === 0 || !detalleResult.rows[0].hora_entrada_camara) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        message: 'Debe registrar la entrada de esta línea antes de registrar la salida'
       });
     }
 
-    const registro = registroResult.rows[0];
-
-    // Fix defensivo: si hora_entrada_camara es NULL (registro creado por flujo antiguo),
-    // rellenarla con la hora de salida para no violar check_salida_camara
     const updateQuery = `
-      UPDATE registros_fermentacion
+      UPDATE fermentacion_detalles
       SET
-        hora_entrada_camara     = COALESCE(hora_entrada_camara, COALESCE($3::timestamptz, NOW())),
-        hora_salida_camara_real = COALESCE($3::timestamptz, NOW()),
-        observaciones = COALESCE($2, observaciones)
+        hora_salida_camara = COALESCE($2::timestamptz, NOW()),
+        tiempo_fermentacion_minutos = ROUND(
+          EXTRACT(EPOCH FROM (COALESCE($2::timestamptz, NOW()) - hora_entrada_camara)) / 60
+        ),
+        fecha_actualizacion = NOW()
       WHERE id = $1
       RETURNING *
     `;
-
     const result = await client.query(updateQuery, [
-      registro.id,
-      observaciones || null,
+      detalleResult.rows[0].id,
       hora_salida_real || null
     ]);
 
-    // Si no requiere cámara de frío, completar la fase
-    if (!registro.requiere_camara_frio) {
-      const updateFaseQuery = `
-        UPDATE progreso_fases
-        SET
-          estado = 'COMPLETADA',
-          porcentaje_completado = 100,
-          fecha_completado = NOW(),
-          observaciones = $2
-        WHERE masa_id = $1 AND fase = 'FERMENTACION'
-      `;
-      await client.query(updateFaseQuery, [masaId, observaciones || null]);
-
-      // Desbloquear fase HORNEADO
-      const desbloquearQuery = `
-        UPDATE progreso_fases
-        SET estado = 'BLOQUEADA'
-        WHERE masa_id = $1 AND fase = 'HORNEADO' AND estado = 'BLOQUEADA'
-      `;
-      await client.query(desbloquearQuery, [masaId]);
-    }
-
     await client.query('COMMIT');
 
-    logger.info(`Salida de cámara registrada para masa ${masaId} por usuario ${usuario.username}`);
+    logger.info(`Salida de cámara registrada — masa ${masaId}, producto ${productoId}, por usuario ${usuario.username}`);
 
     res.json({
       success: true,
-      message: registro.requiere_camara_frio
-        ? 'Salida de cámara registrada. Debe ingresar a cámara de frío'
-        : 'Fermentación completada. Puede proceder a HORNEADO',
+      message: 'Salida de cámara registrada correctamente',
       data: result.rows[0]
     });
   } catch (error) {
@@ -391,95 +357,16 @@ exports.registrarSalidaCamara = async (req, res) => {
 };
 
 /**
- * Registrar entrada a cámara de frío
- * POST /api/fermentacion/:masaId/frio/entrada
+ * Completar fermentación — exige que todas las líneas tengan salida
+ * de cámara registrada. Desbloquea HORNEADO.
+ * POST /api/fermentacion/:masaId/completar
  */
-exports.registrarEntradaFrio = async (req, res) => {
+exports.completarFermentacion = async (req, res) => {
   const client = await db.getClient();
 
   try {
     const { masaId } = req.params;
-    const { temperatura_frio, observaciones } = req.body;
-
-    await client.query('BEGIN');
-
-    // Obtener registro actual
-    const registroQuery = `
-      SELECT id, requiere_camara_frio, hora_salida_camara_real
-      FROM registros_fermentacion
-      WHERE masa_id = $1
-      ORDER BY fecha_registro DESC
-      LIMIT 1
-    `;
-    const registroResult = await client.query(registroQuery, [masaId]);
-
-    if (registroResult.rows.length === 0 || !registroResult.rows[0].requiere_camara_frio) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({
-        success: false,
-        message: 'Esta masa no requiere cámara de frío'
-      });
-    }
-
-    if (!registroResult.rows[0].hora_salida_camara_real) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({
-        success: false,
-        message: 'Debe registrar la salida de cámara de fermentación primero'
-      });
-    }
-
-    const registro = registroResult.rows[0];
-
-    // Actualizar con entrada a frío
-    const updateQuery = `
-      UPDATE registros_fermentacion
-      SET
-        hora_entrada_frio = NOW(),
-        temperatura_frio = $2,
-        observaciones = COALESCE($3, observaciones)
-      WHERE id = $1
-      RETURNING *
-    `;
-
-    const result = await client.query(updateQuery, [
-      registro.id,
-      temperatura_frio || null,
-      observaciones || null
-    ]);
-
-    await client.query('COMMIT');
-
-    logger.info(`Entrada a cámara de frío registrada para masa ${masaId}`);
-
-    res.json({
-      success: true,
-      message: 'Entrada a cámara de frío registrada correctamente',
-      data: result.rows[0]
-    });
-  } catch (error) {
-    await client.query('ROLLBACK');
-    logger.error('Error al registrar entrada a frío:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al registrar entrada a frío',
-      error: error.message
-    });
-  } finally {
-    client.release();
-  }
-};
-
-/**
- * Registrar salida de cámara de frío
- * POST /api/fermentacion/:masaId/frio/salida
- */
-exports.registrarSalidaFrio = async (req, res) => {
-  const client = await db.getClient();
-
-  try {
-    const { masaId } = req.params;
-    const { observaciones, hora_salida_real } = req.body;
+    const { observaciones } = req.body;
 
     const usuario = req.user;
 
@@ -495,45 +382,43 @@ exports.registrarSalidaFrio = async (req, res) => {
 
     await client.query('BEGIN');
 
-    // Obtener registro actual
-    const registroQuery = `
-      SELECT id, hora_entrada_frio
-      FROM registros_fermentacion
-      WHERE masa_id = $1
-      ORDER BY fecha_registro DESC
-      LIMIT 1
-    `;
-    const registroResult = await client.query(registroQuery, [masaId]);
-
-    if (registroResult.rows.length === 0 || !registroResult.rows[0].hora_entrada_frio) {
+    const registroResult = await client.query(
+      `SELECT id FROM registros_fermentacion WHERE masa_id = $1 ORDER BY fecha_registro DESC LIMIT 1`,
+      [masaId]
+    );
+    if (registroResult.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(400).json({
         success: false,
-        message: 'No se encontró registro de entrada a cámara de frío'
+        message: 'No se encontró una fermentación iniciada para esta masa'
+      });
+    }
+    const registroFermentacionId = registroResult.rows[0].id;
+
+    // Todas las líneas (todos los productos de la masa) deben tener salida registrada
+    const pendientesR = await client.query(
+      `SELECT ppm.producto_nombre
+       FROM productos_por_masa ppm
+       LEFT JOIN fermentacion_detalles fd
+         ON fd.producto_masa_id = ppm.id AND fd.registro_fermentacion_id = $2
+       WHERE ppm.masa_id = $1 AND fd.hora_salida_camara IS NULL`,
+      [masaId, registroFermentacionId]
+    );
+    if (pendientesR.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        message: `Faltan líneas por sacar de cámara: ${pendientesR.rows.map(p => p.producto_nombre).join(', ')}`,
       });
     }
 
-    const registro = registroResult.rows[0];
-    const horaSalida = hora_salida_real || null;
-    // Calcular tiempo en frío
-    const updateQuery = `
+    const updateHeaderQuery = `
       UPDATE registros_fermentacion
-      SET
-        hora_salida_frio = COALESCE($4::timestamptz, NOW()),
-        tiempo_frio_minutos = EXTRACT(EPOCH FROM (COALESCE($4::timestamptz, NOW()) - $2)) / 60,
-        observaciones = COALESCE($3, observaciones)
+      SET observaciones = COALESCE($2, observaciones)
       WHERE id = $1
-      RETURNING *
     `;
+    await client.query(updateHeaderQuery, [registroFermentacionId, observaciones || null]);
 
-    const result = await client.query(updateQuery, [
-      registro.id,
-      registro.hora_entrada_frio,
-      observaciones || null,
-      horaSalida
-    ]);
-
-    // Completar fase FERMENTACION
     const updateFaseQuery = `
       UPDATE progreso_fases
       SET
@@ -545,29 +430,25 @@ exports.registrarSalidaFrio = async (req, res) => {
     `;
     await client.query(updateFaseQuery, [masaId, observaciones || null]);
 
-    // Desbloquear fase HORNEADO
-    const desbloquearQuery = `
-      UPDATE progreso_fases
-      SET estado = 'BLOQUEADA'
-      WHERE masa_id = $1 AND fase = 'HORNEADO' AND estado = 'BLOQUEADA'
-    `;
-    await client.query(desbloquearQuery, [masaId]);
-
     await client.query('COMMIT');
 
-    logger.info(`Salida de cámara de frío y fermentación completada para masa ${masaId} por usuario ${usuario.username}`);
+    // Desbloquear fase HORNEADO usando el modelo estándar (mismo patrón que
+    // completarFormado — corrige el no-op que tenía este controller antes)
+    const fasesModel = require('../models/fases.model');
+    await fasesModel.desbloquearSiguienteFase(masaId, 'FERMENTACION');
+
+    logger.info(`Fermentación completada para masa ${masaId} por usuario ${usuario.username}`);
 
     res.json({
       success: true,
-      message: 'Fermentación completada. Puede proceder a HORNEADO',
-      data: result.rows[0]
+      message: 'Fermentación completada. Puede proceder a HORNEADO'
     });
   } catch (error) {
     await client.query('ROLLBACK');
-    logger.error('Error al registrar salida de frío:', error);
+    logger.error('Error al completar fermentación:', error);
     res.status(500).json({
       success: false,
-      message: 'Error al registrar salida de frío',
+      message: 'Error al completar fermentación',
       error: error.message
     });
   } finally {
