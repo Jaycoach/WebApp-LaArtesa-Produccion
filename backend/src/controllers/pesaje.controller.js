@@ -13,7 +13,7 @@ const fasesModel = require('../models/fases.model');
 const db        = require('../database/connection');
 const logger     = require('../utils/logger');
 const sapService    = require('../services/sap.service');
-const { ejecutarSubdivision } = require('./fases.controller');
+const { ejecutarSubdivision, simularAjusteDivisorPorGrupo } = require('./fases.controller');
 const { sendPesajeCompletadoEmail } = require('../services/email.service');
 
 /**
@@ -826,6 +826,35 @@ const confirmarPesaje = async (req, res, next) => {
       logger.error(`Error asignando lote a masa ${masaId}:`, loteErr);
     }
     // ── Fin asignación lote ────────────────────────────────────
+
+    // Fase 4 (12-ago-2026): segunda pasada de la simulación de grupo, ya
+    // con los números confirmados por el pesador — antes de que
+    // ejecutarSubdivision reparta en tandas.
+    const productosParaSimulacion = await db.query(
+      `SELECT id, producto_nombre, tamanio, forma, multiplo_divisor,
+              unidades_por_paquete, unidades_programadas
+       FROM productos_por_masa
+       WHERE masa_id = $1`,
+      [masaId]
+    );
+    const masaTipoResult = await db.query(`SELECT tipo_masa FROM masas_produccion WHERE id = $1`, [masaId]);
+    const ajustesGrupoPesaje = simularAjusteDivisorPorGrupo(productosParaSimulacion.rows, masaTipoResult.rows[0].tipo_masa);
+    for (const ajuste of ajustesGrupoPesaje) {
+      await db.query(
+        `UPDATE productos_por_masa
+         SET unidades_programadas   = $1::integer,
+             kilos_programados      = gramaje_unitario * $1::integer / 1000.0,
+             cantidad_paquetes      = $1::integer,
+             origen_ajuste_divisor  = 'PESAJE',
+             unidades_ajuste_grupal = unidades_ajuste_grupal + $2::integer,
+             updated_at             = NOW()
+         WHERE id = $3`,
+        [ajuste.unidadesProgramadasNuevas, ajuste.deltaPaquetes, ajuste.productoId]
+      );
+    }
+    if (ajustesGrupoPesaje.length > 0) {
+      logger.info(`Masa ${masaId}: simulación de grupo (Fase 4) ajustó ${ajustesGrupoPesaje.length} producto(s) al confirmar pesaje.`);
+    }
 
     // ── NUEVO v4: Intentar subdivisión con pesaje heredado ─────────
     let subdivision = null;

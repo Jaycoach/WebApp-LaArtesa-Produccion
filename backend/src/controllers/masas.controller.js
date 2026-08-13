@@ -8,6 +8,7 @@ const sapService = require('../services/sap.service');
 const logger = require('../utils/logger');
 const { sendAprobacionMasaEmail, sendAprobacionMasaBulkEmail } = require('../services/email.service');
 const { devolverStockMasa } = require('./pesaje.controller');
+const { simularAjusteDivisorPorGrupo } = require('./fases.controller');
 
 /**
  * @desc    Obtener masas por fecha
@@ -420,6 +421,37 @@ const aprobarMasaCore = async (id, userId, opts = {}) => {
     );
   }
   logger.info(`Masa ${id}: delta +${DELTA_DEFAULT_PAQ} paq aplicado a ${prodsSinAjuste.rows.length} productos sin ajuste manual.`);
+
+  // Fase 4 (12-ago-2026): segunda pasada — revisa si algún grupo
+  // (clasificarClaveAgrupacion) no alcanza el múltiplo del divisor
+  // compartido tras el delta+2 de arriba, y ajusta el producto que
+  // corresponda. kilos_programados y cantidad_paquetes se escriben junto
+  // con unidades_programadas para que el ajuste se refleje en el
+  // prorrateo de costos de confirmarPesaje (pesaje.controller.js).
+  const productosParaSimulacion = await db.query(
+    `SELECT id, producto_nombre, tamanio, forma, multiplo_divisor,
+            unidades_por_paquete, unidades_programadas
+     FROM productos_por_masa
+     WHERE masa_id = $1`,
+    [id]
+  );
+  const ajustesGrupo = simularAjusteDivisorPorGrupo(productosParaSimulacion.rows, masa.rows[0].tipo_masa);
+  for (const ajuste of ajustesGrupo) {
+    await db.query(
+      `UPDATE productos_por_masa
+       SET unidades_programadas   = $1::integer,
+           kilos_programados      = gramaje_unitario * $1::integer / 1000.0,
+           cantidad_paquetes      = $1::integer,
+           origen_ajuste_divisor  = 'APROBACION',
+           unidades_ajuste_grupal = unidades_ajuste_grupal + $2::integer,
+           updated_at             = NOW()
+       WHERE id = $3`,
+      [ajuste.unidadesProgramadasNuevas, ajuste.deltaPaquetes, ajuste.productoId]
+    );
+  }
+  if (ajustesGrupo.length > 0) {
+    logger.info(`Masa ${id}: simulación de grupo (Fase 4) ajustó ${ajustesGrupo.length} producto(s) al aprobar.`);
+  }
 
   const totalPaquetesR = await db.query(
     `SELECT COALESCE(SUM(unidades_programadas), 0) AS total

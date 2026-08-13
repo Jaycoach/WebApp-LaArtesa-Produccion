@@ -6,6 +6,7 @@
 const db = require('../database/connection');
 const sapService = require('../services/sap.service');
 const logger = require('../utils/logger');
+const { simularAjusteDivisorPorGrupo } = require('./fases.controller');
 
 /**
  * @desc    Sincronizar órdenes desde SAP y crear masas de producción
@@ -1050,6 +1051,34 @@ const sincronizarDesdeOV = async (req, res, next) => {
              unidadesAjustadas, unidadesExcedente,
              masaIdExistente, itemCode]
           );
+        }
+
+        // Fase 4 (12-ago-2026): simulación de grupo tras recalcular
+        // totales — acotado a este bloque de merge, sin tocar la lógica
+        // de consolidación de OVs de arriba (B1, ya resuelto).
+        const productosSimulacionResult = await client.query(
+          `SELECT id, producto_nombre, tamanio, forma, multiplo_divisor,
+                  unidades_por_paquete, unidades_programadas
+           FROM productos_por_masa
+           WHERE masa_id = $1`,
+          [masaIdExistente]
+        );
+        const ajustesGrupoMerge = simularAjusteDivisorPorGrupo(productosSimulacionResult.rows, tipoMasa);
+        for (const ajuste of ajustesGrupoMerge) {
+          await client.query(
+            `UPDATE productos_por_masa
+             SET unidades_programadas   = $1::integer,
+                 kilos_programados      = gramaje_unitario * $1::integer / 1000.0,
+                 cantidad_paquetes      = $1::integer,
+                 origen_ajuste_divisor  = 'MERGE_OV',
+                 unidades_ajuste_grupal = unidades_ajuste_grupal + $2::integer,
+                 updated_at             = NOW()
+             WHERE id = $3`,
+            [ajuste.unidadesProgramadasNuevas, ajuste.deltaPaquetes, ajuste.productoId]
+          );
+        }
+        if (ajustesGrupoMerge.length > 0) {
+          logger.info(`Tipo ${tipoMasa} — simulación de grupo (Fase 4) ajustó ${ajustesGrupoMerge.length} producto(s) al mergear OV nueva en masa ${masaIdExistente}.`);
         }
 
         // Actualizar contadores de la masa
