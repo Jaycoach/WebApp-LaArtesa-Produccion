@@ -780,6 +780,8 @@ async function ejecutarSubdivision(masaId, userId, conPesaje = false) {
 }
 
 async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false) {
+  await recalcularTotalesMasa(masaId, client);
+
   const masaResult = await client.query(
     `SELECT id, codigo_masa, tipo_masa, nombre_masa, fecha_produccion,
             total_kilos_base, total_kilos_con_merma, porcentaje_merma,
