@@ -24,6 +24,14 @@ interface FormadoInfo {
   productos: any[];
   maquinas_disponibles: Array<{ id: number; nombre: string; tipo: string }>;
   registro_actual: any | null;
+  detalles: Array<{
+    id: number;
+    producto_masa_id: number;
+    maquina_formado_id: number | null;
+    maquina_nombre: string | null;
+    unidades_formadas: number;
+    fecha_actualizacion: string;
+  }>;
 }
 
 // ─────────────────────────────────────────────
@@ -53,7 +61,7 @@ export const FormadoMasa: React.FC = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const [maquinaId, setMaquinaId] = useState<number | null>(null);
+  const [detallesLocal, setDetallesLocal] = useState<Record<number, { maquina_formado_id: number | null; unidades_formadas: string }>>({});
   const [observaciones, setObservaciones] = useState('');
   const [etapa, setEtapa] = useState<'inicio' | 'progreso' | 'completar'>('inicio');
   const [showMO, setShowMO] = useState(false);
@@ -69,8 +77,15 @@ export const FormadoMasa: React.FC = () => {
   React.useEffect(() => {
     if (data?.registro_actual && !data.registro_actual.fecha_fin) {
       setEtapa('progreso');
-      setMaquinaId(data.registro_actual.maquina_formado_id);
       setObservaciones(data.registro_actual.observaciones || '');
+      const init: Record<number, { maquina_formado_id: number | null; unidades_formadas: string }> = {};
+      for (const d of data.detalles || []) {
+        init[d.producto_masa_id] = {
+          maquina_formado_id: d.maquina_formado_id,
+          unidades_formadas: d.unidades_formadas > 0 ? String(d.unidades_formadas) : '',
+        };
+      }
+      setDetallesLocal(init);
     } else if (data?.registro_actual?.fecha_fin) {
       setEtapa('completar');
       setObservaciones(data.registro_actual.observaciones || '');
@@ -82,7 +97,7 @@ export const FormadoMasa: React.FC = () => {
       const res = await fetch(`/api/formado/${masaId}/iniciar`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ maquina_formado_id: maquinaId, observaciones })
+        body: JSON.stringify({ observaciones })
       });
       const d = await res.json();
       if (!d.success) throw new Error(d.message);
@@ -92,6 +107,23 @@ export const FormadoMasa: React.FC = () => {
       setEtapa('progreso');
       queryClient.invalidateQueries({ queryKey: ['formado', masaId] });
     },
+    onError: (e: any) => setErrorMsg(e.message)
+  });
+
+  const actualizarDetalleMutation = useMutation({
+    mutationFn: async ({ productoMasaId, maquina_formado_id, unidades_formadas }: {
+      productoMasaId: number; maquina_formado_id?: number | null; unidades_formadas?: number;
+    }) => {
+      const res = await fetch(`/api/formado/${masaId}/detalle/${productoMasaId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ maquina_formado_id, unidades_formadas })
+      });
+      const d = await res.json();
+      if (!d.success) throw new Error(d.message);
+      return d;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['formado', masaId] }),
     onError: (e: any) => setErrorMsg(e.message)
   });
 
@@ -206,8 +238,8 @@ export const FormadoMasa: React.FC = () => {
           </div>
         )}
 
-        {/* Productos a formar */}
-        {productos.length > 0 && (
+        {/* Productos a formar — vista previa antes de iniciar */}
+        {etapa === 'inicio' && productos.length > 0 && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
             <h2 className="text-lg font-semibold text-gray-800 mb-4">Productos a formar</h2>
             <div className="overflow-x-auto">
@@ -254,27 +286,11 @@ export const FormadoMasa: React.FC = () => {
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-4">
             <h2 className="text-lg font-semibold text-gray-800">Iniciar Formado</h2>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Máquina formadora <span className="text-red-500">*</span>
-              </label>
-              {maquinas_disponibles.length > 0 ? (
-                <select
-                  value={maquinaId || ''}
-                  onChange={e => setMaquinaId(Number(e.target.value))}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-400"
-                >
-                  <option value="">Seleccionar máquina...</option>
-                  {maquinas_disponibles.map((m) => (
-                    <option key={m.id} value={m.id}>{m.nombre}</option>
-                  ))}
-                </select>
-              ) : (
-                <div className="text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2">
-                  ⚠️ No hay máquinas de formado configuradas. Se registrará como formado manual.
-                </div>
-              )}
-            </div>
+            <p className="text-sm text-gray-500">
+              Al iniciar se crea un registro por cada producto de la tabla de arriba —
+              la máquina y las unidades formadas se registran individualmente producto
+              por producto en el siguiente paso.
+            </p>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Observaciones</label>
@@ -289,7 +305,7 @@ export const FormadoMasa: React.FC = () => {
 
             <button
               onClick={() => iniciarMutation.mutate()}
-              disabled={iniciarMutation.isPending || (maquinas_disponibles.length > 0 && !maquinaId)}
+              disabled={iniciarMutation.isPending}
               className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white font-semibold py-3 rounded-lg transition-colors"
             >
               {iniciarMutation.isPending ? 'Iniciando...' : '▶ Iniciar Formado'}
@@ -305,8 +321,77 @@ export const FormadoMasa: React.FC = () => {
               <h2 className="text-lg font-semibold text-orange-700">Formado en progreso</h2>
             </div>
             <p className="text-gray-600 text-sm">
-              El proceso de formado está activo. Cuando las piezas estén formadas, completa la fase.
+              Registra la máquina y las unidades formadas de cada producto. Cuando todos
+              tengan unidades formadas, completa la fase.
             </p>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    <th className="text-left py-2 text-gray-500 font-medium">Producto</th>
+                    <th className="text-center py-2 text-gray-500 font-medium">Und. a Formar</th>
+                    <th className="text-center py-2 text-gray-500 font-medium">Máquina</th>
+                    <th className="text-center py-2 text-gray-500 font-medium">Unidades Formadas</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {productos.map((p: any) => {
+                    const unidades = p.unidades_a_formar || p.cantidad_divisiones || p.unidades_ajustadas || p.unidades_pedidas || 0;
+                    const local = detallesLocal[p.id] || { maquina_formado_id: null, unidades_formadas: '' };
+                    return (
+                      <tr key={p.id} className="border-b border-gray-50">
+                        <td className="py-3">
+                          <div className="font-medium text-gray-800">{p.producto_nombre}</div>
+                          <div className="text-xs text-gray-400">{p.producto_codigo || p.sap_item_code}</div>
+                        </td>
+                        <td className="text-center py-3 text-gray-600">{unidades}</td>
+                        <td className="text-center py-3">
+                          <select
+                            value={local.maquina_formado_id || ''}
+                            onChange={e => {
+                              const nuevoValor = e.target.value ? Number(e.target.value) : null;
+                              setDetallesLocal(prev => ({
+                                ...prev,
+                                [p.id]: { ...local, maquina_formado_id: nuevoValor }
+                              }));
+                              actualizarDetalleMutation.mutate({
+                                productoMasaId: p.id,
+                                maquina_formado_id: nuevoValor,
+                              });
+                            }}
+                            className="border border-gray-300 rounded px-2 py-1 text-sm focus:ring-1 focus:ring-orange-400"
+                          >
+                            <option value="">Sin máquina...</option>
+                            {maquinas_disponibles.map((m) => (
+                              <option key={m.id} value={m.id}>{m.nombre}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="text-center py-3">
+                          <input
+                            type="number"
+                            min="0"
+                            value={local.unidades_formadas}
+                            onChange={e => setDetallesLocal(prev => ({
+                              ...prev,
+                              [p.id]: { ...local, unidades_formadas: e.target.value }
+                            }))}
+                            onBlur={() => actualizarDetalleMutation.mutate({
+                              productoMasaId: p.id,
+                              unidades_formadas: parseInt(local.unidades_formadas) || 0,
+                            })}
+                            placeholder={String(unidades)}
+                            className="w-24 border border-gray-300 rounded px-2 py-1 text-right text-sm focus:ring-1 focus:ring-orange-400"
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Observaciones finales</label>
               <textarea
@@ -317,9 +402,21 @@ export const FormadoMasa: React.FC = () => {
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none"
               />
             </div>
+
+            {productos.some((p: any) => !(parseInt(detallesLocal[p.id]?.unidades_formadas || '0') > 0)) && (
+              <p className="text-xs text-amber-700">
+                ⚠️ Faltan unidades formadas en: {productos
+                  .filter((p: any) => !(parseInt(detallesLocal[p.id]?.unidades_formadas || '0') > 0))
+                  .map((p: any) => p.producto_nombre).join(', ')}
+              </p>
+            )}
+
             <button
               onClick={() => completarMutation.mutate()}
-              disabled={completarMutation.isPending}
+              disabled={
+                completarMutation.isPending ||
+                productos.some((p: any) => !(parseInt(detallesLocal[p.id]?.unidades_formadas || '0') > 0))
+              }
               className="w-full bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white font-semibold py-3 rounded-lg transition-colors"
             >
               {completarMutation.isPending ? 'Completando...' : '✅ Completar Formado → Ir a Fermentación'}
@@ -335,10 +432,17 @@ export const FormadoMasa: React.FC = () => {
               <h2 className="text-lg font-semibold text-green-800">Formado completado</h2>
             </div>
             <div className="bg-white rounded-lg border border-green-100 p-4 mb-4 space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-500">Máquina formadora</span>
-                <span className="font-medium text-gray-800">{data.registro_actual?.maquina_nombre || '—'}</span>
-              </div>
+              {(data.detalles || []).map((d) => {
+                const prod = productos.find((p: any) => p.id === d.producto_masa_id);
+                return (
+                  <div key={d.id} className="flex justify-between">
+                    <span className="text-gray-500">{prod?.producto_nombre || `Producto ${d.producto_masa_id}`}</span>
+                    <span className="font-medium text-gray-800">
+                      {d.unidades_formadas} und. — {d.maquina_nombre || 'sin máquina'}
+                    </span>
+                  </div>
+                );
+              })}
               <div className="flex justify-between">
                 <span className="text-gray-500">Duración</span>
                 <span className="font-medium text-gray-800">
