@@ -706,6 +706,65 @@ exports.completarHorneado = async (req, res) => {
       });
     }
 
+    // ── Validar que ningún producto activo quede con 0 unidades terminadas ──
+    // SAP no permite crear una OV sin cantidad, así que un producto en 0/nulo
+    // en HORNEADO es siempre un error de captura, nunca un estado de negocio
+    // válido (mismo criterio que DIVISION en fases.controller.js). Se calcula
+    // acá la distribución final (por producto o por fallback proporcional)
+    // para validarla ANTES de escribir nada, y se reutiliza más abajo.
+    const productosResult = await db.query(
+      `SELECT id, producto_nombre, presentacion, COALESCE(cantidad_divisiones, 0) AS cantidad_divisiones
+       FROM productos_por_masa WHERE masa_id = $1 ORDER BY producto_nombre`,
+      [masaId]
+    );
+
+    if (productosResult.rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'La masa no tiene productos para hornear.',
+      });
+    }
+
+    const distribucionFinal = {};
+    if (unidades_por_producto && typeof unidades_por_producto === 'object') {
+      for (const prod of productosResult.rows) {
+        distribucionFinal[prod.id] = parseInt(String(unidades_por_producto[prod.id] ?? 0)) || 0;
+      }
+    } else if (unidades_terminadas && parseInt(unidades_terminadas) > 0) {
+      const totalDiv = productosResult.rows.reduce((s, p) => s + parseInt(p.cantidad_divisiones), 0);
+      const totalTerm = parseInt(unidades_terminadas);
+      if (totalDiv > 0) {
+        let asignado = 0;
+        productosResult.rows.forEach((p, i) => {
+          const cant = i === productosResult.rows.length - 1
+            ? totalTerm - asignado
+            : Math.round((parseInt(p.cantidad_divisiones) / totalDiv) * totalTerm);
+          asignado += cant;
+          distribucionFinal[p.id] = cant;
+        });
+      } else {
+        productosResult.rows.forEach((p) => { distribucionFinal[p.id] = totalTerm; });
+      }
+    } else {
+      productosResult.rows.forEach((p) => { distribucionFinal[p.id] = 0; });
+    }
+
+    const faltantes = productosResult.rows
+      .filter((p) => (distribucionFinal[p.id] || 0) <= 0)
+      .map((p) => `${p.producto_nombre}${p.presentacion ? ' ' + p.presentacion : ''}`);
+
+    if (faltantes.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No se puede completar el horneado: hay productos sin unidades terminadas registradas.',
+        data: {
+          total: productosResult.rows.length,
+          completados: productosResult.rows.length - faltantes.length,
+          faltantes,
+        },
+      });
+    }
+
     await client.query('BEGIN');
 
     // Obtener registro de horneado actual
@@ -752,52 +811,23 @@ exports.completarHorneado = async (req, res) => {
       unidades_terminadas ? parseInt(unidades_terminadas) : null
     ]);
 
-    // Actualizar unidades_producidas en productos_por_masa
+    // Actualizar unidades_producidas en productos_por_masa — distribución ya
+    // calculada y validada (>0 en todos los productos) antes del BEGIN.
     if (unidades_por_producto && typeof unidades_por_producto === 'object') {
-      // Guardar desglose por producto en registros_horneado
+      // Guardar desglose por producto tal como lo envió el usuario
       await client.query(`
         UPDATE registros_horneado
         SET unidades_terminadas_por_producto = $2
         WHERE id = $1
       `, [registro.id, JSON.stringify(unidades_por_producto)]);
+    }
 
-      // Actualizar cada producto individualmente
-      for (const [prodId, cantidad] of Object.entries(unidades_por_producto)) {
-        const cant = parseInt(String(cantidad));
-        if (cant >= 0) {
-          await client.query(`
-            UPDATE productos_por_masa
-            SET unidades_producidas = $2, updated_at = NOW()
-            WHERE id = $1 AND masa_id = $3
-          `, [parseInt(prodId), cant, Number(masaId)]);
-        }
-      }
-    } else if (unidades_terminadas && parseInt(unidades_terminadas) > 0) {
-      // Fallback: distribuir proporcionalmente por cantidad_divisiones
-      const prodsDiv = await client.query(`
-        SELECT id, COALESCE(cantidad_divisiones, 0) AS cantidad_divisiones
-        FROM productos_por_masa WHERE masa_id = $1 ORDER BY id
-      `, [Number(masaId)]);
-      const totalDiv = prodsDiv.rows.reduce((s, p) => s + parseInt(p.cantidad_divisiones), 0);
-      const totalTerm = parseInt(unidades_terminadas);
-      if (totalDiv > 0) {
-        let asignado = 0;
-        for (let i = 0; i < prodsDiv.rows.length; i++) {
-          const p = prodsDiv.rows[i];
-          const cant = i === prodsDiv.rows.length - 1
-            ? totalTerm - asignado
-            : Math.round((parseInt(p.cantidad_divisiones) / totalDiv) * totalTerm);
-          asignado += cant;
-          await client.query(`
-            UPDATE productos_por_masa SET unidades_producidas = $2, updated_at = NOW()
-            WHERE id = $1
-          `, [p.id, cant]);
-        }
-      } else {
-        await client.query(`
-          UPDATE productos_por_masa SET unidades_producidas = $2 WHERE masa_id = $1
-        `, [Number(masaId), totalTerm]);
-      }
+    for (const [prodId, cantidad] of Object.entries(distribucionFinal)) {
+      await client.query(`
+        UPDATE productos_por_masa
+        SET unidades_producidas = $2, updated_at = NOW()
+        WHERE id = $1 AND masa_id = $3
+      `, [parseInt(prodId), cantidad, Number(masaId)]);
     }
 
     // Marcar fase HORNEADO como COMPLETADA

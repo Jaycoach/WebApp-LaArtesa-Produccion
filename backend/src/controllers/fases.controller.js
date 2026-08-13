@@ -1328,85 +1328,85 @@ const completarFase = async (req, res, next) => {
         });
       }
 
-      // 2. Validar cantidades_divididas si vienen en el payload
-      if (cantidades_divididas && Object.keys(cantidades_divididas).length > 0) {
-        const errores = [];
+      // 2. Validar cantidades_divididas — SIEMPRE, incluso si el payload no las
+      // trae (un campo ausente equivale a 0 para ese producto). SAP no permite
+      // crear una OV sin cantidad, así que un producto en 0/nulo en esta fase
+      // es siempre un error de captura, nunca un estado de negocio válido.
+      const cantidadesDivididasSeguro = cantidades_divididas || {};
+      const errores = [];
 
-        for (const prod of productosResult.rows) {
-          const cantidad  = Number(cantidades_divididas[prod.id] || 0);
-          const divisor   = parseInt(prod.multiplo_divisor || 0);
-          // Validar contra unidades_ajustadas (que ya es el múltiplo correcto)
-          const requerido = parseInt(prod.unidades_ajustadas || prod.unidades_programadas);
-          const nombre    = `${prod.producto_nombre}${prod.presentacion ? ' ' + prod.presentacion : ''}`;
+      for (const prod of productosResult.rows) {
+        const cantidad  = Number(cantidadesDivididasSeguro[prod.id] || 0);
+        const divisor   = parseInt(prod.multiplo_divisor || 0);
+        // Validar contra unidades_ajustadas (que ya es el múltiplo correcto)
+        const requerido = parseInt(prod.unidades_ajustadas || prod.unidades_programadas);
+        const nombre    = `${prod.producto_nombre}${prod.presentacion ? ' ' + prod.presentacion : ''}`;
 
-          // Validar cantidad mínima
-          if (cantidad <= 0) {
-            errores.push(`"${nombre}": la cantidad debe ser mayor a 0.`);
-            continue;
-          }
-
-          // Validar múltiplo divisor si aplica
-          if (divisor > 0 && cantidad % divisor !== 0) {
-            const inferior = Math.floor(cantidad / divisor) * divisor;
-            const superior = inferior + divisor;
-            errores.push(
-              `"${nombre}": ${cantidad} no es múltiplo de ${divisor}. ` +
-              `Valores válidos cercanos: ${inferior} o ${superior}.`
-            );
-          }
+        // Validar cantidad mínima
+        if (cantidad <= 0) {
+          errores.push(`"${nombre}": la cantidad debe ser mayor a 0.`);
+          continue;
         }
 
-        if (errores.length > 0) {
-          return res.status(400).json({
-            success: false,
-            message: 'Cantidades de división inválidas:',
-            errores,
-          });
+        // Validar múltiplo divisor si aplica
+        if (divisor > 0 && cantidad % divisor !== 0) {
+          const inferior = Math.floor(cantidad / divisor) * divisor;
+          const superior = inferior + divisor;
+          errores.push(
+            `"${nombre}": ${cantidad} no es múltiplo de ${divisor}. ` +
+            `Valores válidos cercanos: ${inferior} o ${superior}.`
+          );
         }
+      }
 
-        // 3. Guardar cantidades_divididas en productos_por_masa
-        //    unidades_excedente_real = cantidad - unidades_pedidas (excedente real cortado)
-        for (const prod of productosResult.rows) {
-          const cantidad = Number(cantidades_divididas[prod.id] || 0);
-          if (cantidad > 0) {
-            const requeridoFinal = parseInt(prod.unidades_ajustadas || prod.unidades_programadas);
-            const upqDiv = (prod.unidades_por_paquete && parseFloat(prod.unidades_por_paquete) > 1)
-              ? parseFloat(prod.unidades_por_paquete)
-              : (() => { const m = (prod.producto_nombre || '').match(/ X ?(\d+)/i); return m ? parseInt(m[1]) : 1; })();
-            const panesSugeridos  = parseInt(prod.unidades_pedidas) * upqDiv;
-            const excedenteReal   = Math.max(0, cantidad - panesSugeridos);
-            const faltante        = Math.max(0, requeridoFinal - cantidad);
-            const esParcial       = faltante > 0;
+      if (errores.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'No se puede completar la división: hay productos sin cantidad válida.',
+          errores,
+        });
+      }
 
-            await db.query(
-              `UPDATE productos_por_masa
-               SET cantidad_divisiones  = $1,
-                   division_completada  = TRUE,
-                   unidades_excedente   = $2,
-                   unidades_faltantes   = $3,
-                   division_parcial     = $4,
-                   unidades_producidas  = $5,
-                   updated_at           = NOW()
-               WHERE id = $6`,
-              [cantidad, excedenteReal, faltante, esParcial, cantidad, prod.id]
-            );
-          }
-        }
+      // 3. Guardar cantidades_divididas en productos_por_masa
+      //    unidades_excedente_real = cantidad - unidades_pedidas (excedente real cortado)
+      for (const prod of productosResult.rows) {
+        const cantidad = Number(cantidadesDivididasSeguro[prod.id] || 0);
+        const requeridoFinal = parseInt(prod.unidades_ajustadas || prod.unidades_programadas);
+        const upqDiv = (prod.unidades_por_paquete && parseFloat(prod.unidades_por_paquete) > 1)
+          ? parseFloat(prod.unidades_por_paquete)
+          : (() => { const m = (prod.producto_nombre || '').match(/ X ?(\d+)/i); return m ? parseInt(m[1]) : 1; })();
+        const panesSugeridos  = parseInt(prod.unidades_pedidas) * upqDiv;
+        const excedenteReal   = Math.max(0, cantidad - panesSugeridos);
+        const faltante        = Math.max(0, requeridoFinal - cantidad);
+        const esParcial       = faltante > 0;
 
-        logger.info(
-          `División masa ${masaId}: cantidades guardadas para ${productosResult.rows.length} productos`
+        await db.query(
+          `UPDATE productos_por_masa
+           SET cantidad_divisiones  = $1,
+               division_completada  = TRUE,
+               unidades_excedente   = $2,
+               unidades_faltantes   = $3,
+               division_parcial     = $4,
+               unidades_producidas  = $5,
+               updated_at           = NOW()
+           WHERE id = $6`,
+          [cantidad, excedenteReal, faltante, esParcial, cantidad, prod.id]
         );
       }
+
+      logger.info(
+        `División masa ${masaId}: cantidades guardadas para ${productosResult.rows.length} productos`
+      );
 
       // 4. Completar fase y desbloquear siguiente
       const faseActualizada = await fasesModel.updateEstadoFase(
         masaId, 'DIVISION', 'COMPLETADA', 100, req.user.id,
-        { ...(restosDatos || {}), cantidades_divididas }
+        { ...(restosDatos || {}), cantidades_divididas: cantidadesDivididasSeguro }
       );
       const siguienteFase = await fasesModel.desbloquearSiguienteFase(masaId, 'DIVISION');
 
       const hayFaltantes = productosResult.rows.some(p => {
-        const cant = Number(cantidades_divididas?.[p.id] || 0);
+        const cant = Number(cantidadesDivididasSeguro[p.id] || 0);
         const req  = parseInt(p.unidades_ajustadas || p.unidades_programadas);
         return cant < req;
       });

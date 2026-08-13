@@ -144,6 +144,16 @@ export const HorneadoMasa: React.FC = () => {
     onError: (e: any) => setErrorMsg(e.message)
   });
 
+  // Valida que todos los productos activos tengan unidades terminadas > 0
+  // antes de permitir completar — mismo criterio que DIVISION (fases.controller.js):
+  // SAP no permite crear una OV sin cantidad, así que 0 siempre es error de captura.
+  const todasTienenCantidad = (): boolean => {
+    if (data?.productos_horneado && data.productos_horneado.length > 0) {
+      return data.productos_horneado.every((p: any) => (parseInt(unidadesPorProducto[p.id]) || 0) > 0);
+    }
+    return (parseInt(unidadesTerminadas) || 0) > 0;
+  };
+
   if (isLoading) {
     return (
       <div className="flex justify-center items-center min-h-screen">
@@ -392,6 +402,11 @@ export const HorneadoMasa: React.FC = () => {
                 rows={2} className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-400 resize-none" />
             </div>
 
+            {!todasTienenCantidad() && (
+              <p className="text-xs text-red-500 font-medium">
+                ⚠ Debes ingresar las unidades terminadas para todos los productos
+              </p>
+            )}
             <div className="flex gap-3">
               <button
                 onClick={() => setShowMO(true)}
@@ -401,7 +416,7 @@ export const HorneadoMasa: React.FC = () => {
               </button>
               <button
                 onClick={() => completarMutation.mutate()}
-                disabled={completarMutation.isPending}
+                disabled={completarMutation.isPending || !todasTienenCantidad()}
                 className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white font-semibold py-3 rounded-lg transition-colors"
               >
                 {completarMutation.isPending ? 'Completando...' : '✅ Completar Horneado → Ir a Empaque'}
