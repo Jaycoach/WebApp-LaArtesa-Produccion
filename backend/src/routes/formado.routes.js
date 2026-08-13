@@ -25,6 +25,13 @@ router.get('/:masaId', formadoController.getFormadoInfo);
 router.post('/:masaId/iniciar', formadoController.iniciarFormado);
 
 /**
+ * @route   PATCH /api/formado/:masaId/detalle/:productoId
+ * @desc    Actualizar máquina/unidades formadas de un producto puntual (Fase 5)
+ * @access  Private
+ */
+router.patch('/:masaId/detalle/:productoId', formadoController.actualizarDetalle);
+
+/**
  * @route   POST /api/formado/:masaId/completar
  * @desc    Completar proceso de formado
  * @access  Private

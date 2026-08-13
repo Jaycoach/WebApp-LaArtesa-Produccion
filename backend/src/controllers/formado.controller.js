@@ -15,7 +15,7 @@ exports.getFormadoInfo = async (req, res) => {
   try {
     const { masaId } = req.params;
 
-    // Verificar que la masa existe y que requiere formado
+    // Verificar que la masa existe
     const masaQuery = `
       SELECT
         mp.id,
@@ -25,7 +25,6 @@ exports.getFormadoInfo = async (req, res) => {
         mp.nombre_masa,
         mp.estado,
         mp.fase_actual,
-        ctm.requiere_formado,
         ctm.requiere_reposo_pre_division,
         ctm.tiempo_reposo_division_minutos
       FROM masas_produccion mp
@@ -44,9 +43,20 @@ exports.getFormadoInfo = async (req, res) => {
 
     const masa = masaResult.rows[0];
 
-    // Si la masa no requiere formado, no es un error — informar la fase siguiente
-    // para que el frontend muestre un CTA directo en vez de un mensaje de error sin salida.
-    if (!masa.requiere_formado) {
+    // Fase 5 (12-ago-2026): requiere_formado ya no es de la masa completa —
+    // se decide por producto (productos_por_masa.requiere_formado).
+    const requiereResult = await db.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM productos_por_masa WHERE masa_id = $1 AND requiere_formado = true
+       ) AS requiere_formado`,
+      [masaId]
+    );
+    const masaRequiereFormado = requiereResult.rows[0]?.requiere_formado === true;
+
+    // Si ningún producto de la masa requiere formado, no es un error —
+    // informar la fase siguiente para que el frontend muestre un CTA
+    // directo en vez de un mensaje de error sin salida.
+    if (!masaRequiereFormado) {
       return res.json({
         success: true,
         data: {
@@ -64,7 +74,7 @@ exports.getFormadoInfo = async (req, res) => {
       });
     }
 
-    // Obtener productos a formar con sus cantidades
+    // Obtener SOLO los productos que requieren formado
     const productosQuery = `
       SELECT
         ppm.id,
@@ -92,7 +102,7 @@ exports.getFormadoInfo = async (req, res) => {
           CASE WHEN producto_codigo = ppm.producto_codigo THEN 0 ELSE 1 END
         LIMIT 1
       ) ef ON true
-      WHERE ppm.masa_id = $1
+      WHERE ppm.masa_id = $1 AND ppm.requiere_formado = true
       ORDER BY ppm.producto_nombre
     `;
 
@@ -108,7 +118,7 @@ exports.getFormadoInfo = async (req, res) => {
 
     const maquinasResult = await db.query(maquinasQuery);
 
-    // Obtener registro existente de formado (si existe)
+    // Obtener registro existente de formado (si existe) + detalle por producto
     const registroQuery = `
       SELECT
         rf.id,
@@ -130,6 +140,16 @@ exports.getFormadoInfo = async (req, res) => {
 
     const registroResult = await db.query(registroQuery, [masaId]);
 
+    const detallesResult = registroResult.rows[0]
+      ? await db.query(
+          `SELECT fd.id, fd.producto_masa_id, fd.maquina_formado_id, fd.maquina_nombre,
+                  fd.unidades_formadas, fd.fecha_actualizacion
+           FROM formado_detalles fd
+           WHERE fd.registro_formado_id = $1`,
+          [registroResult.rows[0].id]
+        )
+      : { rows: [] };
+
     res.json({
       success: true,
       data: {
@@ -146,7 +166,8 @@ exports.getFormadoInfo = async (req, res) => {
         },
         productos: productosResult.rows,
         maquinas_disponibles: maquinasResult.rows,
-        registro_actual: registroResult.rows[0] || null
+        registro_actual: registroResult.rows[0] || null,
+        detalles: detallesResult.rows
       }
     });
   } catch (error) {
@@ -168,10 +189,7 @@ exports.iniciarFormado = async (req, res) => {
 
   try {
     const { masaId } = req.params;
-    const {
-      maquina_formado_id,
-      observaciones
-    } = req.body;
+    const { observaciones } = req.body;
 
     const usuario = req.user; // Del middleware auth
 
@@ -193,44 +211,40 @@ exports.iniciarFormado = async (req, res) => {
       });
     }
 
-    // Obtener info de la máquina
-    const maquinaQuery = `
-      SELECT nombre FROM maquinas_formado WHERE id = $1
-    `;
-    const maquinaResult = await client.query(maquinaQuery, [maquina_formado_id]);
-
-    if (maquinaResult.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({
-        success: false,
-        message: 'Máquina de formado no encontrada'
-      });
-    }
-
-    const maquinaNombre = maquinaResult.rows[0].nombre;
-
-    // Crear registro de formado
+    // Crear registro de formado (header — la máquina/unidades se registran
+    // por producto en formado_detalles, Fase 5)
     const insertQuery = `
       INSERT INTO registros_formado (
         masa_id,
-        maquina_formado_id,
-        maquina_nombre,
         fecha_inicio,
         usuario_id,
         usuario_nombre,
         observaciones
-      ) VALUES ($1, $2, $3, NOW(), $4, $5, $6)
+      ) VALUES ($1, NOW(), $2, $3, $4)
       RETURNING *
     `;
 
     const result = await client.query(insertQuery, [
       masaId,
-      maquina_formado_id,
-      maquinaNombre,
       usuario.id,
       usuario.nombre_completo,
       observaciones || null
     ]);
+    const registroFormadoId = result.rows[0].id;
+
+    // Un formado_detalles por producto que requiere formado — mismo patrón
+    // que iniciarEmpaque/empaque_detalles (empaque.controller.js:353-381)
+    const prodsR = await client.query(
+      `SELECT id FROM productos_por_masa WHERE masa_id = $1 AND requiere_formado = true`,
+      [masaId]
+    );
+    for (const p of prodsR.rows) {
+      await client.query(
+        `INSERT INTO formado_detalles (registro_formado_id, producto_masa_id, unidades_formadas)
+         VALUES ($1, $2, 0) ON CONFLICT DO NOTHING`,
+        [registroFormadoId, p.id]
+      );
+    }
 
     // Actualizar progreso de fase FORMADO a EN_PROGRESO
     const updateFaseQuery = `
@@ -270,6 +284,53 @@ exports.iniciarFormado = async (req, res) => {
     });
   } finally {
     client.release();
+  }
+};
+
+/**
+ * Actualizar máquina/unidades formadas de un producto puntual (Fase 5)
+ * PATCH /api/formado/:masaId/detalle/:productoId
+ */
+exports.actualizarDetalle = async (req, res) => {
+  try {
+    const { masaId, productoId } = req.params;
+    const { maquina_formado_id, unidades_formadas } = req.body;
+
+    const regR = await db.query(
+      `SELECT id FROM registros_formado WHERE masa_id = $1 ORDER BY fecha_registro DESC LIMIT 1`,
+      [masaId]
+    );
+    if (!regR.rows.length) {
+      return res.status(400).json({ success: false, message: 'No hay formado en progreso' });
+    }
+
+    let maquinaNombre = null;
+    if (maquina_formado_id) {
+      const maqR = await db.query(`SELECT nombre FROM maquinas_formado WHERE id = $1`, [maquina_formado_id]);
+      if (!maqR.rows.length) {
+        return res.status(404).json({ success: false, message: 'Máquina de formado no encontrada' });
+      }
+      maquinaNombre = maqR.rows[0].nombre;
+    }
+
+    const r = await db.query(
+      `UPDATE formado_detalles
+       SET maquina_formado_id = COALESCE($3, maquina_formado_id),
+           maquina_nombre     = COALESCE($4, maquina_nombre),
+           unidades_formadas  = COALESCE($5, unidades_formadas),
+           fecha_actualizacion = NOW()
+       WHERE registro_formado_id = $1 AND producto_masa_id = $2
+       RETURNING *`,
+      [regR.rows[0].id, productoId, maquina_formado_id ?? null, maquinaNombre, unidades_formadas ?? null]
+    );
+    if (!r.rows.length) {
+      return res.status(404).json({ success: false, message: 'Detalle de formado no encontrado para este producto' });
+    }
+
+    res.json({ success: true, data: r.rows[0] });
+  } catch (error) {
+    logger.error('Error actualizarDetalle formado:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -317,6 +378,22 @@ exports.completarFormado = async (req, res) => {
     }
 
     const registro = registroResult.rows[0];
+
+    // Validar que todos los productos de este formado ya tienen unidades formadas
+    const pendientesR = await client.query(
+      `SELECT ppm.producto_nombre
+       FROM formado_detalles fd
+       JOIN productos_por_masa ppm ON ppm.id = fd.producto_masa_id
+       WHERE fd.registro_formado_id = $1 AND fd.unidades_formadas <= 0`,
+      [registro.id]
+    );
+    if (pendientesR.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        message: `Faltan productos por formar: ${pendientesR.rows.map(p => p.producto_nombre).join(', ')}`,
+      });
+    }
 
     // Calcular duración en minutos
     const updateQuery = `

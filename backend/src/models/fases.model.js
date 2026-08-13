@@ -619,14 +619,17 @@ const desbloquearSiguienteFase = async (masaId, faseActual) => {
 
   const masaIdNum = Number(masaId);
 
-  // Si viene de DIVISION, verificar si la masa requiere formado
-  // requiere_formado NULL se trata como false (tipos de masa sin configurar)
+  // Si viene de DIVISION, verificar si la masa requiere formado.
+  // Fase 5 (12-ago-2026): el criterio pasa de tipo_masa completo
+  // (catalogo_tipos_masa.requiere_formado, deprecado para esto) a
+  // producto/SKU individual — se abre FORMADO si AL MENOS UN producto de
+  // la masa lo requiere, aunque otros de la misma masa no lo necesiten.
   if (faseActual === 'DIVISION') {
     const reqResult = await db.query(`
-      SELECT ctm.requiere_formado
-      FROM masas_produccion mp
-      LEFT JOIN catalogo_tipos_masa ctm ON mp.tipo_masa = ctm.tipo_masa
-      WHERE mp.id = $1
+      SELECT EXISTS (
+        SELECT 1 FROM productos_por_masa
+        WHERE masa_id = $1 AND requiere_formado = true
+      ) AS requiere_formado
     `, [masaIdNum]);
 
     const requiereFormado = reqResult.rows[0]?.requiere_formado === true;

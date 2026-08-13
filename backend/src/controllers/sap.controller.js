@@ -967,8 +967,8 @@ const sincronizarDesdeOV = async (req, res, next) => {
                  sap_item_code, unidades_por_paquete, cantidad_paquetes,
                  sap_doc_entry, sap_doc_num,
                  multiplo_divisor, unidades_ajustadas, unidades_excedente,
-                 tamanio, forma, peso_masa_dividida, dias_vencimiento
-               ) VALUES ($1,$2,$3,'Por definir',$4,0,0,0,0,$5,$6,$7,$8,$9,$10,0,0,$11,$12,$13,$14)
+                 tamanio, forma, peso_masa_dividida, dias_vencimiento, requiere_formado
+               ) VALUES ($1,$2,$3,'Por definir',$4,0,0,0,0,$5,$6,$7,$8,$9,$10,0,0,$11,$12,$13,$14,$15)
                RETURNING id`,
               [
                 masaIdExistente,
@@ -983,6 +983,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
                 prod.forma || null,
                 prod.pesoMasaDividida || null,
                 prod.diasVencimiento || null,
+                prod.esFormado || false,
               ]
             );
             productoMasaId = insertPPM.rows[0].id;
@@ -1206,13 +1207,14 @@ const sincronizarDesdeOV = async (req, res, next) => {
              unidades_pedidas, unidades_programadas, kilos_pedidos, kilos_programados,
              sap_item_code, unidades_por_paquete, cantidad_paquetes, sap_doc_entry, sap_doc_num,
              multiplo_divisor, unidades_ajustadas, unidades_excedente,
-             tamanio, forma, peso_masa_dividida, dias_vencimiento
-           ) VALUES ($1, $2, $3, 'Por definir', $4, $5, $5, $6, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+             tamanio, forma, peso_masa_dividida, dias_vencimiento, requiere_formado
+           ) VALUES ($1, $2, $3, 'Por definir', $4, $5, $5, $6, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
            ON CONFLICT (masa_id, sap_item_code) DO UPDATE SET
              tamanio               = COALESCE(EXCLUDED.tamanio, productos_por_masa.tamanio),
              forma                 = COALESCE(EXCLUDED.forma, productos_por_masa.forma),
              peso_masa_dividida    = COALESCE(EXCLUDED.peso_masa_dividida, productos_por_masa.peso_masa_dividida),
              dias_vencimiento      = COALESCE(EXCLUDED.dias_vencimiento, productos_por_masa.dias_vencimiento),
+             requiere_formado      = COALESCE(EXCLUDED.requiere_formado, productos_por_masa.requiere_formado),
              unidades_pedidas     = productos_por_masa.unidades_pedidas     + EXCLUDED.unidades_pedidas,
              unidades_programadas = productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas,
              cantidad_paquetes    = productos_por_masa.cantidad_paquetes    + EXCLUDED.cantidad_paquetes,
@@ -1267,6 +1269,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
             prod.forma || null,                                     // $16
             prod.pesoMasaDividida || null,                          // $17
             prod.diasVencimiento || null,                           // $18
+            prod.esFormado || false,                                // $19
           ]
         );
       }

@@ -558,6 +558,7 @@ class SAPService {
         multiploDivisor: art.multiploDivisor || 0,
         tamanio: art.tamanio || null,
         forma: art.forma || null,
+        esFormado: art.esFormado || false,
       };
     });
 
