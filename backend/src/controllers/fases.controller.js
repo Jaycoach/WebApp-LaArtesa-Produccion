@@ -76,6 +76,38 @@ async function getLimiteKg(queryable, tipo_masa) {
 }
 
 /**
+ * Recalcula y persiste total_kilos_base/total_kilos_con_merma de una masa
+ * desde productos_por_masa (misma fórmula que usa /api/masas/:id/composicion).
+ * Pura respecto al estado actual de productos_por_masa/porcentaje_merma —
+ * llamarla varias veces sin cambios intermedios no acumula, da el mismo resultado.
+ * `client` puede ser el pool (`db`) o un client de transacción activa.
+ */
+async function recalcularTotalesMasa(masaId, client) {
+  const totalesResult = await client.query(
+    `SELECT COALESCE(SUM(gramaje_unitario * COALESCE(unidades_ajustadas, unidades_programadas)), 0) / 1000.0 AS total_base
+     FROM productos_por_masa WHERE masa_id = $1`,
+    [masaId]
+  );
+  const totalKilosBase = parseFloat(totalesResult.rows[0].total_base) || 0;
+
+  const masaResult = await client.query(
+    `SELECT porcentaje_merma FROM masas_produccion WHERE id = $1`,
+    [masaId]
+  );
+  const porcentajeMerma = parseFloat(masaResult.rows[0]?.porcentaje_merma) || 0;
+  const totalKilosConMerma = totalKilosBase * (1 + porcentajeMerma / 100);
+
+  await client.query(
+    `UPDATE masas_produccion
+     SET total_kilos_base = $1, total_kilos_con_merma = $2, updated_at = NOW()
+     WHERE id = $3`,
+    [totalKilosBase, totalKilosConMerma, masaId]
+  );
+
+  return { total_kilos_base: totalKilosBase, total_kilos_con_merma: totalKilosConMerma };
+}
+
+/**
  * Calcula el número mínimo de tandas para no superar el límite.
  */
 function calcularNTandas(totalKg, limiteKg) {
@@ -1240,6 +1272,8 @@ const completarFase = async (req, res, next) => {
 
       logger.info(`Masa ${masaId}: ${componentesPeso.length} ingredientes de masa + ${componentesEmpaque.length} materiales de empaque consolidados`);
 
+      await recalcularTotalesMasa(masaId, db);
+
       const totalKgIngredientes = componentesPeso.reduce((sum, [, comp]) => sum + comp.cantidad, 0);
       const limiteKg = await getLimiteKg(db, masa.tipo_masa);
 
@@ -1474,4 +1508,5 @@ module.exports = {
   ejecutarSubdivision,
   getLimiteKg,
   simularAjusteDivisorPorGrupo,
+  recalcularTotalesMasa,
 };

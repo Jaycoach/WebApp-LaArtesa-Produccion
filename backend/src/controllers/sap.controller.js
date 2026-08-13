@@ -6,7 +6,7 @@
 const db = require('../database/connection');
 const sapService = require('../services/sap.service');
 const logger = require('../utils/logger');
-const { simularAjusteDivisorPorGrupo } = require('./fases.controller');
+const { simularAjusteDivisorPorGrupo, recalcularTotalesMasa } = require('./fases.controller');
 
 /**
  * @desc    Sincronizar órdenes desde SAP y crear masas de producción
@@ -1091,6 +1091,8 @@ const sincronizarDesdeOV = async (req, res, next) => {
            WHERE id = $1`,
           [masaIdExistente]
         );
+
+        await recalcularTotalesMasa(masaIdExistente, client);
 
         logger.info(`Tipo ${tipoMasa} en PLANIFICACION — ${ovsNuevas} OVs nuevas registradas en masa ${masaIdExistente}`);
         masasCreadas.push({

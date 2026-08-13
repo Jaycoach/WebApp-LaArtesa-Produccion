@@ -8,7 +8,7 @@ const sapService = require('../services/sap.service');
 const logger = require('../utils/logger');
 const { sendAprobacionMasaEmail, sendAprobacionMasaBulkEmail } = require('../services/email.service');
 const { devolverStockMasa } = require('./pesaje.controller');
-const { simularAjusteDivisorPorGrupo } = require('./fases.controller');
+const { simularAjusteDivisorPorGrupo, recalcularTotalesMasa } = require('./fases.controller');
 
 /**
  * @desc    Obtener masas por fecha
@@ -304,6 +304,8 @@ const updateUnidadesProgramadas = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Producto no encontrado' });
     }
 
+    await recalcularTotalesMasa(masaId, db);
+
     res.json({
       success: true,
       data: producto,
@@ -452,6 +454,8 @@ const aprobarMasaCore = async (id, userId, opts = {}) => {
   if (ajustesGrupo.length > 0) {
     logger.info(`Masa ${id}: simulación de grupo (Fase 4) ajustó ${ajustesGrupo.length} producto(s) al aprobar.`);
   }
+
+  await recalcularTotalesMasa(id, db);
 
   const totalPaquetesR = await db.query(
     `SELECT COALESCE(SUM(unidades_programadas), 0) AS total
