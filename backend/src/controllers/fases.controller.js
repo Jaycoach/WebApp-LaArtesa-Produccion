@@ -274,7 +274,11 @@ async function distribuirEmpaque(empaques, subMasaIds, qr = db) {
 
 /**
  * Clave de agrupación de un producto para el empaquetado por tandas.
- * Jerárquico: tipo_masa → +forma → +tamaño (cada nivel exige el anterior).
+ * Jerárquico: tipo_masa → +forma → +tamaño (cada nivel exige el anterior),
+ * siempre cerrando con +multiplo_divisor (Fase 4, 12-ago-2026) — dentro de
+ * cada nivel de tipo/forma/tamaño, productos con distinto multiplo_divisor
+ * van en subgrupos distintos, para que simularAjusteDivisorPorGrupo nunca
+ * mezcle divisores distintos en el mismo cálculo de múltiplo.
  * SAP o fallback por nombre resuelven tamaño/forma indistintamente.
  */
 function clasificarClaveAgrupacion(producto, tipoMasa) {
@@ -310,64 +314,249 @@ function clasificarClaveAgrupacion(producto, tipoMasa) {
       clave += `|TAM:${tamanio}`;
     }
   }
+
+  // Fase 4: multiplo_divisor siempre particiona el grupo, sin importar si
+  // forma/tamaño se resolvieron — dos productos del mismo tipo_masa con
+  // distinto divisor nunca pueden compartir grupo.
+  const multiploDivisor = parseInt(producto.multiplo_divisor) || 1;
+  clave += `|MULT:${multiploDivisor}`;
+
   return clave;
 }
 
 /**
- * Agrupa productos en tandas respetando limiteKg (kg de PRODUCTO, no de
- * ingrediente). Se llena cada tanda con clusters completos antes de abrir
- * la siguiente — nunca se reparte 50/50 ni proporcional parejo. Solo se
- * parte un cluster cuando no cabe completo y aún queda espacio disponible.
- * Aplica igual al grupo por tamaño+forma que al grupo base por tipo_masa.
+ * Simula, para los productos de UNA masa, si algún grupo de
+ * clasificarClaveAgrupacion (tipo_masa+forma+tamaño+multiplo_divisor) no
+ * alcanza el múltiplo mínimo del divisor compartido con las unidades
+ * programadas actuales, y calcula cuánto subir unidades_programadas del o
+ * los productos necesarios para completarlo. Pura — no escribe en DB, el
+ * llamador decide cómo persistir cada ajuste.
+ *
+ * Itera dentro de cada grupo en un orden FIJO (calculado una sola vez):
+ * mayor unidades_por_paquete primero, menor upq al final. Es una
+ * restricción MATEMÁTICA, no de negocio — el multiplo_divisor de un grupo
+ * no siempre es alcanzable sumando paquetes de un solo producto (si su upq
+ * no divide el faltante exacto), así que se recorren los productos del
+ * grupo uno por uno, recalculando el resto tras cada paso, hasta cerrar en
+ * 0 exacto o agotar el grupo (máximo `productos.length` iteraciones,
+ * nunca loop infinito). Dentro de un mismo upq, empate por mayor kg
+ * pendiente y luego por id ascendente.
+ *
+ * LIMITACIÓN CONOCIDA (Fase 4, 12-ago-2026, decisión explícita): opera
+ * sobre productos_por_masa agregado, sin visibilidad de OV individual.
+ *
+ * @param {Array} productos - filas de productos_por_masa de UNA masa (id,
+ *   producto_nombre, tamanio, forma, multiplo_divisor, unidades_por_paquete,
+ *   unidades_programadas)
+ * @param {string} tipoMasa
+ * @returns {Array<{ productoId, unidadesProgramadasAnteriores, unidadesProgramadasNuevas, deltaPaquetes, clave }>}
  */
-function agruparProductosEnTandas(productos, limiteKg, tipoMasa) {
-  // FIX 2026-08-04: la subdivisión por límite de kg de amasado debe agrupar
-  // SOLO por tipo_masa. La separación por forma/tamaño (clasificarClaveAgrupacion)
-  // solo tiene sentido en la fase de División — antes de eso son el mismo moje
-  // (misma receta/materias primas). Agruparlas aquí generaba "masas" distintas
-  // para lo que era una sola masa, como pasó con Árabe/Árabe cuadrada el 3-ago.
+function simularAjusteDivisorPorGrupo(productos, tipoMasa) {
+  const upqDe = (p) => (p.unidades_por_paquete && parseFloat(p.unidades_por_paquete) > 1)
+    ? parseFloat(p.unidades_por_paquete)
+    : (() => { const m = (p.producto_nombre || '').match(/ X ?(\d+)/i); return m ? parseInt(m[1]) : 1; })();
+
   const grupos = new Map();
   for (const prod of productos) {
-    const clave = `TIPOMASA:${tipoMasa}`;
-    if (!grupos.has(clave)) grupos.set(clave, { clave, productos: [], kgTotal: 0 });
-    const g = grupos.get(clave);
-    g.productos.push(prod);
-    g.kgTotal += parseFloat(prod.kilos_programados || 0);
+    const clave = clasificarClaveAgrupacion(prod, tipoMasa);
+    if (!grupos.has(clave)) grupos.set(clave, []);
+    grupos.get(clave).push(prod);
   }
 
-  // Clusters más grandes primero — minimiza cuántos quedan partidos entre tandas
-  const clusters = Array.from(grupos.values()).sort((a, b) => b.kgTotal - a.kgTotal);
+  const ajustes = [];
+
+  for (const [clave, prods] of grupos) {
+    const divisor = parseInt(prods[0].multiplo_divisor) || 1;
+    if (divisor <= 1) continue; // sin divisor real, nada que ajustar
+
+    // Estado mutable por producto — permite iterar el ajuste sin perder lo
+    // ya acumulado en pasos previos dentro del mismo grupo.
+    const estado = prods.map(p => ({
+      producto: p,
+      upq: upqDe(p),
+      unidadesActuales: parseInt(p.unidades_programadas || 0),
+      deltaAcumulado: 0,
+    }));
+
+    const panesTotalActual = () => estado.reduce((s, e) => s + e.unidadesActuales * e.upq, 0);
+
+    let resto = panesTotalActual() % divisor;
+    if (resto === 0) continue; // grupo ya es múltiplo exacto
+
+    const orden = [...estado].sort((a, b) => {
+      if (a.upq !== b.upq) return b.upq - a.upq;
+      const kgA = a.unidadesActuales * a.upq;
+      const kgB = b.unidadesActuales * b.upq;
+      if (kgB !== kgA) return kgB - kgA;
+      return a.producto.id - b.producto.id;
+    });
+
+    const maxIter = orden.length;
+    let iter = 0;
+    while (resto !== 0 && iter < maxIter) {
+      const elegido = orden[iter];
+      const panesFaltantes = divisor - resto;
+      const paquetesAAgregar = Math.ceil(panesFaltantes / elegido.upq);
+      elegido.unidadesActuales += paquetesAAgregar;
+      elegido.deltaAcumulado += paquetesAAgregar;
+      resto = panesTotalActual() % divisor;
+      iter++;
+    }
+
+    if (resto !== 0) {
+      // Combinación de unidades_por_paquete que matemáticamente no permite
+      // cerrar el múltiplo exacto en maxIter pasos (caso de "problema de
+      // monedas" genuino) — se omite el ajuste de TODO el grupo (mejor no
+      // tocar nada que dejar un ajuste parcial/incorrecto) y se loguea.
+      logger.warn(`simularAjusteDivisorPorGrupo: grupo ${clave} no cerró en múltiplo exacto de ${divisor} tras ${maxIter} iteración(es) (resto=${resto}) — se omite el ajuste, revisar unidades_por_paquete de los productos del grupo.`);
+      continue;
+    }
+
+    for (const e of estado) {
+      if (e.deltaAcumulado > 0) {
+        ajustes.push({
+          productoId: e.producto.id,
+          unidadesProgramadasAnteriores: parseInt(e.producto.unidades_programadas),
+          unidadesProgramadasNuevas: e.unidadesActuales,
+          deltaPaquetes: e.deltaAcumulado,
+          clave,
+        });
+      }
+    }
+  }
+
+  return ajustes;
+}
+
+/**
+ * Agrupa productos en tandas respetando limiteKg (kg de PRODUCTO, no de
+ * ingrediente). Fase 4 (12-ago-2026): el reparto ya no es proporcional
+ * parejo — en cada decisión se elige primero el GRUPO (clasificarClaveAgrupacion)
+ * con mayor kg pendiente total, y dentro de ese grupo el PRODUCTO con mayor
+ * kg pendiente; ambos niveles se recalculan en cada iteración, ningún
+ * remanente de tanda anterior tiene prioridad automática (Puntos 1-2).
+ * Cuando un producto no cabe completo, el corte se calcula en múltiplos
+ * exactos de su multiplo_divisor — nunca proporción libre de peso. La
+ * tanda puede cerrar por debajo de limiteKg si eso exige respetar el
+ * múltiplo; nunca se fuerza a llenar exacto rompiéndolo.
+ *
+ * LIMITACIÓN CONOCIDA (decisión explícita, no accidental): opera sobre
+ * productos_por_masa agregado, sin visibilidad de OV individual — no
+ * intenta mantener una misma OV dentro de una sola tanda. Ver nota en
+ * distribuirProductosPorTandas. Bajar a nivel de productos_por_masa_ov
+ * queda como fase aparte si se confirma como necesidad real de negocio.
+ */
+function agruparProductosEnTandas(productos, limiteKg, tipoMasa) {
+  const upqDe = (p) => (p.unidades_por_paquete && parseFloat(p.unidades_por_paquete) > 1)
+    ? parseFloat(p.unidades_por_paquete)
+    : (() => { const m = (p.producto_nombre || '').match(/ X ?(\d+)/i); return m ? parseInt(m[1]) : 1; })();
+
+  const pendientes = productos.map(prod => {
+    const upq = upqDe(prod);
+    const kgPorPan = upq > 0 ? (parseFloat(prod.gramaje_unitario || 0) / 1000) / upq : 0;
+
+    // Guardia: un solo pan más pesado que el límite de tanda es un dato
+    // imposible (gramaje_unitario o unidades_por_paquete corruptos). No hay
+    // forma de respetarlo sin loop infinito — se aborta esta masa.
+    if (kgPorPan > limiteKg + 0.0001) {
+      throw new Error(
+        `agruparProductosEnTandas: producto ${prod.id} (${prod.producto_nombre}) pesa ` +
+        `${kgPorPan.toFixed(2)}kg por pieza — supera limiteKg (${limiteKg}kg). ` +
+        `Dato imposible (gramaje_unitario/unidades_por_paquete corruptos). Abortando subdivisión de esta masa.`
+      );
+    }
+
+    const divisor = parseInt(prod.multiplo_divisor) || 1;
+    return {
+      producto: prod,
+      clave: clasificarClaveAgrupacion(prod, tipoMasa),
+      upq, kgPorPan, divisor,
+      kgPorChunk: kgPorPan * divisor,
+      paquetesTotal: parseInt(prod.unidades_programadas || 0),
+      panesRestantes: parseInt(prod.unidades_programadas || 0) * upq,
+    };
+  }).filter(p => p.panesRestantes > 0 && p.kgPorPan > 0);
 
   const tandas = [{ kg: 0, items: [] }];
   let actual = tandas[0];
 
-  for (const cluster of clusters) {
-    let kgRestante = cluster.kgTotal;
+  while (pendientes.some(p => p.panesRestantes > 0)) {
+    const espacio = limiteKg - actual.kg;
 
-    while (kgRestante > 0.0001) {
-      const espacio = limiteKg - actual.kg;
+    if (espacio <= 0.0001) {
+      tandas.push({ kg: 0, items: [] });
+      actual = tandas[tandas.length - 1];
+      continue;
+    }
 
-      if (espacio <= 0.0001) {
+    const activos = pendientes.filter(p => p.panesRestantes > 0);
+
+    // Nivel 1 — grupo: kg pendiente TOTAL del grupo, descendente,
+    // recalculado en cada iteración (ningún grupo tiene prioridad fija).
+    // Empate → menor id de producto dentro del grupo (análogo de "id
+    // ascendente" a nivel grupo).
+    const gruposInfo = new Map(); // clave -> { kg, minId }
+    for (const p of activos) {
+      const kg = p.panesRestantes * p.kgPorPan;
+      const info = gruposInfo.get(p.clave) || { kg: 0, minId: Infinity };
+      info.kg += kg;
+      info.minId = Math.min(info.minId, p.producto.id);
+      gruposInfo.set(p.clave, info);
+    }
+    const claveElegida = [...gruposInfo.entries()].sort((a, b) => {
+      if (Math.abs(b[1].kg - a[1].kg) > 0.0001) return b[1].kg - a[1].kg;
+      return a[1].minId - b[1].minId;
+    })[0][0];
+
+    // Nivel 2 — producto dentro del grupo elegido: mismo criterio de kg
+    // pendiente descendente, empate por id ascendente.
+    const candidato = activos
+      .filter(p => p.clave === claveElegida)
+      .sort((a, b) => {
+        const kgA = a.panesRestantes * a.kgPorPan;
+        const kgB = b.panesRestantes * b.kgPorPan;
+        if (Math.abs(kgB - kgA) > 0.0001) return kgB - kgA;
+        return a.producto.id - b.producto.id;
+      })[0];
+
+    const kgPendienteCandidato = candidato.panesRestantes * candidato.kgPorPan;
+
+    let panesAAsignar;
+    if (kgPendienteCandidato <= espacio + 0.0001) {
+      // Cabe completo — todo lo que le queda a este producto
+      panesAAsignar = candidato.panesRestantes;
+    } else {
+      // No cabe completo — corte en múltiplos exactos de multiplo_divisor
+      if (candidato.kgPorChunk > limiteKg + 0.0001) {
+        // Dato degenerado: ni un chunk cabría en una tanda vacía. Se
+        // ignora el divisor para ESTE producto en vez de loop infinito.
+        logger.warn(`agruparProductosEnTandas: producto ${candidato.producto.id} tiene un chunk de multiplo_divisor (${candidato.kgPorChunk.toFixed(2)}kg) que excede limiteKg (${limiteKg}kg) — se ignora el divisor para este producto.`);
+        candidato.divisor = 1;
+        candidato.kgPorChunk = candidato.kgPorPan;
+      }
+
+      const chunksQueCaben   = Math.floor((espacio + 0.0001) / candidato.kgPorChunk);
+      const chunksPendientes = Math.floor(candidato.panesRestantes / candidato.divisor);
+      const chunks            = Math.min(chunksQueCaben, chunksPendientes);
+
+      if (chunks <= 0) {
+        // Ni un chunk completo cabe en el espacio restante — la tanda
+        // cierra tal como está (puede quedar por debajo de limiteKg,
+        // esperado) y este producto pasa completo a la siguiente.
         tandas.push({ kg: 0, items: [] });
         actual = tandas[tandas.length - 1];
         continue;
       }
-
-      const kgAAsignar    = Math.min(espacio, kgRestante);
-      const fraccionParte = kgAAsignar / cluster.kgTotal;
-
-      for (const prod of cluster.productos) {
-        actual.items.push({ producto: prod, fraccion: fraccionParte });
-      }
-
-      actual.kg  += kgAAsignar;
-      kgRestante -= kgAAsignar;
-
-      if (kgRestante > 0.0001) {
-        tandas.push({ kg: 0, items: [] });
-        actual = tandas[tandas.length - 1];
-      }
+      panesAAsignar = chunks * candidato.divisor;
     }
+
+    const kgAAsignar       = panesAAsignar * candidato.kgPorPan;
+    const paquetesAAsignar = panesAAsignar / candidato.upq;
+    const fraccion         = candidato.paquetesTotal > 0 ? paquetesAAsignar / candidato.paquetesTotal : 0;
+
+    actual.items.push({ producto: candidato.producto, fraccion });
+    actual.kg += kgAAsignar;
+    candidato.panesRestantes -= panesAAsignar;
   }
 
   // Consolidar si un mismo producto quedó con más de una fracción en la misma tanda
@@ -445,6 +634,16 @@ async function distribuirProductosPorTandas(tandas, subMasaIds, qr = db) {
         const nuevoProductoMasaId = await insertarProductoEnMasa(subMasaIds[oc.tandaIdx], prod, prog, ped, kgPed, kgProg, qr);
 
         for (const ov of ovsRestante) {
+          // LIMITACIÓN CONOCIDA (Fase 4, 12-ago-2026): esta fracción divide
+          // cada OV proporcionalmente sin ningún criterio de cohesión — una
+          // misma OV puede terminar partida entre dos tandas aunque hubiera
+          // cabido entera en una. agruparProductosEnTandas/Pieza A operan a
+          // nivel de productos_por_masa agregado, sin visibilidad de OV
+          // individual. Bajar este reparto a nivel de productos_por_masa_ov
+          // (empaquetado de OV individual dentro de cada producto) queda
+          // como fase aparte, solo si se confirma como necesidad real de
+          // negocio tras observar el comportamiento en producción —
+          // decisión explícita, no pendiente por descuido.
           const cantidadOv = esUltima ? ov.restante : Math.floor((parseInt(ov.unidades_pedidas) || 0) * oc.fraccion);
           ov.restante -= cantidadOv;
           if (cantidadOv > 0) {
@@ -1271,7 +1470,8 @@ module.exports = {
   getProgresoFases,
   updateProgreso,
   completarFase,
-  // Exportado para uso en pesaje.controller.js
+  // Exportado para uso en pesaje.controller.js, masas.controller.js, sap.controller.js
   ejecutarSubdivision,
   getLimiteKg,
+  simularAjusteDivisorPorGrupo,
 };
