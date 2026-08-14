@@ -252,6 +252,47 @@ class SAPService {
   }
 
   /**
+   * Marcar OV como sincronizadas en HANA (UDF U_JZ_TxOP = 'SI' en ORDR)
+   * Reemplaza el PATCH a Service Layer por UPDATE directo vía hana_marcar_txop.py.
+   * Falla no bloqueante: solo loguea, no lanza excepción hacia el llamador.
+   * @param {Array<Number>} docEntries - DocEntry de las órdenes de venta (ORDR)
+   */
+  async marcarOvsSincronizadasHANA(docEntries) {
+    const { execFile } = require('child_process');
+    const path = require('path');
+
+    return new Promise((resolve) => {
+      const scriptPath = path.join(__dirname, '../../scripts/hana_marcar_txop.py');
+      const child = execFile('python3', [scriptPath], {
+        timeout: 30000,
+        env: process.env,
+      }, (error, stdout, stderr) => {
+        if (error) {
+          logger.error(`HANA marcar TxOP: error ejecutando script Python: ${error.message}. stderr: ${stderr}`);
+          return resolve();
+        }
+        try {
+          const parsed = JSON.parse(stdout);
+          if (parsed && parsed.error) {
+            logger.error(`HANA marcar TxOP: error reportado por script: ${parsed.error}`);
+            return resolve();
+          }
+          if (parsed.fallidos && parsed.fallidos.length > 0) {
+            logger.error(`HANA marcar TxOP: fallaron docEntry ${parsed.fallidos.join(', ')}`);
+          }
+          logger.info(`HANA marcar TxOP: ${parsed.actualizados.length} OV marcadas (U_JZ_TxOP=SI)`);
+          resolve();
+        } catch (parseErr) {
+          logger.error(`HANA marcar TxOP: respuesta no parseable: ${parseErr.message}. stdout: ${stdout}`);
+          resolve();
+        }
+      });
+      child.stdin.write(JSON.stringify(docEntries));
+      child.stdin.end();
+    });
+  }
+
+  /**
    * Registrar consumo de materiales en SAP
    * @param {Number} docEntry - DocEntry de la orden
    * @param {Array} materiales - Lista de materiales consumidos

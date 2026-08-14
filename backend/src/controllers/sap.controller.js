@@ -801,6 +801,10 @@ const sincronizarDesdeOV = async (req, res, next) => {
     );
     let ordenCounter = (maxCorrelativoResult.rows[0]?.max_correlativo || 0) + 1;
 
+    // Acumula docEntry únicos de OV efectivamente sincronizadas en este run
+    // (para marcarlas en SAP con U_JZ_TxOP tras el COMMIT)
+    const docEntriesSincronizados = new Set();
+
     for (const claveGrupo in masasAgrupadas) {
       const grupo = masasAgrupadas[claveGrupo];
       const tipoMasa = grupo.tipo_masa;
@@ -836,6 +840,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
       }
       // Trabajar solo con los productos nuevos
       grupo.productos = productosNuevos;
+      grupo.productos.forEach(p => docEntriesSincronizados.add(p.docEntry));
       // ─────────────────────────────────────────────────────────────────
 
       // Calcular kilos por producto desde BOM local (grupo_sap=181, excluyendo empaque)
@@ -1399,6 +1404,13 @@ const sincronizarDesdeOV = async (req, res, next) => {
     }
 
     await client.query('COMMIT');
+
+    // Marcar en SAP las OV sincronizadas (U_JZ_TxOP=SI) — fuera de la transacción
+    // Postgres porque es llamada externa a SAP. No bloqueante: un PATCH individual
+    // que falle no debe interrumpir la respuesta al usuario.
+    if (docEntriesSincronizados.size > 0) {
+      await sapService.marcarOvsSincronizadasHANA([...docEntriesSincronizados]);
+    }
 
     await db.query(
       `INSERT INTO sap_sync_log (tipo_operacion, estado, request_payload, response_payload)
