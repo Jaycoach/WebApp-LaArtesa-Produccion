@@ -384,15 +384,6 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
   const inicio = Date.now();
   let requestPayload = null;
   try {
-    // Ítems excluidos del consumo SAP (agua y otros insumos propios sin stock real gestionable en SAP)
-    const configExc = await db.query(
-      `SELECT valor FROM configuracion_sistema WHERE clave = 'ingredientes_excluir_stock_validacion'`
-    );
-    const excluidos = configExc.rows.length > 0
-      ? configExc.rows[0].valor.split(',').map(c => c.trim()).filter(Boolean)
-      : [];
-    const excluidosParam = excluidos.length > 0 ? excluidos : null;
-
     const result = await db.query(
       `SELECT im.ingrediente_sap_code, im.ingrediente_nombre,
               im.peso_real, im.lote,
@@ -423,9 +414,8 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
        WHERE plc.masa_id = $1
          AND plc.confirmado_sap = false
          AND plc.liberado_en IS NULL
-         AND im.es_empaque = false
-         AND ($2::text[] IS NULL OR plc.item_code != ALL($2::text[]))`,
-      [masaId, excluidosParam]
+         AND im.es_empaque = false`,
+      [masaId]
     );
 
     // Agrupar por item_code (un ítem puede tener múltiples lotes)
@@ -448,9 +438,8 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
          AND im.es_empaque = false
          AND im.pesado = true
          AND im.peso_real > 0
-         AND plc.id IS NULL
-         AND ($2::text[] IS NULL OR im.ingrediente_sap_code != ALL($2::text[]))`,
-      [masaId, excluidosParam]
+         AND plc.id IS NULL`,
+      [masaId]
     );
     for (const r of sinLotesResult.rows) {
       if (!itemMap[r.ingrediente_sap_code]) {
@@ -528,7 +517,7 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
 
   } catch (err) {
     const tiempoRespuesta = Date.now() - inicio;
-    const sapMsg = err?.response?.data?.error?.message?.value
+    let sapMsg = err?.response?.data?.error?.message?.value
       || err?.response?.data?.error?.message
       || err?.response?.data?.message
       || err.message;
@@ -614,6 +603,25 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
         lote_fallido.item_name = nombreRes.rows[0]?.item_name || itemFallido;
       } catch (altErr) {
         logger.warn(`Error consultando alternativas de lote para ${itemFallido}:`, altErr.message);
+      }
+    }
+    // Parsear error de stock insuficiente en ítem SIN lote (ej: agua, MP0007/MP0008).
+    // SAP no reporta ItemCode/batch en este mensaje, solo el número de línea del documento.
+    const matchNegativeInventory = sapMsg.match(/Quantity falls into negative inventory\s*\[DocumentLines\.\w+\]\[line:\s*(\d+)\]/i);
+    if (matchNegativeInventory) {
+      const filaFallida = parseInt(matchNegativeInventory[1], 10);
+      const itemFallido = requestPayload?.DocumentLines?.[filaFallida - 1]?.ItemCode || null;
+      if (itemFallido) {
+        try {
+          const nombreRes = await db.query(
+            `SELECT item_name FROM sap_inventario_mp WHERE item_code = $1 LIMIT 1`,
+            [itemFallido]
+          );
+          const itemNombre = nombreRes.rows[0]?.item_name || itemFallido;
+          sapMsg = `Stock insuficiente en SAP para ${itemFallido} (${itemNombre}) — no hay inventario suficiente para completar la salida. Verificar con Diana/SAP antes de reintentar.`;
+        } catch (nombreErr) {
+          logger.warn(`Error consultando nombre de ítem para negative inventory ${itemFallido}:`, nombreErr.message);
+        }
       }
     }
     return { success: false, error: sapMsg, lote_fallido, alternativas };
