@@ -80,13 +80,14 @@ def main():
         cursor.execute(f'''
             SELECT "ItemCode", "ItemName", "U_JZ_Tipos_Masa", "U_JZ_PanesPorBolsa",
                    "SWeight1", "U_JZ_MultiploDivisor", "validFor", "frozenFor",
-                   "U_JZ_Tamanio", "U_JZ_Forma", "U_JZ_PesMasDiv", "U_JZ_DiasExp"
+                   "U_JZ_Tamanio", "U_JZ_Forma", "U_JZ_PesMasDiv", "U_JZ_DiasExp",
+                   "U_JZ_Formado"
             FROM "{schema}"."OITM"
             WHERE "ItemCode" IN ({placeholders})
         ''', item_codes)
 
         articulos = {}
-        for item_code, item_name, tipo_masa, panes_por_bolsa, sweight1, multiplo, valid_for, frozen_for, tamanio, forma, peso_masa_dividida, dias_vencimiento in cursor.fetchall():
+        for item_code, item_name, tipo_masa, panes_por_bolsa, sweight1, multiplo, valid_for, frozen_for, tamanio, forma, peso_masa_dividida, dias_vencimiento, formado in cursor.fetchall():
             if valid_for == 'N' or frozen_for == 'Y':
                 continue
             if not tipo_masa:
@@ -101,6 +102,7 @@ def main():
                 'forma': forma or None,
                 'pesoMasaDividida': float(peso_masa_dividida) if peso_masa_dividida is not None else None,
                 'diasVencimiento': round(float(dias_vencimiento)) if dias_vencimiento is not None else None,
+                'esFormado': str(formado or '').strip().upper() == 'SI',
             }
 
         conn.close()
@@ -142,6 +144,7 @@ def main():
                 'forma': art.get('forma'),
                 'pesoMasaDividida': art.get('pesoMasaDividida'),
                 'diasVencimiento': art.get('diasVencimiento'),
+                'esFormado': art.get('esFormado', False),
             })
 
         print(json.dumps(resultado))
