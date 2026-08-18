@@ -309,6 +309,47 @@ const startServer = async () => {
     }, { timezone: 'America/Bogota' });
     logger.info('Cron sync empaque registrado: 5h, 8h, 11h, 14h, 17h (Bogotá)');
 
+    // ── Cron: sync BOM + inventario/lotes de materia prima desde SAP ──────
+    // Corre a las 6:00 y 21:00 — mantiene sap_articulos/sap_bom_componentes/
+    // sap_inventario_mp/sap_lotes_mp frescos sin depender de que alguien
+    // dispare el sync manual. Son sincronizaciones de solo caché (no crean
+    // masas_produccion ni escriben hacia SAP) — a diferencia de
+    // sincronizar-ov, que sigue siendo 100% manual y no se toca aquí.
+    const { sincronizarBOM, sincronizarInventarioMP } = require('./controllers/sap.controller');
+    const mockResCron = (label) => ({
+      status(code) { this._code = code; return this; },
+      json(data) {
+        if (this._code && this._code >= 400) {
+          logger.error(`Cron ${label}: fin con error — ${data.message || JSON.stringify(data)}`);
+        } else {
+          logger.info(`Cron ${label}: fin OK — ${data.message || 'sin mensaje'}`);
+        }
+      },
+    });
+    const mockNextCron = (label) => (err) => {
+      if (err) logger.error(`Cron ${label}: error —`, err.message);
+    };
+    cron.schedule('0 6,21 * * *', async () => {
+      logger.info('Cron: iniciando sync BOM + inventario/lotes MP...');
+
+      try {
+        logger.info('Cron BOM: inicio');
+        // req={} (no null): sincronizarBOM lee req.body?.items para sync puntual —
+        // con {} queda undefined y corre la sincronización completa.
+        await sincronizarBOM({}, mockResCron('BOM'), mockNextCron('BOM'));
+      } catch (err) {
+        logger.error('Cron BOM: excepción —', err.message);
+      }
+
+      try {
+        logger.info('Cron Inventario/Lotes MP: inicio');
+        await sincronizarInventarioMP(null, mockResCron('Inventario/Lotes MP'), mockNextCron('Inventario/Lotes MP'));
+      } catch (err) {
+        logger.error('Cron Inventario/Lotes MP: excepción —', err.message);
+      }
+    }, { timezone: 'America/Bogota' });
+    logger.info('Cron sync BOM + inventario/lotes MP registrado: 6h, 21h (Bogotá)');
+
   } catch (error) {
     logger.error('Error al iniciar el servidor:', error);
     process.exit(1);

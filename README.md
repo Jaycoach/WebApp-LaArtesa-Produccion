@@ -6,40 +6,16 @@ Backend API RESTful para el sistema de gestión de producción de panadería **L
 
 ## ✅ Estado del Proyecto
 
-**Fase Actual:** Implementación de Autenticación y Usuarios
+Sistema de gestión de producción de panadería en operación (staging), con las **8 fases completas** del flujo productivo:
 
-### ✅ Completado (PASO 1 y PASO 2)
+**PLANIFICACIÓN → PESAJE → AMASADO → DIVISIÓN → FORMADO → FERMENTACIÓN → HORNEADO → EMPAQUE**
 
-#### Servicios de Autenticación
-- [x] Register
-- [x] Login
-- [x] Refresh Token
-- [x] Logout
-- [x] Forgot Password
-- [x] Reset Password
-- [x] Change Password
-- [x] Get Profile
-- [x] Update Profile
+- **Integración bidireccional con SAP Business One:** Service Layer para escrituras (OV, `InventoryGenExits`/`InventoryGenEntries`) y HANA de solo lectura para consultas masivas (stock de materia prima, BOM, tipos de masa, sincronización de OV), vía scripts Python dedicados en `backend/scripts/` (excepción explícita al patrón general de Service Layer). El modo de lectura se controla con `SAP_READ_MODE` (`hana` o Service Layer).
+- **Autenticación JWT**, gestión de usuarios y roles (`admin`/`supervisor`/`operario`) — base del sistema, sigue vigente sin cambios de fondo.
+- **Auditoría automática** de cambios (triggers en las tablas principales, ver `auditoria_cambios`).
+- **49 migraciones SQL** aplicadas en `backend/database/migrations/` (numeradas hasta la `058`, con algunos números no consecutivos/repetidos por historial del proyecto).
 
-#### Servicios de Usuarios
-- [x] CRUD completo
-- [x] Gestión de roles
-- [x] Activar/Desactivar usuarios
-- [x] Resetear contraseñas
-- [x] Desbloquear usuarios
-- [x] Obtener actividad
-- [x] Estadísticas de usuarios
-
-#### Infraestructura Base
-- [x] Configuración centralizada
-- [x] Conexión a PostgreSQL
-- [x] Sistema de logging con Winston
-- [x] Middleware de seguridad
-- [x] Middleware de autenticación JWT
-- [x] Middleware de verificación de roles
-- [x] Manejo de errores centralizado
-- [x] Rate limiting (10 limitadores especializados)
-- [x] Request logging
+Para el detalle de fixes y decisiones de diseño recientes, ver `docs/SESION_2026-08-12_RESUMEN.md` (última sesión de trabajo documentada en el repo — puede no reflejar cambios posteriores).
 
 ---
 
@@ -279,6 +255,8 @@ npm run docs       # Generar documentación
 
 ## 🐳 Comandos Docker
 
+> **Nota:** estos comandos son para desarrollo local únicamente. El deploy real a staging/producción **no usa Docker** — ver sección [🚀 Deploy a Staging/Producción](#-deploy-a-stagingproducción) más abajo.
+
 ```bash
 # Iniciar servicios
 docker-compose up -d
@@ -387,20 +365,19 @@ Password: Admin123!@#
 
 ### Tablas Principales
 
-| Tabla | Descripción |
-|-------|-------------|
-| `usuarios` | Gestión de usuarios y autenticación |
-| `ordenes_produccion` | Órdenes de producción |
-| `orden_productos` | Productos por orden |
-| `etapas_proceso` | Etapas del proceso productivo |
-| `control_calidad` | Control de calidad |
-| `recetas` | Recetas/fórmulas |
-| `receta_ingredientes` | Ingredientes de recetas |
-| `lotes` | Control de lotes |
-| `sap_sync_log` | Log de sincronización SAP |
-| `auditoria` | Auditoría del sistema |
-| `configuracion_sistema` | Configuraciones |
-| `sesiones_usuarios` | Control de sesiones |
+Validado contra `information_schema.tables` real de staging (52 tablas totales). Las agrupo por área:
+
+| Grupo | Tablas |
+|-------|--------|
+| **Núcleo de producción** | `masas_produccion`, `productos_por_masa`, `productos_por_masa_ov`, `progreso_fases`, `ingredientes_masa`, `orden_masa_relacion` |
+| **Pesaje y costos** | `pesaje_lotes_consumo`, `pesaje_ajustes_sap`, `costos_masa` |
+| **Registros por fase** (1 fila por masa/sesión) | `registros_amasado`, `registros_division`, `registros_formado`, `registros_fermentacion`, `registros_horneado`, `registros_empaque`, `registros_mano_obra` |
+| **Detalle por producto** (1 fila por producto, patrón `_detalles`) | `formado_detalles`, `fermentacion_detalles`, `empaque_detalles`, `empaque_consumo_materiales`, `empaque_por_masa` |
+| **Catálogos de producción** | `catalogo_tipos_masa`, `catalogo_productos`, `amasadoras`, `maquinas_corte`, `maquinas_formado`, `camaras_fermentacion`, `tipos_horno`, `programas_horneo`, `especificaciones_formado`, `tipos_mano_obra` |
+| **Integración SAP** | `sap_articulos`, `sap_bom_componentes`, `sap_inventario_mp`, `sap_lotes_mp`, `sap_sync_log`, `sincronizaciones_sap`, `cancelaciones_ov_sap` |
+| **Sistema** | `usuarios`, `usuarios_sesiones`, `configuracion_sistema`, `configuracion_etiqueta`, `auditoria`, `auditoria_cambios`, `auditoria_modificaciones`, `notificaciones_empaque` |
+
+**Tablas legacy (existen en el schema pero sin uso real en `backend/src/`):** `ordenes_produccion`, `orden_productos`, `etapas_proceso`, `control_calidad`, `recetas`, `receta_ingredientes`, `lotes`. Confirmado por grep: `orden_productos` y `receta_ingredientes` tienen 0 referencias en el código; las demás solo aparecen en el chequeo de arranque `verifyTables()` (`backend/src/database/connection.js`), no en lógica de negocio. Son remanentes de un modelo de datos anterior al actual (`masas_produccion`).
 
 ### Respaldo y Restauración
 
@@ -490,53 +467,37 @@ SAP_USER=tu_usuario_api
 SAP_PASSWORD=tu_password
 ```
 
-### Sincronización Automática
+### Sincronización
 
-La sincronización se ejecuta automáticamente a las 8:00 PM (Lun-Vie).
+No hay sincronización automática de OV/BOM — se ejecuta manualmente desde el módulo de Sincronización. El único cron job activo hoy es el de stock/precios de materiales de empaque, a las 5:00, 8:00, 11:00, 14:00 y 17:00 (America/Bogota) — ver `backend/src/server.js`.
 
-Ejecutar manualmente:
+Ejecutar sincronización de OV manualmente:
 ```bash
-curl -X POST http://localhost:3000/api/sync/now \
+curl -X POST http://localhost:3000/api/sap/sincronizar-ov \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
----
-
-## 🚀 Despliegue a Producción
-
-### Preparación
-
-1. **Generar nuevos secretos JWT:**
-```bash
-node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
-```
-
-2. **Actualizar `.env` con valores de producción:**
-   - Credenciales seguras de BD
-   - Nuevos secretos JWT
-   - URLs correctas
-   - SAP credenciales
-
-3. **Configurar SSL/TLS en Nginx**
-
-4. **Iniciar con perfil de producción:**
-```bash
-docker-compose --profile production up -d
-```
+Otros endpoints de sincronización: `/api/sap/sincronizar-tipos-masa`, `/api/sap/sincronizar-bom`, `/api/sap/sincronizar-inventario-mp` — ver `backend/src/routes/sap.routes.js`.
 
 ---
 
-## 🎯 Próximos Pasos
+## 🚀 Deploy a Staging/Producción
 
-### PASO 3: Órdenes de Producción (Siguiente)
+El deploy real **no usa Docker**. El flujo es: cambios locales → commit → push → (en el servidor) `git pull` → `deployment/deploy.sh`. Nunca se edita código directamente en el servidor.
 
-- [ ] Servicios de órdenes
-- [ ] Controladores
-- [ ] Validadores
-- [ ] Rutas
-- [ ] Integración SAP
+En el servidor (EC2, vía SSH):
+```bash
+cd ~/LaArtesa
+bash deployment/deploy.sh staging   # o: bash deployment/deploy.sh prod
+```
 
-Ver `PROXIMOS_PASOS.md` para el roadmap completo.
+`deploy.sh` hace, en orden: `git pull origin main` → `npm install --omit=dev` en backend → reinicia el proceso con **PM2** (`artesa-backend-staging` o `artesa-backend-prod`) → build de frontend con Vite → copia a `/var/www/artesa-frontend/dist` → recarga **NGINX**. Ver `deployment/deploy.sh` para el detalle completo.
+
+---
+
+## 🎯 Pendientes
+
+No hay un archivo de roadmap vigente en el repo. Para el estado de fixes y pendientes más reciente documentado, ver `docs/SESION_2026-08-12_RESUMEN.md` — es un snapshot de esa fecha, no necesariamente el estado actual.
 
 ---
 

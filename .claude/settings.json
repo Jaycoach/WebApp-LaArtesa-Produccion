@@ -30,7 +30,13 @@
       "Bash(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i \"deployment/aws-staging/produccion-artesa-staging-key.pem\" ubuntu@54.196.194.114 \"echo CONEXION_OK && whoami && ls ~/LaArtesa 2>/dev/null | head -5\")",
       "Bash(ssh -i \"deployment/aws-staging/produccion-artesa-staging-key.pem\" ubuntu@54.196.194.114 \"which psql && cat ~/LaArtesa/backend/.env | grep -E '^DB_|^DATABASE_URL' | sed -E 's/\\(PASSWORD=\\).*/\\\\1***REDACTED***/'\")",
       "Bash(ssh -i deployment/aws-staging/produccion-artesa-staging-key.pem ubuntu@54.196.194.114 ' *)",
-      "Bash(ssh -i \"deployment/aws-staging/produccion-artesa-staging-key.pem\" ubuntu@54.196.194.114 \"cat ~/LaArtesa/backend/scripts/hana_stock_mp.py\")"
+      "Bash(ssh -i \"deployment/aws-staging/produccion-artesa-staging-key.pem\" ubuntu@54.196.194.114 \"cat ~/LaArtesa/backend/scripts/hana_stock_mp.py\")",
+      "Bash(grep -v \"/\\\\.git/\")",
+      "Bash(awk -F'|' 'NR>9 {gsub\\(/^[ \\\\t]+|[ \\\\t]+$/,\"\",$1\\); print $1}' docs/schema/schema_columnas_artesa_LATEST.txt)",
+      "Bash(grep -v \"^--\\\\|^$\\\\|^\\(\")",
+      "Bash(node --check backend/src/server.js)",
+      "Bash(scp -i \"deployment/aws-staging/produccion-artesa-staging-key.pem\" \"/c/Users/jayco/AppData/Local/Temp/claude/c--Users-jayco-OneDrive-CLIENTES-MASORG-Desarrollo-LaArtesa-Produccion/5eafbff0-d1f1-4d3f-b2d8-6c9c121eaf56/scratchpad/test_cron_bom_inventario.js\" ubuntu@54.196.194.114:~/LaArtesa/backend/scripts/_tmp_test_cron_bom_inventario.js)",
+      "Bash(ssh -i \"deployment/aws-staging/produccion-artesa-staging-key.pem\" ubuntu@54.196.194.114 'rm -f ~/LaArtesa/backend/scripts/_tmp_test_cron_bom_inventario.js && ls ~/LaArtesa/backend/scripts/ | grep tmp || echo \"limpio, sin archivos tmp\"')"
     ],
     "additionalDirectories": [
       "\\tmp"
