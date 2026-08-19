@@ -1,3 +1,7 @@
+> 📌 **Documento histórico** — refleja el estado del proyecto al 23 de enero de 2026.
+> No representa el estado actual del sistema. Para el estado vigente ver
+> README.md / MANUAL_FUNCIONAL.md.
+
 # Análisis: Reunión del 15 de Enero de 2026 - Amasado y División
 
 ## Fecha de Análisis: 2026-01-23

@@ -1,3 +1,7 @@
+> 📌 **Documento histórico** — refleja el estado del proyecto al 12 de agosto de 2026.
+> No representa el estado actual del sistema. Para el estado vigente ver
+> README.md / MANUAL_FUNCIONAL.md.
+
 # Resumen de sesión — 12 de agosto de 2026
 
 Contexto para retomar el trabajo en una sesión nueva. Cubre Fases 1 a 5,
