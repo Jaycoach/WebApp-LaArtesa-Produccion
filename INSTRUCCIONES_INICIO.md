@@ -366,7 +366,7 @@ Verificar que `JWT_SECRET` esté configurado en `backend/.env`
 
 ## 📚 Documentación Adicional
 
-- [RESUMEN_CORRECCIONES.md](RESUMEN_CORRECCIONES.md) - Correcciones de consistencia FrontEnd/BackEnd
+- [RESUMEN_CORRECCIONES_2026-01-23.md](RESUMEN_CORRECCIONES_2026-01-23.md) - Correcciones de consistencia FrontEnd/BackEnd
 - [VALIDACION_CHECKLIST_PESAJE.md](backend/VALIDACION_CHECKLIST_PESAJE.md) - Validación del checklist
 - [ANALISIS_REUNION_15_ENERO_2026.md](ANALISIS_REUNION_15_ENERO_2026.md) - Análisis de la reunión del 15/01/2026
 

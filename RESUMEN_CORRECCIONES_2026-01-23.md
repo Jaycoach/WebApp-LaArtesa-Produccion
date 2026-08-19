@@ -1,3 +1,7 @@
+> 📌 **Documento histórico** — refleja el estado del proyecto al 23 de enero de 2026.
+> No representa el estado actual del sistema. Para el estado vigente ver
+> README.md / MANUAL_FUNCIONAL.md.
+
 # Resumen de Correcciones - Consistencia FrontEnd y BackEnd
 
 ## Fecha: 2026-01-23
