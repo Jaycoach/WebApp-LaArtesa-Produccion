@@ -356,7 +356,7 @@ export const ListaMasas: React.FC = () => {
                   </button>
                 )}
               </div>
-              {esSupervisor && aprobables.length > 0 && (
+              {esSupervisor && aprobables.length > 2 && (
                 <>
                   <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
                     <input
