@@ -1,6 +1,6 @@
 // frontend/src/hooks/useMasas.ts
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { masasService } from '../services/masasService';
 import { MESSAGES } from '../config/api.config';
 
@@ -35,6 +35,10 @@ export const useMasaDetail = (masaId: number) => {
     queryKey: MASAS_QUERY_KEYS.detail(masaId),
     queryFn: () => masasService.getMasaById(masaId),
     enabled: !!masaId,
+    // Conserva los datos previos durante un refetch en segundo plano (reconexión
+    // de red, etc.) en vez de caer a `undefined` — evita que la pantalla de fase
+    // parpadee a "Masa no encontrada" mientras el usuario sigue trabajando.
+    placeholderData: keepPreviousData,
   });
 };
 
@@ -57,6 +61,7 @@ export const useProductos = (masaId: number) => {
     queryKey: MASAS_QUERY_KEYS.productos(masaId),
     queryFn: () => masasService.getProductos(masaId),
     enabled: !!masaId,
+    placeholderData: keepPreviousData,
   });
 };
 

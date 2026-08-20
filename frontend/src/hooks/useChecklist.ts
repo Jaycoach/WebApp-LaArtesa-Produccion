@@ -1,6 +1,6 @@
 // frontend/src/hooks/useChecklist.ts
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { checklistService } from '../services/checklistService';
 import { UpdateIngredienteRequest } from '../types/api';
 import { MESSAGES } from '../config/api.config';
@@ -22,6 +22,9 @@ export const useChecklist = (masaId: number) => {
     queryFn: () => checklistService.getChecklist(masaId),
     enabled: !!masaId,
     refetchInterval: 5000, // Refrescar cada 5 segundos
+    // Con refetchInterval activo, cualquier poll fallido (red inestable en planta)
+    // no debe tumbar `checklist` a undefined y disparar "Masa no encontrada".
+    placeholderData: keepPreviousData,
   });
 };
 
