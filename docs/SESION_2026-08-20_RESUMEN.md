@@ -115,6 +115,27 @@ adicional específico para "cero unidades empacadas"), más el bloqueo
 correspondiente en el frontend (`PanelEmpaqueMasa`/flujo OV en
 `EmpaqueMasa.tsx`).
 
+**Actualización (mismo día, turno posterior) — Estado: ✅ Implementado.**
+
+- **App (commit `e5fa027`)**: dos guards nuevos en `completarEmpaque`,
+  complementan (no reemplazan) el guard `?.error` existente — rechazan con
+  422 si `totalUdsProducidas === 0` (antes de tocar SAP/costos) y si tras
+  el intento de SAP no hay `DocEntry` real de entrada y salida. Frontend
+  (`EmpaqueMasa.tsx`, ambos flujos): bloquea el botón "Completar" con
+  mensaje explícito si no se guardó el detalle antes de llamar al backend.
+- **DB (commit `efffe83`, migración
+  `059-empaque-completado-requiere-sap.sql`)**: la misma regla queda
+  garantizada también a nivel de Postgres, para que no dependa solo del
+  código de aplicación — `CHECK constraint` en `registros_empaque` (estado
+  `COMPLETADO` exige `sap_doc_entry_entrada`/`sap_doc_entry_salida` no
+  nulos) + trigger `BEFORE INSERT OR UPDATE` en `progreso_fases` (fase
+  EMPAQUE → COMPLETADA exige un `registros_empaque` en estado COMPLETADO
+  con ambos DocEntry, para cubrir cualquier código/script que actualice
+  esa tabla sin pasar por `completarEmpaque`). Aplicada de forma normal
+  (sin `NOT VALID`) porque no hay datos de producción que preservar.
+  **Pendiente**: validar en staging real (la sesión no tuvo acceso a la
+  DB de staging en ese momento — ver nota de infraestructura en 3.4).
+
 ### 3.2 — Costeo proporcional por peso producido (no por plan/`kilos_programados`)
 
 **Estado: ✅ Implementado y confirmado con datos reales — commit `8df5360`.**
@@ -198,14 +219,86 @@ standalone + `tsc`/`build`), falta staging real.**
   que el placeholder se ve correctamente y que completar con la cantidad
   correcta de paquetes sigue transmitiendo el `Quantity` correcto a SAP.
 
+### 3.4 — Prellenado de "Paquetes Empacados" con panes sin convertir (UAT real)
+
+**Estado: Parte B (blindaje en la app) ✅ implementada — commit `8f13e04`.
+Parte A (dato) ❌ cerrada como no-bug — master data pendiente en SAP, ver
+abajo.**
+
+- **Caso real UAT**: masa `MASA-OV-20260820-018`, producto `PANPAQ186` /
+  BRIOCHE_MOLDE, OV 976 — el campo "Paquetes Empacados" se prellenó con
+  `10` (el número de panes horneados) cuando lo correcto era `1` paquete
+  (10 panes por paquete).
+- **Diagnóstico corregido respecto a la hipótesis inicial**: se sospechaba
+  de `unidades_pan_por_paquete` (columna de `productos_por_masa`/
+  `catalogo_tipos_masa`, migración 028, poblada una sola vez por
+  heurística de nombre `%X10%` y usada solo en costeo backend). Por grep
+  se confirmó que **no es esa columna** — el campo que de verdad alimenta
+  el sugerido y el input de "Paquetes Empacados" en el frontend es
+  `productos_por_masa.unidades_por_paquete` (documentada desde la
+  migración 007 como *"Unidades por paquete según SAP (SalPackUn de
+  OITM)"*, sincronizada desde el UDF SAP `U_JZ_PanesPorBolsa` en
+  `sap.service.js`). Son dos columnas distintas con nombres parecidos, no
+  una mal nombrada.
+- **Causa raíz directa (bug de código, ya corregido)**: el `useEffect` de
+  precarga en `PanelEmpaqueMasa` (`EmpaqueMasa.tsx`, flujo de lista de
+  pendientes) copiaba `productos_por_masa.unidades_producidas` tal cual al
+  campo de paquetes — esa columna está documentada como PANES en el propio
+  comentario de `actualizarDetalle` (backend), no como paquetes. El
+  safety-net (`esPosibleErrorPanes`) no lo detectaba porque su propio
+  cálculo de referencia usa la misma `unidades_por_paquete`: si ese dato
+  también está en el default sin configurar (`=1`), el "sugerido" coincide
+  por casualidad con el valor mal prellenado y no dispara advertencia.
+- **Fix aplicado (Parte B, commit `8f13e04`)**: el prellenado ahora
+  convierte panes → paquetes dividiendo por `unidades_por_paquete`; si esa
+  columna está en el default sin configurar (`≤1`), el campo queda vacío
+  en vez de mostrar un número con apariencia confiable. Se agregó una
+  advertencia visible (texto rojo + borde rojo en el input) junto al
+  producto en **ambos** flujos (lista de pendientes y búsqueda por OV)
+  cuando `unidades_por_paquete` no está configurado. El safety-net
+  existente no se tocó.
+- **Parte A (dato) — cerrada, no es bug de código**: se corrió el
+  dimensionamiento pedido (`GROUP BY sap_item_code, unidades_por_paquete
+  HAVING unidades_por_paquete = 1`) contra SAP vía el equipo/sesión de
+  staging: **97 productos** tienen `U_JZ_PanesPorBolsa` vacío/sin
+  configurar en el maestro de artículos de SAP — no es un problema de
+  sincronización (el sync de `sap.service.js` sí trae y mapea el UDF
+  correctamente cuando SAP lo tiene poblado) ni de la app. Queda **fuera
+  de este repo**, pendiente de que el equipo de SAP complete
+  `U_JZ_PanesPorBolsa` en esos 97 ítems. No se tocó ningún dato ni se hizo
+  ningún `UPDATE` puntual en esta sesión sobre `productos_por_masa`/
+  `catalogo_tipos_masa` — la lista completa de los 97 productos afectados
+  queda registrada en la sesión de staging donde se corrió la query, no en
+  este repo.
+- **Nota de infraestructura**: en esta sesión, el intento de conectar a la
+  DB de staging real (`localhost:5433`, `artesa_staging`) para correr las
+  queries de diagnóstico falló por partida doble — Docker Desktop estaba
+  apagado, y al levantarlo el `docker-compose.yml` de este repo resultó
+  ser un Postgres **distinto** (puerto 5432, DB nueva vacía) al de
+  staging real. El usuario terminó conectándose por su cuenta vía SSH y
+  corriendo las queries directamente. Para una próxima sesión: **el
+  `docker-compose.yml` de este repo no es el camino para llegar a
+  staging** — confirmar con el usuario cuál es el mecanismo real
+  (parece ser un túnel/servicio fuera de este repo) antes de asumir que
+  `docker compose up` es suficiente.
+
 ## 4. Próximos pasos
 
-- [ ] Implementar el fix 3.1 (bloqueo completar sin unidades empacadas) —
-      no existe todavía, ver esa sección para el punto de partida.
-- [ ] Validar en staging 3.3 (placeholder/sugerido visual con un producto
-      `×N` real).
-- [ ] Push consolidado de `8df5360` y `4cd7eea` (los dos commits de Empaque
-      de esta sesión) una vez Jonathan dé luz verde.
+- [x] Implementar el fix 3.1 (bloqueo completar sin unidades empacadas) —
+      hecho, app (`e5fa027`) + DB (`efffe83`, migración 059).
+- [ ] Validar en staging real 3.1 (CHECK/trigger de la migración 059) y 3.3
+      (placeholder/sugerido visual con un producto `×N` real) — pendiente
+      por falta de acceso a staging en esta sesión, ver 3.4.
+- [ ] Validar en staging real 3.4: reproducir con PANPAQ186/BRIOCHE_MOLDE
+      antes/después de que SAP configure `U_JZ_PanesPorBolsa`, y forzar
+      `unidades_por_paquete = 1` en un producto de prueba para confirmar
+      que ahora se ve la advertencia en vez de prellenar con panes.
+- [ ] Parte A de 3.4 — no es tarea de código: pedir al equipo de SAP que
+      complete `U_JZ_PanesPorBolsa` en los 97 productos identificados
+      (master data, fuera de este repo).
+- [ ] Push consolidado de `8df5360`, `4cd7eea`, `e5fa027`, `efffe83` y
+      `8f13e04` (los commits de Empaque de esta sesión) una vez Jonathan dé
+      luz verde.
 - [ ] Deploy a staging de todo el bloque 2 tras el push.
 - [ ] Pendientes de UAT no abordados en esta sesión (según la descripción
       del usuario — el archivo fuente `PENDIENTES_UAT_2026-07-28.md` no se
