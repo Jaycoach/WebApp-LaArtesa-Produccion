@@ -573,6 +573,20 @@ exports.completarEmpaque = async (req, res) => {
       (s, p) => s + (parseInt(p.uds_empacadas) * parseFloat(p.unidades_pan_por_paquete || 1)), 0
     );
 
+    // ── GUARDIA RESTRICTIVA: sin unidades empacadas guardadas, no se completa ──
+    // Bug real (masas 1918, 1944, 1971, 1975): la usuaria terminaba la fase sin
+    // guardar el detalle de empaque; como nunca se intentaba el envío a SAP, el
+    // guard de "sapAdvertencias" (paso 9b, basado en `?.error`) no detectaba nada
+    // y la masa quedaba COMPLETADA sin haber transmitido unidades. Se corta acá,
+    // antes de calcular costos o tocar SAP.
+    if (totalUdsProducidas <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(422).json({
+        success: false,
+        message: 'No se puede completar el empaque: no hay unidades empacadas guardadas para ningún producto. Guarda el detalle de unidades empacadas antes de completar la fase.',
+      });
+    }
+
     // 3. Costo MO total (esta masa + sub-masas)
     const masaInfoR = await client.query(
       `SELECT id FROM masas_produccion WHERE id = $1 OR masa_padre_id = $1`, [masaId]
@@ -878,6 +892,24 @@ exports.completarEmpaque = async (req, res) => {
     }
     if (sapResult?.error) {
       sapAdvertencias.push(`Salida de materiales de empaque SAP falló: ${sapResult.error}`);
+    }
+
+    // ── GUARDIA RESTRICTIVA: exigir DocEntry real de SAP ────────────────────
+    // El check de arriba (`?.error`) nunca se activaba porque un envío que
+    // nunca se INTENTÓ (entradaLines/docLines vacíos, p.ej. producto sin
+    // sap_item_code pese a tener unidades_empacadas > 0) deja sapEntradaResult
+    // / sapResult en null, sin `.error`. Complementa (no reemplaza) el guard
+    // anterior: exige DocEntry real tanto para la entrada de producto
+    // terminado como para la salida de materiales de empaque.
+    const sinDocEntry = [];
+    if (!sapEntradaResult?.doc_entry) sinDocEntry.push('entrada de producto terminado');
+    if (!sapResult?.doc_entry) sinDocEntry.push('salida de materiales de empaque');
+    if (sinDocEntry.length > 0) {
+      await client.query('COMMIT');
+      return res.status(422).json({
+        success: false,
+        message: `No se puede completar el empaque: no se obtuvo un DocEntry real de SAP para: ${sinDocEntry.join(' y ')}. Verifica que los productos tengan código SAP asociado y vuelve a intentar. La fase permanece EN_PROGRESO.`,
+      });
     }
 
     if (sapAdvertencias.length === 0) {

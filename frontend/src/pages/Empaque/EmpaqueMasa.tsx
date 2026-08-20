@@ -739,6 +739,20 @@ const PanelEmpaqueMasa: React.FC<{
   };
 
   const handleCompletar = async (obsOverride?: string) => {
+    // Guardia UX: bloquear si no se guardó explícitamente el detalle de
+    // ningún producto (bug real: la usuaria completaba la fase con valores
+    // tecleados pero nunca guardados vía PATCH /detalle/:productoId). El
+    // backend es la validación autoritativa; esto solo evita el viaje
+    // redondo y da un mensaje claro antes de intentar completar.
+    const todosProductos = masa.ovs.flatMap(ov => ov.productos);
+    const sinGuardar = todosProductos.filter(p => !guardadoIds.has(p.id));
+    if (sinGuardar.length > 0) {
+      mostrar('err',
+        `Debes guardar el detalle de unidades empacadas antes de completar. Falta guardar: ${sinGuardar.map(p => p.producto_nombre).join(', ')}.`
+      );
+      return;
+    }
+
     const faltantes: { nombre: string; ov: string; faltante: number }[] = [];
     masa.ovs.forEach(ov => {
       ov.productos.forEach(p => {
@@ -2122,7 +2136,21 @@ export const EmpaqueMasa: React.FC = () => {
                         )}
                         {tieneEmpaque && !empaqueCompleto && (
                           <button
-                            onClick={() => completarMut.mutate(sm.id)}
+                            onClick={() => {
+                              // Guardia UX: bloquear si ningún producto de esta tanda
+                              // tiene unidades_empacadas guardadas (persistido en DB,
+                              // no valores tecleados sin guardar). El backend es la
+                              // validación autoritativa; esto da un mensaje claro antes
+                              // de intentar completar.
+                              const sinGuardar = prodsSM.filter(p => !((p.unidades_empacadas ?? 0) > 0));
+                              if (sinGuardar.length > 0) {
+                                mostrarMsg('err',
+                                  `Debes guardar las unidades empacadas antes de completar. Falta guardar: ${sinGuardar.map(p => p.producto_nombre).join(', ')}.`
+                                );
+                                return;
+                              }
+                              completarMut.mutate(sm.id);
+                            }}
                             disabled={completarMut.isPending || !!sm.sap_doc_entry_entrada}
                             className="text-xs px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
                             title={sm.sap_doc_entry_entrada ? `Entrada SAP ya registrada (DocNum ${sm.sap_doc_num_entrada})` : undefined}
