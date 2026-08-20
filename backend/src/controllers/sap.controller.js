@@ -1222,6 +1222,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
              peso_masa_dividida    = COALESCE(EXCLUDED.peso_masa_dividida, productos_por_masa.peso_masa_dividida),
              dias_vencimiento      = COALESCE(EXCLUDED.dias_vencimiento, productos_por_masa.dias_vencimiento),
              requiere_formado      = COALESCE(EXCLUDED.requiere_formado, productos_por_masa.requiere_formado),
+             unidades_por_paquete = EXCLUDED.unidades_por_paquete,
              unidades_pedidas     = productos_por_masa.unidades_pedidas     + EXCLUDED.unidades_pedidas,
              unidades_programadas = productos_por_masa.unidades_programadas + EXCLUDED.unidades_programadas,
              cantidad_paquetes    = productos_por_masa.cantidad_paquetes    + EXCLUDED.cantidad_paquetes,
