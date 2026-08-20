@@ -282,6 +282,101 @@ abajo.**
   (parece ser un túnel/servicio fuera de este repo) antes de asumir que
   `docker compose up` es suficiente.
 
+### 3.5 — `unidades_por_paquete` congelado en `productos_por_masa` tras re-sync (bug de sync, no master data)
+
+**Estado: fix de código aplicado — commit `a9e4cf9` (local, sin push).
+Falta validación real con HANA — pendiente de correr en la sesión con
+acceso SSH (ver comandos abajo).**
+
+- **Contexto**: Jonathan confirmó que `U_JZ_PanesPorBolsa` **sí** tiene
+  valores reales cargados en SAP para los 97 productos detectados en
+  3.4 con `unidades_por_paquete = 1` — descarta la hipótesis de master
+  data pendiente que se había documentado como cierre de 3.4. El
+  problema está en la cadena SAP → BD.
+- **Descartado por grep (no es el bug de `U_JZ_Formado`)**: las 4 rutas
+  de lectura que alimentan este dato — `sincronizarDesdeOV` vía Service
+  Layer (`sap.service.js:505`) y vía HANA (`hana_ov_sync.py:81`),
+  `sincronizarBOM` vía Service Layer (`sap.service.js:671`) y vía HANA
+  (`hana_bom_completo.py:54`) — **sí** incluyen `U_JZ_PanesPorBolsa` en
+  su `$select`/`SELECT`. No falta el campo en ningún query.
+- **Causa raíz confirmada por código**: el `ON CONFLICT (masa_id,
+  sap_item_code) DO UPDATE SET` de `sincronizarDesdeOV`
+  (`sap.controller.js`, INSERT a `productos_por_masa`, antes de este fix
+  en la línea ~1219-1230) nunca incluía `unidades_por_paquete` en su
+  `SET`, aunque `EXCLUDED.unidades_por_paquete` sí se leía —
+  correctamente— dentro de los `CASE` que calculan `unidades_ajustadas`/
+  `unidades_excedente` un poco más abajo en el mismo statement. Es decir:
+  el valor nuevo llegaba hasta el UPSERT, se usaba para cálculos
+  derivados, pero la columna en sí nunca se sobreescribía — quedaba
+  congelada en lo que tenía la primera vez que esa fila (masa_id +
+  sap_item_code) se insertó. Cada re-sync posterior de la misma masa
+  (común: llegan más líneas de OV mientras la masa sigue en
+  PLANIFICACION) pasaba por `ON CONFLICT` y nunca corregía el dato, sin
+  importar cuántas veces se sincronizara ni si SAP ya tenía el UDF bien
+  cargado.
+- **`sap_articulos.sales_qty_per_pack` no tiene este bug**: sus dos
+  UPSERT (`sincronizarBOM` y `sincronizarInventarioMP`,
+  `sap.controller.js`) sí hacen `sales_qty_per_pack =
+  EXCLUDED.sales_qty_per_pack` sin excepción — se refresca en cada sync.
+- **Cron (paso 4 confirmado por grep en `server.js:296-351`)**:
+  `sincronizarBOM` + `sincronizarInventarioMP` corren automáticamente a
+  las 6:00 y 21:00 (América/Bogotá) — ambos con el UPSERT correcto de
+  `sap_articulos`. `sincronizarDesdeOV` (donde vive el bug) es **100%
+  manual**, confirmado por el propio comentario del código
+  (`server.js:317`, "sincronizar-ov, que sigue siendo 100% manual y no
+  se toca aquí") — nunca se auto-corrige solo, hace falta correrlo a
+  mano por producto/masa después del fix.
+- **Fix aplicado (commit `a9e4cf9`, local, sin push)**: se agregó
+  `unidades_por_paquete = EXCLUDED.unidades_por_paquete,` al `SET` del
+  `ON CONFLICT`, reutilizando el mismo cálculo (preferir el dato de SAP
+  si es `> 1`, si no extraer de la descripción con `/ X ?(\d+)/i`) que ya
+  se pasaba como parámetro `$8` — sin duplicar lógica.
+
+**Pendiente — correr en la sesión con SSH ya conectada al entorno real
+(HANA_HOST/PORT/USER/PASSWORD/SCHEMA no están disponibles en este
+entorno local, tampoco `hdbcli` instalado):**
+
+1. **Paso 1 — confirmar el valor real en HANA, bypaseando toda la app**
+   (SELECT-only, jamás escritura):
+   ```sql
+   SELECT "ItemCode", "ItemName", "U_JZ_PanesPorBolsa"
+   FROM "<SCHEMA>"."OITM"
+   WHERE "ItemCode" IN ('PANPAQ186', /* 2-3 más de la lista de 97 detectada en 3.4 */);
+   ```
+   O el mismo patrón que `hana_lotes_mp.py`/`hana_ov_sync.py`:
+   ```python
+   from hdbcli import dbapi
+   import os
+   conn = dbapi.connect(
+       address=os.environ['HANA_HOST'], port=int(os.environ['HANA_PORT']),
+       user=os.environ['HANA_USER'], password=os.environ['HANA_PASSWORD'],
+       encrypt=True, sslValidateCertificate=False,
+   )
+   cur = conn.cursor()
+   cur.execute(f'''SELECT "ItemCode", "ItemName", "U_JZ_PanesPorBolsa"
+                    FROM "{os.environ["HANA_SCHEMA"]}"."OITM"
+                    WHERE "ItemCode" IN (?, ?, ?)''', ('PANPAQ186', '<item2>', '<item3>'))
+   print(cur.fetchall())
+   ```
+   Si esto confirma valores `> 1` reales en SAP, cierra la duda de Jonathan
+   y valida que el fix de 3.5 es la causa completa (no queda ningún
+   componente de master data pendiente).
+2. **Paso 6 — validar el fix**: correr manualmente `sincronizar-ov` en
+   staging para al menos la masa de `PANPAQ186`/BRIOCHE_MOLDE (o
+   cualquier masa que contenga alguno de los 97 productos y siga en
+   PLANIFICACION, para forzar el `ON CONFLICT`), luego:
+   ```sql
+   SELECT sap_item_code, unidades_por_paquete
+   FROM productos_por_masa
+   WHERE sap_item_code = 'PANPAQ186'
+   ORDER BY id DESC LIMIT 5;
+   ```
+   y confirmar que ya coincide con el valor real de HANA del paso 1. Si
+   el producto no tiene ninguna masa en PLANIFICACION activa para forzar
+   el `ON CONFLICT`, considerar un `UPDATE` puntual de verificación (no
+   parte del fix, solo para confirmar que el cálculo `$8` da el número
+   correcto) o esperar al próximo ciclo real de sync-OV.
+
 ## 4. Próximos pasos
 
 - [x] Implementar el fix 3.1 (bloqueo completar sin unidades empacadas) —
