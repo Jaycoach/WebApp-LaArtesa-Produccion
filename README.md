@@ -15,7 +15,7 @@ Sistema de gestión de producción de panadería en operación (staging), con la
 - **Auditoría automática** de cambios (triggers en las tablas principales, ver `auditoria_cambios`).
 - **49 migraciones SQL** aplicadas en `backend/database/migrations/` (numeradas hasta la `058`, con algunos números no consecutivos/repetidos por historial del proyecto).
 
-Para el detalle de fixes y decisiones de diseño recientes, ver `docs/SESION_2026-08-12_RESUMEN.md` (última sesión de trabajo documentada en el repo — puede no reflejar cambios posteriores).
+Para el detalle de fixes y decisiones de diseño recientes, ver `docs/SESION_2026-08-20_RESUMEN.md` (última sesión de trabajo documentada en el repo — puede no reflejar cambios posteriores; ver también `docs/SESION_2026-08-12_RESUMEN.md` para la sesión previa).
 
 ---
 
@@ -497,7 +497,7 @@ bash deployment/deploy.sh staging   # o: bash deployment/deploy.sh prod
 
 ## 🎯 Pendientes
 
-No hay un archivo de roadmap vigente en el repo. Para el estado de fixes y pendientes más reciente documentado, ver `docs/SESION_2026-08-12_RESUMEN.md` — es un snapshot de esa fecha, no necesariamente el estado actual.
+No hay un archivo de roadmap vigente en el repo. Para el estado de fixes y pendientes más reciente documentado, ver `docs/SESION_2026-08-20_RESUMEN.md` — es un snapshot de esa fecha, no necesariamente el estado actual.
 
 ---
 
