@@ -1,6 +1,6 @@
 // frontend/src/pages/Planificacion/ListaMasas.tsx
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   useMasasByFecha,
@@ -13,6 +13,7 @@ import {
 import { useAuthStore } from '@/store';
 import { MasaProduccionResumen } from '../../types/api';
 import { ModalCancelarMasa } from '@/components/common/ModalCancelarMasa';
+import { MasasFiltroDropdown, masaCumpleFiltro } from '@/components/common/MasasFiltroDropdown';
 
 /**
  * Página: Lista de masas de producción del día
@@ -31,14 +32,19 @@ export const ListaMasas: React.FC = () => {
 
   const { data: masas, isLoading, error, refetch } = useMasasByFecha(fecha);
   const [busqueda, setBusqueda] = useState('');
+  const [filtroSeleccion, setFiltroSeleccion] = useState<Set<string>>(new Set());
+  // Resetear filtro al cambiar de fecha — no debe arrastrarse entre días distintos.
+  useEffect(() => {
+    setFiltroSeleccion(new Set());
+  }, [fecha]);
   const masasFiltradas = (masas || []).filter((m: MasaProduccionResumen) => {
     const q = busqueda.trim().toLowerCase();
-    if (!q) return true;
-    return (
+    const cumpleBusqueda = !q || (
       m.tipo_masa?.toLowerCase().includes(q) ||
       m.nombre_masa?.toLowerCase().includes(q) ||
       m.codigo_masa?.toLowerCase().includes(q)
     );
+    return cumpleBusqueda && masaCumpleFiltro(m, filtroSeleccion);
   });
   const sincronizarMutation = useSincronizarSAP();
   const sincronizarBOMMutation = useSincronizarBOM();
@@ -246,6 +252,13 @@ export const ListaMasas: React.FC = () => {
                 onChange={(e) => { sessionStorage.setItem('artesa_fecha_produccion', e.target.value); setFecha(e.target.value); }}
                 className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm w-full sm:w-auto"
               />
+
+              <MasasFiltroDropdown seleccion={filtroSeleccion} onChange={setFiltroSeleccion} />
+              {masas && (
+                <span className="text-xs text-gray-500 shrink-0">
+                  {masasFiltradas.length} de {masas.length} masas
+                </span>
+              )}
 
               {/* Botón sincronizar BOM */}
               <button
