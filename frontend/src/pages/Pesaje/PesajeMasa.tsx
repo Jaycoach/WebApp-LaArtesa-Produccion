@@ -263,6 +263,11 @@ export const PesajeMasa: React.FC = () => {
     setConfirmando(true);
     try {
       const resultado = await confirmarMutation.mutateAsync(masaIdNum);
+      // TODO(TS-audit): 'sap_docentry' es un typo -- el backend devuelve 'sap_doc_entry'
+      // (con guion bajo, ver pesaje.controller.js confirmarPesaje). Este fallback nunca
+      // se activa porque sap_doc_num ya viene bien, pero es un bug real, no solo de
+      // tipos. Requiere revision -- ver resumen de sesion.
+      // @ts-expect-error TS-audit: 'sap_docentry' no existe, deberia ser 'sap_doc_entry'
       const docNum = resultado?.sap_doc_num ?? resultado?.sap_docentry ?? '—';
       alert(`✅ Pesaje confirmado exitosamente.\nSalida SAP Nº ${docNum} creada.\n\nPuedes continuar a Amasado con el botón de arriba cuando estés listo.`);
     } catch (err: any) {

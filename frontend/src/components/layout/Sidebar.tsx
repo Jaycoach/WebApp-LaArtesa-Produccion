@@ -154,6 +154,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
             <li>
               <Link
                 to="/configuracion/usuarios"
+                // TODO(TS-audit): handleNavClick espera (targetPath?, esFaseVigente?)
+                // pero aqui se pasa directo como onClick, asi que recibe el MouseEvent
+                // como primer argumento en vez de un string. Hoy es inofensivo (ver
+                // resumen de sesion: ni targetPath ni esFaseVigente calzan con las
+                // condiciones de este link de todas formas), pero es un bug latente
+                // si esa condicion cambia. Requiere revision -- no se toca en el audit
+                // de tipos por instruccion explicita de no cambiar logica/runtime.
+                // @ts-expect-error TS-audit: ver TODO arriba y resumen de sesion
                 onClick={handleNavClick}
                 className={clsx(
                   'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors',
