@@ -3,7 +3,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { configService } from '@/services';
-import type { ConfiguracionSistema, UpdateConfiguracionRequest } from '@/types';
+import type { UpdateConfiguracionRequest } from '@/types';
 
 // Query keys
 export const configKeys = {

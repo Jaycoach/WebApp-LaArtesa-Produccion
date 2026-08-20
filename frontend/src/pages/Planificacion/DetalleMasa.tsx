@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card } from '@/components/common';
 import { useMasaDetail, useProductos, useComposicion, MASAS_QUERY_KEYS } from '../../hooks/useMasas';
@@ -99,7 +99,7 @@ export const DetalleMasa: React.FC = () => {
   const setAjusteCampo = (productoId: number, campo: 'delta' | 'motivo', valor: string) =>
     setAjustes(prev => ({ ...prev, [productoId]: { ...getAjuste(productoId, undefined), [campo]: valor, error: null } }));
 
-  const handleGuardarAjuste = async (productoId: number, upq: number) => {
+  const handleGuardarAjuste = async (productoId: number) => {
     const ajuste = getAjuste(productoId);
     const delta = parseInt(ajuste.delta, 10);
     if (isNaN(delta)) {
@@ -530,7 +530,7 @@ export const DetalleMasa: React.FC = () => {
                                 />
                                 <span className="text-xs text-gray-400">paq</span>
                                 <button
-                                  onClick={() => handleGuardarAjuste(producto.id, upq)}
+                                  onClick={() => handleGuardarAjuste(producto.id)}
                                   disabled={ajuste.guardando || !ajuste.delta}
                                   className="px-2 py-1 text-xs font-medium bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                                 >

@@ -162,7 +162,7 @@ export const useUpdateUnidadesProgramadas = () => {
       productoId: number;
       unidades: number;
     }) => masasService.updateUnidadesProgramadas(masaId, productoId, unidades),
-    onSuccess: (data, variables) => {
+    onSuccess: (_data, variables) => {
       // Invalidar queries relacionadas
       queryClient.invalidateQueries({
         queryKey: MASAS_QUERY_KEYS.productos(variables.masaId),

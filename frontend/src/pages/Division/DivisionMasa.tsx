@@ -525,7 +525,6 @@ export const DivisionMasa: React.FC = () => {
                         const cantidad   = cantidadesDivididas[producto.id] || 0;
                         const error      = cantidad > 0 ? validarCantidad(producto, cantidad) : null;
                         const divisor    = parseInt(producto.multiplo_divisor || 0);
-                        const pedidas    = parseInt(producto.unidades_pedidas || 0);
                         const excedente  = parseInt(producto.unidades_excedente || 0);
                         const esCorrecto = cantidad > 0 && !error;
                         // Peso unitario: U_JZ_PesMasDiv con respaldo en gramaje_unitario — misma fuente que la columna "Peso Unitario Masa"

@@ -4,7 +4,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fasesService } from '@/services';
 import type {
-  ProgresoFases,
   UpdateProgresoFaseRequest,
   CompletarFaseRequest,
   CompletarFaseResponse,

@@ -7,7 +7,6 @@ import {
   MasaProduccionDetalle,
   ProductoMasa,
   IngredienteMasa,
-  UpdateUnidadesProgramadasRequest,
   SincronizacionSAPResponse,
   SincronizacionBOMResponse,
   SincronizacionInventarioMPResponse,

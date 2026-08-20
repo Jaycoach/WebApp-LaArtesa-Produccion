@@ -3,7 +3,6 @@
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { checklistService } from '../services/checklistService';
 import { UpdateIngredienteRequest } from '../types/api';
-import { MESSAGES } from '../config/api.config';
 
 /**
  * Query keys para checklist
@@ -44,7 +43,7 @@ export const useUpdateIngrediente = () => {
       ingredienteId: number;
       data: UpdateIngredienteRequest;
     }) => checklistService.updateIngrediente(masaId, ingredienteId, data),
-    onSuccess: (data, variables) => {
+    onSuccess: (_data, variables) => {
       // Invalidar el checklist
       queryClient.invalidateQueries({
         queryKey: CHECKLIST_QUERY_KEYS.byMasa(variables.masaId),
@@ -80,7 +79,7 @@ export const useMarcarDisponible = () => {
       ingredienteId: number;
       disponible: boolean;
     }) => checklistService.marcarDisponible(masaId, ingredienteId, disponible),
-    onSuccess: (data, variables) => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({
         queryKey: CHECKLIST_QUERY_KEYS.byMasa(variables.masaId),
       });
@@ -104,7 +103,7 @@ export const useMarcarVerificado = () => {
       ingredienteId: number;
       verificado: boolean;
     }) => checklistService.marcarVerificado(masaId, ingredienteId, verificado),
-    onSuccess: (data, variables) => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({
         queryKey: CHECKLIST_QUERY_KEYS.byMasa(variables.masaId),
       });
@@ -142,7 +141,7 @@ export const useMarcarPesado = () => {
         lote,
         fechaVencimiento
       ),
-    onSuccess: (data, variables) => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({
         queryKey: CHECKLIST_QUERY_KEYS.byMasa(variables.masaId),
       });
