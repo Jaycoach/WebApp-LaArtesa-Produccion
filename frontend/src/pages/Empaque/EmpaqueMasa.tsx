@@ -650,11 +650,24 @@ const PanelEmpaqueMasa: React.FC<{
     setDetalles(prev => {
       const next = { ...prev };
       for (const p of masaActualData.data.productos) {
-        const empacadas = p.unidades_producidas ?? null;
+        // productos_por_masa.unidades_producidas está en PANES, no en paquetes
+        // (ver empaque.controller.js actualizarDetalle, comentario "semántica de
+        // PANES") — hay que convertir dividiendo por unidades_por_paquete antes de
+        // prellenar este campo. Bug real UAT 2026-08-20: sin esta conversión se
+        // prellenaba "Paquetes Empacados" con el número de panes horneados.
+        const panesProducidos = p.unidades_producidas ?? null;
+        const xPaq = Number(p.unidades_por_paquete) > 0 ? Number(p.unidades_por_paquete) : 1;
+        const xPaqConfiable = xPaq > 1;
+        const paquetesEquivalentes = panesProducidos !== null && panesProducidos > 0
+          ? Math.round(panesProducidos / xPaq)
+          : null;
         // Solo sobreescribir si el campo está vacío (no tocar lo que el usuario está editando)
         if (next[p.id] !== undefined && next[p.id].emp === '') {
           next[p.id] = {
-            emp:   empacadas !== null && empacadas > 0 ? String(empacadas) : '',
+            // Si unidades_por_paquete no está configurado (=1, valor por defecto sin
+            // sincronizar), no hay forma confiable de convertir panes → paquetes:
+            // mejor dejar vacío que prellenar un número que parece confiable y no lo es.
+            emp: (xPaqConfiable && paquetesEquivalentes !== null) ? String(paquetesEquivalentes) : '',
             merma: '',
           };
         }
@@ -1029,6 +1042,13 @@ const PanelEmpaqueMasa: React.FC<{
                   const det = detalles[p.id] ?? { emp: '0', merma: '0' };
                   const empacadas = parseInt(det.emp) || 0; // paquetes, no panes
                   const panesPorPaquete = Number(p.unidades_por_paquete) > 0 ? Number(p.unidades_por_paquete) : 1;
+                  // unidades_por_paquete = 1 es el default de columna sin sincronizar
+                  // desde SAP (U_JZ_PanesPorBolsa) — no distingue "1 pan por paquete real"
+                  // de "nunca se configuró". Bug real UAT 2026-08-20 (BRIOCHE_MOLDE/
+                  // PANPAQ186): con este valor sin confiar, el sugerido calculado
+                  // coincidía por coincidencia con el prellenado incorrecto y no se
+                  // veía ninguna advertencia.
+                  const xPaqConfiable = panesPorPaquete > 1;
                   const panesEmpacados = empacadas * panesPorPaquete;
                   const panesEsperados = p.unidades_divididas > 0 ? p.unidades_divididas : p.unidades_horneadas;
                   const mermaCalculada = panesEsperados - panesEmpacados;
@@ -1042,6 +1062,11 @@ const PanelEmpaqueMasa: React.FC<{
                         <div className="text-xs text-gray-400 font-mono">
                           {p.sap_item_code} · {p.presentacion}
                         </div>
+                        {!xPaqConfiable && (
+                          <div className="text-xs text-red-600 font-medium mt-0.5">
+                            ⚠ Unidades por paquete no configuradas — verifica la cantidad de paquetes antes de guardar
+                          </div>
+                        )}
                       </td>
                       <td className="p-2 text-right font-mono text-gray-500">
                         {p.unidades_programadas}
@@ -1071,9 +1096,13 @@ const PanelEmpaqueMasa: React.FC<{
                             onChange={e => setDetalles(prev => ({
                               ...prev, [p.id]: { ...det, emp: e.target.value }
                             }))}
-                            placeholder={String(paquetesSugeridos)}
-                            title={`Sugerido: ${paquetesSugeridos} paquetes`}
-                            className="w-20 border border-gray-300 rounded px-2 py-1 text-right text-sm focus:ring-1 focus:ring-blue-400"
+                            placeholder={xPaqConfiable ? String(paquetesSugeridos) : 'Verificar'}
+                            title={xPaqConfiable
+                              ? `Sugerido: ${paquetesSugeridos} paquetes`
+                              : 'Unidades por paquete no configuradas para este producto — no hay sugerido confiable, verifica manualmente'}
+                            className={`w-20 border rounded px-2 py-1 text-right text-sm focus:ring-1 focus:ring-blue-400 ${
+                              xPaqConfiable ? 'border-gray-300' : 'border-red-300'
+                            }`}
                           />
                         ) : empaque_iniciado ? (
                           <span className="font-mono text-sm text-gray-700">{empacadas}</span>
@@ -2186,6 +2215,10 @@ export const EmpaqueMasa: React.FC = () => {
                             };
                             const empacadasEdit = parseInt(edit.emp) || 0; // paquetes, no panes
                             const panesPorPaqueteOV = Number(p.unidades_por_paquete) > 0 ? Number(p.unidades_por_paquete) : 1;
+                            // unidades_por_paquete = 1 (default sin sincronizar desde SAP)
+                            // no distingue "1 pan por paquete real" de "nunca se configuró" —
+                            // ver misma advertencia en el flujo de lista de pendientes.
+                            const xPaqConfiableOV = panesPorPaqueteOV > 1;
                             const panesEmpacadosOV = empacadasEdit * panesPorPaqueteOV;
                             const divididasOV = p.unidades_divididas ?? 0;
                             const horneadasOV = p.unidades_horneadas ?? 0;
@@ -2196,6 +2229,11 @@ export const EmpaqueMasa: React.FC = () => {
                                 <td className="p-2">
                                   <div className="font-medium">{p.producto_nombre}</div>
                                   <div className="text-xs text-gray-400">{p.sap_item_code} · {p.presentacion}</div>
+                                  {!xPaqConfiableOV && (
+                                    <div className="text-xs text-red-600 font-medium mt-0.5">
+                                      ⚠ Unidades por paquete no configuradas — verifica la cantidad de paquetes antes de guardar
+                                    </div>
+                                  )}
                                 </td>
                                 <td className="p-2 text-right font-mono">{p.unidades_ajustadas}</td>
                                 <td className="p-2 text-right">
@@ -2206,7 +2244,10 @@ export const EmpaqueMasa: React.FC = () => {
                                       onChange={e => setDetallesEdit(prev => ({
                                         ...prev, [p.id]: { ...edit, emp: e.target.value }
                                       }))}
-                                      className="w-20 border border-gray-300 rounded px-2 py-1 text-right text-sm"
+                                      title={xPaqConfiableOV ? undefined : 'Unidades por paquete no configuradas para este producto — verifica manualmente'}
+                                      className={`w-20 border rounded px-2 py-1 text-right text-sm ${
+                                        xPaqConfiableOV ? 'border-gray-300' : 'border-red-300'
+                                      }`}
                                     />
                                   ) : (
                                     <span className={`font-mono ${faltantes > 0 ? 'text-red-600 font-bold' : 'text-green-700'}`}>
