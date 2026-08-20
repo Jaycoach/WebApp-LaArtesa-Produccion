@@ -15,6 +15,54 @@ const getCfg = async (clave) => {
   return parseFloat(r.rows[0]?.valor || '0');
 };
 
+// ── helper: repartir MP/MO/indirecto por peso REALMENTE producido ───────────
+// Reemplaza el reparto anterior por kilos_programados (planificado) — ahora
+// MP, MO e indirecto se prorratean por el peso real de cada producto
+// (uds_empacadas × unidades_pan_por_paquete × gramaje_unitario), coherente
+// con el costo de empaque que ya se calculaba por consumo real. Usada tanto
+// para persistir costo_unitario_final en productos_por_masa (paso 8) como
+// para el UnitPrice enviado a SAP en InventoryGenEntries (paso 10) — antes
+// eran dos copias de la misma fórmula que podían desincronizarse.
+const calcularCostosPorProducto = (prodsRows, costoMPTotal, costoMOTotal, costoIndirectoTotal) => {
+  const pesos = prodsRows.map((p) => {
+    const uds = parseInt(p.uds_empacadas || 0);
+    if (uds <= 0) return 0;
+    const panesXpaq = parseFloat(p.unidades_pan_por_paquete || 1);
+    const gramaje = parseFloat(p.gramaje_unitario || 0);
+    return uds * panesXpaq * gramaje;
+  });
+  const pesoTotalProducido = pesos.reduce((s, w) => s + w, 0);
+
+  if (pesoTotalProducido <= 0) {
+    logger.warn('calcularCostosPorProducto: peso_total_producido = 0 (ningún producto con unidades empacadas) — MP/MO/indirecto quedan en 0 para todos los productos.');
+  }
+
+  const costoMPPorGramo = pesoTotalProducido > 0 ? costoMPTotal / pesoTotalProducido : 0;
+
+  const resultados = new Map();
+  prodsRows.forEach((prod, i) => {
+    const pesoProducidoProd = pesos[i];
+    const proporcion = pesoTotalProducido > 0 ? pesoProducidoProd / pesoTotalProducido : 0;
+    const mpProd = costoMPPorGramo * pesoProducidoProd;
+    const moProd = costoMOTotal * proporcion;
+    const indirectoProd = costoIndirectoTotal * proporcion;
+    const empaqueProd = prod._costo_empaque || 0; // costo real por BOM — no se toca
+    const totalProd = mpProd + moProd + empaqueProd + indirectoProd;
+
+    const udsEmpacadas = parseInt(prod.uds_empacadas || 0);
+    const panesUd = parseInt(prod.unidades_pan_por_paquete || 1);
+    const unitarioProd = udsEmpacadas > 0 ? totalProd / udsEmpacadas : 0;
+    const panUnitProd = (udsEmpacadas * panesUd) > 0
+      ? totalProd / (udsEmpacadas * panesUd) : 0;
+
+    resultados.set(prod.id, {
+      pesoProducidoProd, mpProd, moProd, indirectoProd, empaqueProd,
+      totalProd, unitarioProd, panUnitProd,
+    });
+  });
+  return resultados;
+};
+
 // ── GET /api/empaque/ov/:docNum ──────────────────────────────────────────────
 // Vista consolidada por número de OV SAP
 exports.getEmpaqueByOV = async (req, res) => {
@@ -591,24 +639,16 @@ exports.completarEmpaque = async (req, res) => {
     const costoPanUnitario = totalPanesProducidos > 0
       ? costoTotalFinal / totalPanesProducidos : 0;
 
-    // 8. Actualizar costos finales — empaque REAL por producto, MO/indirecto por kilos
-    const totalKilosPPM = prodsR.rows.reduce(
-      (s, p) => s + parseFloat(p.kilos_programados || 0), 0
+    // 8. Actualizar costos finales — MP/MO/indirecto prorrateados por peso REAL
+    // producido (uds_empacadas × unidades_pan_por_paquete × gramaje_unitario),
+    // empaque REAL por producto (BOM). Mismo cálculo que alimenta el UnitPrice
+    // de SAP en el paso 10 (ver calcularCostosPorProducto).
+    const costosPorProducto = calcularCostosPorProducto(
+      prodsR.rows, costoMPTotal, costoMOTotal, costoIndirectoTotal
     );
     for (const prod of prodsR.rows) {
-      const ratio         = totalKilosPPM > 0
-        ? parseFloat(prod.kilos_programados || 0) / totalKilosPPM
-        : 1 / prodsR.rows.length;
-      const moProd        = costoMOTotal        * ratio;
-      const indirectoProd = costoIndirectoTotal * ratio;
-      const empaqueProd   = prod._costo_empaque || 0;   // ← costo real de su BOM
-      const mpProd        = parseFloat(prod.costo_mp_total_prod || 0);
-      const totalProd     = mpProd + moProd + empaqueProd + indirectoProd;
-      const udsEmpacadas  = parseInt(prod.uds_empacadas || 0);
-      const panesUd       = parseInt(prod.unidades_pan_por_paquete || 1);
-      const unitarioProd  = udsEmpacadas > 0 ? totalProd / udsEmpacadas : 0;
-      const panUnitProd   = (udsEmpacadas * panesUd) > 0
-        ? totalProd / (udsEmpacadas * panesUd) : 0;
+      const { mpProd, moProd, indirectoProd, empaqueProd, totalProd, unitarioProd, panUnitProd } =
+        costosPorProducto.get(prod.id);
 
       await client.query(
         `UPDATE productos_por_masa SET
@@ -622,6 +662,12 @@ exports.completarEmpaque = async (req, res) => {
          WHERE id = $7`,
         [moProd, empaqueProd, indirectoProd,
          totalProd, unitarioProd, panUnitProd, prod.id]
+      );
+      // costo_mp_total_prod recalculado (antes se dejaba el valor "programado"
+      // guardado por pesaje/division; ahora refleja el reparto por peso real)
+      await client.query(
+        `UPDATE productos_por_masa SET costo_mp_total_prod = $1 WHERE id = $2`,
+        [mpProd, prod.id]
       );
     }
 
@@ -641,17 +687,11 @@ exports.completarEmpaque = async (req, res) => {
         const entradaLines = [];
         for (const prod of prodsR.rows) {
           if (!prod.sap_item_code || !prod.uds_empacadas || parseInt(prod.uds_empacadas) <= 0) continue;
-          const mpProdEntrada      = parseFloat(prod.costo_mp_total_prod || 0);
-          const empaqueProdEntrada = prod._costo_empaque || 0;
-          const totalKilosPPMEnt   = prodsR.rows.reduce((s, p) => s + parseFloat(p.kilos_programados || 0), 0);
-          const ratioEnt           = totalKilosPPMEnt > 0
-            ? parseFloat(prod.kilos_programados || 0) / totalKilosPPMEnt
-            : 1 / prodsR.rows.length;
-          const moProdEntrada      = costoMOTotal        * ratioEnt;
-          const indProdEntrada     = costoIndirectoTotal * ratioEnt;
-          const totalProdEntrada   = mpProdEntrada + moProdEntrada + empaqueProdEntrada + indProdEntrada;
-          const udsEnt             = parseInt(prod.uds_empacadas);
-          const costoUnitarioProd  = udsEnt > 0 ? totalProdEntrada / udsEnt : 0;
+          // Mismo costo unitario ya calculado en el paso 8 (calcularCostosPorProducto) —
+          // antes se recalculaba aquí por separado con la misma fórmula, con riesgo de
+          // desincronizarse del valor persistido en productos_por_masa.
+          const { unitarioProd: costoUnitarioProd } = costosPorProducto.get(prod.id);
+          const udsEnt = parseInt(prod.uds_empacadas);
 
           const linea = {
             ItemCode:      prod.sap_item_code,
