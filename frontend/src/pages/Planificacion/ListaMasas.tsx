@@ -243,7 +243,6 @@ export const ListaMasas: React.FC = () => {
                 className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm w-full sm:w-auto"
               />
 
-              <MasasFiltroDropdown seleccion={filtroSeleccion} onChange={setFiltroSeleccion} />
               {masas && (
                 <span className="text-xs text-gray-500 shrink-0">
                   {masasFiltradas.length} de {masas.length} masas
@@ -338,6 +337,17 @@ export const ListaMasas: React.FC = () => {
         {!isLoading && masas && masas.length > 0 && (
           <>
             <div className="flex items-center gap-2 mb-3 px-1 flex-wrap">
+              {esSupervisor && aprobables.length > 2 && (
+                <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={seleccionadas.size === aprobables.length && aprobables.length > 0}
+                    onChange={toggleSeleccionarTodas}
+                    className="w-3.5 h-3.5 accent-green-600"
+                  />
+                  Seleccionar Todo
+                </label>
+              )}
               <div className="relative flex-1 min-w-[200px] max-w-xs">
                 <input
                   type="text"
@@ -356,20 +366,7 @@ export const ListaMasas: React.FC = () => {
                   </button>
                 )}
               </div>
-              {esSupervisor && aprobables.length > 2 && (
-                <>
-                  <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={seleccionadas.size === aprobables.length && aprobables.length > 0}
-                      onChange={toggleSeleccionarTodas}
-                      className="w-4 h-4 accent-green-600"
-                    />
-                    Seleccionar todas las aprobables ({aprobables.length})
-                  </label>
-                  <span className="text-gray-300">·</span>
-                </>
-              )}
+              <MasasFiltroDropdown seleccion={filtroSeleccion} onChange={setFiltroSeleccion} />
               <button
                 onClick={toggleExpandirTodo}
                 className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
