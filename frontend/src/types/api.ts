@@ -10,6 +10,9 @@ export interface ApiResponse<T = any> {
   data?: T;
   message?: string;
   error?: string;
+  // Errores de validación por campo (ej. POST /users con createUserValidation) —
+  // backend/src/validators/user.validator.js: errors.array().map(err => ({field, message}))
+  errors?: { field: string; message: string }[];
 }
 
 // Respuesta con paginación
@@ -67,6 +70,7 @@ export interface MasaProduccionResumen {
   sap_doc_entry_pesaje?: number | null;
   masa_adicional_referencia_id?: number | null;
   lote_produccion?: string;
+  numeros_ov?: string[];
 }
 
 // Masa de producción (detalle completo)
@@ -124,6 +128,16 @@ export interface IngredienteMasa {
   observaciones?: string;
   usuario_peso?: number;
   timestamp_peso?: string;
+  // Lotes SAP disponibles para este ítem (sap_lotes_mp), distinto de `lote` (el
+  // lote único legado) — backend/src/controllers/pesaje.controller.js getChecklist
+  lotes?: {
+    item_code: string;
+    batch: string;
+    status?: string;
+    admission_date?: string | null;
+    expiration_date?: string | null;
+    cantidad_disponible: number;
+  }[];
 }
 
 // Progreso de fase
@@ -143,6 +157,7 @@ export interface ProgresoFase {
 // Checklist de pesaje
 export interface ChecklistPesaje {
   masa_id: number;
+  codigo_masa: string;
   tipo_masa: string;
   fase_actual?: string;
   es_repeticion: boolean;
@@ -157,7 +172,9 @@ export interface ChecklistPesaje {
   productos_con_ajuste?: any[];
   hay_ajustes_divisor?: boolean;
   pesaje_transmitido?: boolean;
-  sin_stock_count?: number;
+  pesaje_completado: boolean;
+  sap_doc_num_pesaje?: number | null;
+  sin_stock_count: number;
   ingredientes_sin_stock?: string[];
   productos_resumen?: {
     producto_nombre: string;
@@ -201,6 +218,8 @@ export interface ConfirmarPesajeResponse {
   success: boolean;
   fase_desbloqueada: string;
   message: string;
+  sap_doc_num?: number | null;
+  sap_doc_entry?: number | null;
 }
 
 // Response de sincronización SAP
