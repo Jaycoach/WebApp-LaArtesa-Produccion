@@ -146,6 +146,32 @@ interface OVData {
 const COP = (v: number) => isNaN(v) ? '0' : v.toLocaleString('es-CO', { minimumFractionDigits: 0 });
 const fmtFecha = (s: string) => new Date(s + 'T12:00').toLocaleDateString('es-CO');
 
+// ── helper: paquetes sugeridos a partir de la referencia real en PANES ──────
+// Bug PENDIENTES_UAT 2026-07-28 #8a: el campo "Paquetes empacados" es lo que
+// el operario llena en PAQUETES, pero se sugería/validaba contra una
+// referencia en PANES (horneadas > divididas > programadas×xPaq) sin
+// convertir -- el operario podía terminar escribiendo panes por error, y esa
+// cantidad se transmite tal cual a SAP como si fueran paquetes. Esta función
+// convierte la referencia en panes a paquetes; si no hay dato de producción
+// real, cae de vuelta al plan original en paquetes.
+const calcularPaquetesSugeridos = (panesReferencia: number, xPaq: number, paquetesProgramados: number): number =>
+  panesReferencia > 0 && xPaq > 0
+    ? Math.round(panesReferencia / xPaq)
+    : (paquetesProgramados || 0);
+
+// ── helper: safety net -- ¿el valor tecleado parece panes en vez de paquetes?
+// Solo tiene sentido cuando xPaq > 1 (con xPaq = 1 panes y paquetes coinciden,
+// no hay forma de distinguir un error). No bloquea nada, solo dispara aviso.
+const esPosibleErrorPanes = (
+  valorIngresado: number, paquetesSugeridos: number, panesReferencia: number, xPaq: number
+): boolean => {
+  if (xPaq <= 1 || valorIngresado <= 0 || panesReferencia <= 0) return false;
+  const margen = Math.max(1, Math.round(panesReferencia * 0.1));
+  const cercaDePanes = Math.abs(valorIngresado - panesReferencia) <= margen;
+  const lejosDePaquetesSugeridos = Math.abs(valorIngresado - paquetesSugeridos) > margen;
+  return cercaDePanes && lejosDePaquetesSugeridos;
+};
+
 // ── Etiqueta imprimible ──────────────────────────────────────────────────────
 const Etiqueta: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose }) => {
   const imprimir = () => {
@@ -674,6 +700,22 @@ const PanelEmpaqueMasa: React.FC<{
   const guardarDetalle = async (productoId: number) => {
     const vals = detalles[productoId];
     if (!vals) return;
+
+    // Safety net no bloqueante: ¿el operario pudo haber escrito panes en vez
+    // de paquetes? (ver PENDIENTES_UAT #8a)
+    const prodRef = masa.ovs.flatMap(o => o.productos).find(p => p.id === productoId);
+    if (prodRef) {
+      const empVal = parseInt(vals.emp) || 0;
+      const xPaqP = Number(prodRef.unidades_por_paquete) > 0 ? Number(prodRef.unidades_por_paquete) : 1;
+      const paquetesSugeridos = calcularPaquetesSugeridos(prodRef.unidades_referencia, xPaqP, prodRef.unidades_programadas);
+      if (esPosibleErrorPanes(empVal, paquetesSugeridos, prodRef.unidades_referencia, xPaqP)) {
+        const continuar = window.confirm(
+          `¿Seguro que son ${empVal} PAQUETES?\n\nParece que podrías haber escrito la cantidad de panes en vez de paquetes (se esperaban ~${paquetesSugeridos} paquetes).\n\nAceptar = guardar así de todos modos · Cancelar = corregir el valor`
+        );
+        if (!continuar) return;
+      }
+    }
+
     setSavingId(productoId);
     try {
       await api(`/empaque/${masa.id}/detalle/${productoId}`, {
@@ -701,7 +743,11 @@ const PanelEmpaqueMasa: React.FC<{
     masa.ovs.forEach(ov => {
       ov.productos.forEach(p => {
         const empacadas = parseInt(detalles[p.id]?.emp || '0') || 0;
-        const faltante = p.unidades_referencia - empacadas;
+        // Comparar en PAQUETES (lo que el operario tecleó), no unidades_referencia
+        // directo (que está en PANES) -- ver calcularPaquetesSugeridos arriba.
+        const xPaqP = Number(p.unidades_por_paquete) > 0 ? Number(p.unidades_por_paquete) : 1;
+        const paquetesSugeridos = calcularPaquetesSugeridos(p.unidades_referencia, xPaqP, p.unidades_programadas);
+        const faltante = paquetesSugeridos - empacadas;
         if (faltante > 0) faltantes.push({ nombre: p.producto_nombre, ov: ov.doc_num, faltante });
       });
     });
@@ -973,6 +1019,8 @@ const PanelEmpaqueMasa: React.FC<{
                   const panesEsperados = p.unidades_divididas > 0 ? p.unidades_divididas : p.unidades_horneadas;
                   const mermaCalculada = panesEsperados - panesEmpacados;
                   const faltante = p.unidades_referencia - panesEmpacados;
+                  // Sugerido del input SIEMPRE en paquetes, no en unidades_referencia (panes)
+                  const paquetesSugeridos = calcularPaquetesSugeridos(p.unidades_referencia, panesPorPaquete, p.unidades_programadas);
                   return (
                     <tr key={p.id} className="border-b hover:bg-gray-50">
                       <td className="p-2">
@@ -1009,6 +1057,8 @@ const PanelEmpaqueMasa: React.FC<{
                             onChange={e => setDetalles(prev => ({
                               ...prev, [p.id]: { ...det, emp: e.target.value }
                             }))}
+                            placeholder={String(paquetesSugeridos)}
+                            title={`Sugerido: ${paquetesSugeridos} paquetes`}
                             className="w-20 border border-gray-300 rounded px-2 py-1 text-right text-sm focus:ring-1 focus:ring-blue-400"
                           />
                         ) : empaque_iniciado ? (
@@ -1778,6 +1828,25 @@ export const EmpaqueMasa: React.FC = () => {
   const guardarDetalleOV = async (masaId: number, productoId: number) => {
     const vals = detallesEdit[productoId];
     if (!vals) return;
+
+    // Safety net no bloqueante: ¿el operario pudo haber escrito panes en vez
+    // de paquetes? (ver PENDIENTES_UAT #8a). Este flujo ya usa unidades_ajustadas
+    // (paquetes) como referencia correcta -- solo falta el aviso.
+    const prodRef = ov?.productos?.find((p: any) => p.id === productoId);
+    if (prodRef) {
+      const empVal = parseInt(vals.emp) || 0;
+      const xPaqP = Number(prodRef.unidades_por_paquete) > 0 ? Number(prodRef.unidades_por_paquete) : 1;
+      const panesReferenciaOV = (prodRef.unidades_divididas ?? 0) > 0
+        ? (prodRef.unidades_divididas ?? 0)
+        : (prodRef.unidades_horneadas ?? 0);
+      if (esPosibleErrorPanes(empVal, prodRef.unidades_ajustadas, panesReferenciaOV, xPaqP)) {
+        const continuar = window.confirm(
+          `¿Seguro que son ${empVal} PAQUETES?\n\nParece que podrías haber escrito la cantidad de panes en vez de paquetes (se esperaban ~${prodRef.unidades_ajustadas} paquetes).\n\nAceptar = guardar así de todos modos · Cancelar = corregir el valor`
+        );
+        if (!continuar) return;
+      }
+    }
+
     setSavingEmpaque(productoId);
     try {
       await api(`/empaque/${masaId}/detalle/${productoId}`, {
