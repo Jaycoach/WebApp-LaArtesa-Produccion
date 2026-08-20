@@ -302,7 +302,12 @@ export const FormadoMasa: React.FC = () => {
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none"
               />
             </div>
+          </div>
+        )}
 
+        {/* Botón sticky — nunca requiere scroll para iniciar */}
+        {etapa === 'inicio' && (
+          <div className="sticky bottom-0 z-10 bg-gray-50 border-t border-gray-200 px-4 py-3 -mx-6">
             <button
               onClick={() => iniciarMutation.mutate()}
               disabled={iniciarMutation.isPending}
@@ -410,7 +415,12 @@ export const FormadoMasa: React.FC = () => {
                   .map((p: any) => p.producto_nombre).join(', ')}
               </p>
             )}
+          </div>
+        )}
 
+        {/* Botón sticky — nunca requiere scroll para completar, aunque la tabla de arriba sea larga */}
+        {etapa === 'progreso' && (
+          <div className="sticky bottom-0 z-10 bg-gray-50 border-t border-gray-200 px-4 py-3 -mx-6">
             <button
               onClick={() => completarMutation.mutate()}
               disabled={

@@ -407,22 +407,26 @@ export const HorneadoMasa: React.FC = () => {
                 ⚠ Debes ingresar las unidades terminadas para todos los productos
               </p>
             )}
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowMO(true)}
-                className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 text-sm font-medium"
-              >
-                + Mano de obra
-              </button>
-              <button
-                onClick={() => completarMutation.mutate()}
-                disabled={completarMutation.isPending || !todasTienenCantidad()}
-                className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white font-semibold py-3 rounded-lg transition-colors"
-              >
-                {completarMutation.isPending ? 'Completando...' : '✅ Completar Horneado → Ir a Empaque'}
-              </button>
-            </div>
             {showMO && <ModalMO masaId={Number(masaId)} fase="HORNEADO" onClose={() => setShowMO(false)} />}
+          </div>
+        )}
+
+        {/* Botones sticky — nunca requiere scroll para completar */}
+        {etapa === 'en_progreso' && (
+          <div className="sticky bottom-0 z-10 bg-gray-50 border-t border-gray-200 px-4 py-3 -mx-6 flex gap-3">
+            <button
+              onClick={() => setShowMO(true)}
+              className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 text-sm font-medium"
+            >
+              + Mano de obra
+            </button>
+            <button
+              onClick={() => completarMutation.mutate()}
+              disabled={completarMutation.isPending || !todasTienenCantidad()}
+              className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white font-semibold py-3 rounded-lg transition-colors"
+            >
+              {completarMutation.isPending ? 'Completando...' : '✅ Completar Horneado → Ir a Empaque'}
+            </button>
           </div>
         )}
 

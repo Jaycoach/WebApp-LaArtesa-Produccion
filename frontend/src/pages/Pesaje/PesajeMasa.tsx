@@ -872,8 +872,9 @@ export const PesajeMasa: React.FC = () => {
           </div>
         </Card>
 
-        {/* Botones de acción */}
-        <div className="flex justify-end">
+        {/* Botones de acción — sticky (la acción principal "Confirmar Pesaje" ya
+            vive en BarraNavegacionFases arriba; esta barra cubre las secundarias) */}
+        <div className="sticky bottom-0 z-10 bg-gray-50 border-t border-gray-200 px-4 py-3 -mx-6 flex justify-end">
           <div className="flex gap-3">
             {puedeEditar && (
               <button

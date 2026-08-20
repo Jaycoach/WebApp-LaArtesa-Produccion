@@ -1212,7 +1212,7 @@ const PanelEmpaqueMasa: React.FC<{
       })()}
 
       {empaque_iniciado && puedeOperar && (
-        <div className="flex justify-end">
+        <div className="sticky bottom-0 z-10 bg-gray-50 border-t border-gray-200 px-4 py-3 flex justify-end">
           <button
             onClick={() => handleCompletar()}
             disabled={saving || yaEnviadoSAP}

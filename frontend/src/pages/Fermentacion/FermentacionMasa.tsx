@@ -363,16 +363,19 @@ export const FermentacionMasa: React.FC = () => {
                 </div>
               );
             })}
+          </div>
+        )}
 
-            {totalLineas > 0 && (
-              <button
-                onClick={() => mutacionCompletar.mutate()}
-                disabled={!todasLasLineasCompletadas || mutacionCompletar.isPending}
-                className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-300 text-white font-semibold py-3 rounded-lg transition-colors"
-              >
-                {mutacionCompletar.isPending ? 'Completando...' : '✅ Completar Fermentación'}
-              </button>
-            )}
+        {/* Botón sticky — nunca requiere scroll para completar, aunque haya muchas líneas */}
+        {!faseCompletada && totalLineas > 0 && (
+          <div className="sticky bottom-0 z-10 bg-gray-50 border-t border-gray-200 px-4 py-3 -mx-6">
+            <button
+              onClick={() => mutacionCompletar.mutate()}
+              disabled={!todasLasLineasCompletadas || mutacionCompletar.isPending}
+              className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-300 text-white font-semibold py-3 rounded-lg transition-colors"
+            >
+              {mutacionCompletar.isPending ? 'Completando...' : '✅ Completar Fermentación'}
+            </button>
           </div>
         )}
 

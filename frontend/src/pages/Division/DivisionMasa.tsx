@@ -719,8 +719,8 @@ export const DivisionMasa: React.FC = () => {
           </div>
         </Card>
 
-        {/* Botones */}
-        <div className="flex justify-end items-center">
+        {/* Botones — sticky para que "Completar División" nunca requiera scroll */}
+        <div className="sticky bottom-0 z-10 bg-gray-50 border-t border-gray-200 px-4 py-3 -mx-6 flex justify-end items-center">
           <div className="flex gap-3 items-center">
             <button
               onClick={() => setShowMO(true)}
