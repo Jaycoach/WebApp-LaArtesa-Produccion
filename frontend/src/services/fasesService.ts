@@ -8,7 +8,6 @@ import type {
   UpdateProgresoFaseRequest,
   CompletarFaseRequest,
   CompletarFaseResponse,
-  ApiResponse,
 } from '@/types';
 
 export const fasesService = {
@@ -16,7 +15,7 @@ export const fasesService = {
    * Obtener progreso de fases de una masa
    */
   getByMasa: async (masaId: string): Promise<ProgresoFases> => {
-    const response = await apiClient.get<ApiResponse<ProgresoFases>>(
+    const response = await apiClient.get<ProgresoFases>(
       API_CONFIG.ENDPOINTS.FASES.BY_MASA(masaId)
     );
     return handleApiResponse(response);
@@ -26,7 +25,7 @@ export const fasesService = {
    * Actualizar progreso de una fase
    */
   updateProgreso: async (masaId: string, data: UpdateProgresoFaseRequest): Promise<ProgresoFases> => {
-    const response = await apiClient.put<ApiResponse<ProgresoFases>>(
+    const response = await apiClient.put<ProgresoFases>(
       API_CONFIG.ENDPOINTS.FASES.UPDATE_PROGRESO(masaId),
       data
     );
@@ -41,7 +40,7 @@ export const fasesService = {
     fase: 'pesaje' | 'amasado' | 'division' | 'formado' | 'fermentacion' | 'horneado',
     responsable?: string
   ): Promise<ProgresoFases> => {
-    const response = await apiClient.put<ApiResponse<ProgresoFases>>(
+    const response = await apiClient.put<ProgresoFases>(
       API_CONFIG.ENDPOINTS.FASES.UPDATE_PROGRESO(masaId),
       {
         fase,
