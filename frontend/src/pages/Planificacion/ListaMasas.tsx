@@ -104,8 +104,13 @@ export const ListaMasas: React.FC = () => {
       setAprobarModal(null);
       // v5 2026-08-11: la subdivisión ya no ocurre al aprobar, sino al confirmar
       // pesaje. aprobarMasa ya no devuelve `subdivision`.
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error aprobando masa:', error);
+      // El interceptor de api.ts ya reformatea el 400 a { message: data.message },
+      // no un AxiosError — error.message trae el texto armado por el backend
+      // (producto + campo faltante, ver aprobarMasaCore) tal cual, sin reformatear.
+      const msg = error?.message || 'Error desconocido al aprobar la masa';
+      alert(`⚠️ No se pudo aprobar la masa:\n\n${msg}`);
       setAprobarModal(null);
     }
   };
