@@ -377,6 +377,111 @@ entorno local, tampoco `hdbcli` instalado):**
    parte del fix, solo para confirmar que el cálculo `$8` da el número
    correcto) o esperar al próximo ciclo real de sync-OV.
 
+**Actualización (mismo día, turno posterior) — Jonathan corrigió el
+enfoque arquitectónico de este ítem.** El fix `a9e4cf9` de arriba
+(`ON CONFLICT SET unidades_por_paquete` en `sincronizarDesdeOV`) queda,
+pero **no es la causa de fondo** — se confirmó en staging que la masa
+2010/producto 6530 (PANPAQ186) seguía en `unidades_por_paquete = 1`
+después de ese fix, porque `productos_por_masa` solo se actualiza si esa
+masa puntual se re-sincroniza por OV (manual, y potencialmente bloqueado
+por `U_JZ_TxOP` una vez ya sincronizada) — no porque el dato maestro se
+haya corregido en SAP. Ver sección 3.6 para el diagnóstico completo
+(incluye validación real contra HANA) y el fix correcto.
+
+### 3.6 — Diagnóstico real con HANA: NO es `SalPackUn` (ya corregido hace 10 días) — falta propagación a masas existentes
+
+**Estado: función de fallback centralizada — commit `3a4b960` (local, sin
+push). SELECT de verificación para backfill — commit `c816eb9` (local, sin
+push, UPDATE comentado, no ejecutado). 5 casos de master data — reportados,
+no tocados. Validación real (paso 6) — pendiente, sin acceso a HANA/staging
+en este entorno.**
+
+- **Validación real con HANA (aportada por Jonathan, no por esta sesión —
+  este entorno no tiene credenciales HANA)**: `OITM.SalPackUn` es `1` para
+  el 100% de los 97 productos consultados (ese campo estándar de SAP nunca
+  se usa en este negocio — confirmado también por el propio commit
+  `45935b9`, ver abajo). `OITM.U_JZ_PanesPorBolsa` (el UDF real) sí tiene
+  el valor correcto para la gran mayoría, coincidiendo con el patrón
+  " X<N>" del nombre en decenas de casos (`PANPAQ19`: UDF=12,
+  nombre "...X12"; `PANPAQ03`: UDF=10, nombre "...X10").
+- **Corrección de premisa — grep antes de tocar código**: se pidió
+  corregir "los scripts HANA leen `SalPackUn` en vez de
+  `U_JZ_PanesPorBolsa`". Grep de todo el repo (`SalPackUn` /
+  `U_JZ_PanesPorBolsa`) confirma que **ese bug ya no existe en el código
+  actual** — cero usos vivos de `SalPackUn`, solo un comentario histórico
+  en la migración 007 (documentación desactualizada, nunca se corrigió el
+  texto cuando cambió el código). El fix real ya está en `main`/
+  `origin/main` desde hace 10 días:
+  `45935b9` (2026-08-10) *"fix(sap): leer U_JZ_PanesPorBolsa en vez de
+  SalPackUn/SalesQtyPerPackUnit"* — tocó exactamente los 4 puntos de
+  lectura (`hana_bom_completo.py`, `hana_ov_sync.py`,
+  `sap.service.js` ×2), con el mismo mensaje de commit explicando la razón
+  de negocio (SalPackUn no es escribible vía Service Layer porque
+  Packaging no está configurado en SAP; se creó `U_JZ_PanesPorBolsa` como
+  reemplazo, poblado para 178 ítems en staging y producción al momento de
+  ese commit). **No se volvió a tocar esa lectura en esta sesión** —
+  hacerlo habría sido un cambio redundante sobre código ya correcto.
+- **Entonces por qué seguían en `1` los 97 productos**: exactamente el
+  diagnóstico de la sección 3.5 (el `ON CONFLICT` de `productos_por_masa`
+  no propagaba el dato, y aunque ahora sí lo hace vía `a9e4cf9`, solo
+  actúa cuando esa masa puntual se re-sincroniza) — más el hecho, ahora
+  confirmado, de que **no existe ningún mecanismo que empuje
+  `sap_articulos.sales_qty_per_pack` (que sí se mantiene correcto en cada
+  corrida del cron) hacia las filas de `productos_por_masa` ya creadas**.
+  `productos_por_masa.unidades_por_paquete` solo se escribe en dos puntos,
+  ambos dentro de `sincronizarDesdeOV` (`sap.controller.js`, INSERT en
+  ~L968 y ~L1211/UPSERT en ~L1219) — confirmado por grep de
+  `unidades_por_paquete` en todo `backend/src`, ningún otro archivo lo
+  escribe.
+- **Refactor implementado (commit `3a4b960`)**: la resolución
+  UDF→regex-por-nombre→default 1 estaba duplicada con variaciones en 3
+  puntos (`sap.service.js` ×2, `hana_ov_sync.py`). Se centralizó en una
+  función (`resolverUnidadesPorPaquete` en JS, `resolver_unidades_por_paquete`
+  en `backend/scripts/_sap_paquetes.py` nuevo, importada por
+  `hana_ov_sync.py`), resuelta UNA vez en el punto más temprano de lectura
+  de SAP (`getArticulosInfo`/construcción de `articulos` en el script
+  HANA); los puntos que antes recalculaban el fallback ahora solo leen el
+  valor ya resuelto. **A propósito NO se aplicó en
+  `getArticulosConTipoMasa`/`hana_bom_completo.py`** (BOM-sync, alimenta
+  `sap_articulos`) — con esa tabla ahora funcionando como fuente de
+  verdad de master data para el backfill, adivinar por nombre ahí
+  ocultaría silenciosamente los 5 casos de conflicto/gap real (ver abajo)
+  sin que Diana los confirme primero. Documentado inline en ambos
+  archivos.
+- **Fuera de alcance, reportado en vez de decidido**: NO se tocó la
+  derivación de fallback en `fases.controller.js`, `pesaje.controller.js`,
+  `masas.controller.js` ni `DivisionMasa.tsx` (cada uno recalcula su
+  propio `upqDe`/`upq` a partir de `unidades_por_paquete` + nombre). Mover
+  esos consumidores a confiar ciegamente en la columna ya resuelta es un
+  refactor más grande que toca cálculo de División/Pesaje en producción —
+  amerita revisión propia, no se incluyó aquí sin aprobación explícita.
+- **Backfill a masas existentes (commit `c816eb9`,
+  `backend/database/fix-unidades-por-paquete-productos_por_masa.sql`)**:
+  dos `SELECT` de verificación (conteo + detalle fila por fila) listos
+  para correr en staging; el `UPDATE` que propagaría
+  `sap_articulos.sales_qty_per_pack` → `productos_por_masa.unidades_por_paquete`
+  queda **comentado, no ejecutado**, excluyendo `masas_produccion.estado
+  = 'COMPLETADA'` (mismo criterio "el fix aplica solo hacia adelante" del
+  fix de costeo 3.2). **Ambigüedad de negocio sin resolver, reportada en
+  vez de decidida**: ¿el corte correcto es solo `estado = 'COMPLETADA'`
+  (lo que usa el script), o también hay que excluir masas con
+  `fase_actual = 'EMPAQUE'` aunque `estado` todavía no sea `COMPLETADA`
+  (empaque en progreso, costeo aún no finalizado)? Falta que Jonathan lo
+  confirme antes de correr el `UPDATE`.
+- **5 casos de conflicto/gap real de master data en SAP — NO tocados,
+  pendientes de Diana**: `PANPAQ13`, `PANPAQ11`, `PANPAQ05`, `PANPAQ26`
+  (UDF sin configurar, el nombre sugiere el valor real: 20, 20, 4 y 4
+  respectivamente) y `PANPAQ20` (UDF=1 pero el nombre dice "X3" —
+  conflicto activo entre SAP y nomenclatura, no ausencia). Ningún código
+  de esta sesión los adivina ni los corrige.
+- **Pendiente — Paso 6 (validar con datos reales)**: este entorno sigue
+  sin credenciales HANA ni acceso a staging (ver nota de infraestructura
+  en 3.4). Falta, en la sesión con SSH: (a) correr los `SELECT` de
+  verificación del script de backfill y reportar cuántas filas
+  cambiarían; (b) una vez Jonathan apruebe el criterio de exclusión y el
+  `UPDATE`, correrlo y re-confirmar `PANPAQ186`/`PANPAQ19`/`PANPAQ03`
+  contra el valor real de HANA.
+
 ## 4. Próximos pasos
 
 - [x] Implementar el fix 3.1 (bloqueo completar sin unidades empacadas) —
@@ -388,12 +493,25 @@ entorno local, tampoco `hdbcli` instalado):**
       antes/después de que SAP configure `U_JZ_PanesPorBolsa`, y forzar
       `unidades_por_paquete = 1` en un producto de prueba para confirmar
       que ahora se ve la advertencia en vez de prellenar con panes.
-- [ ] Parte A de 3.4 — no es tarea de código: pedir al equipo de SAP que
-      complete `U_JZ_PanesPorBolsa` en los 97 productos identificados
-      (master data, fuera de este repo).
-- [ ] Push consolidado de `8df5360`, `4cd7eea`, `e5fa027`, `efffe83` y
-      `8f13e04` (los commits de Empaque de esta sesión) una vez Jonathan dé
-      luz verde.
+- [x] ~~Parte A de 3.4 — pedir a SAP que complete `U_JZ_PanesPorBolsa`~~ —
+      **corregido en 3.6**: el UDF sí está configurado en SAP para la
+      gran mayoría de los 97 (confirmado con HANA real por Jonathan); no
+      era master data faltante sino falta de propagación a
+      `productos_por_masa`. Solo quedan 5 casos puntuales de gap/conflicto
+      real, ver ítem siguiente.
+- [ ] 3.6 — correr en staging real (sesión con SSH): los 2 `SELECT` de
+      `backend/database/fix-unidades-por-paquete-productos_por_masa.sql`
+      y reportar cuántas filas cambiarían.
+- [ ] 3.6 — Jonathan debe confirmar el criterio de exclusión del `UPDATE`
+      (¿solo `estado = 'COMPLETADA'`, o también `fase_actual = 'EMPAQUE'`
+      sin `COMPLETADA`?) antes de correrlo.
+- [ ] 3.6 — Diana debe confirmar el valor correcto de `U_JZ_PanesPorBolsa`
+      en SAP para `PANPAQ13`, `PANPAQ11`, `PANPAQ05`, `PANPAQ26` (UDF sin
+      configurar) y `PANPAQ20` (UDF=1 vs. nombre "X3", conflicto activo) —
+      no tocar por código hasta esa confirmación.
+- [ ] Push consolidado de `8df5360`, `4cd7eea`, `e5fa027`, `efffe83`,
+      `8f13e04`, `a9e4cf9`, `3a4b960` y `c816eb9` (los commits de Empaque/
+      SAP-sync de esta sesión) una vez Jonathan dé luz verde.
 - [ ] Deploy a staging de todo el bloque 2 tras el push.
 - [ ] Pendientes de UAT no abordados en esta sesión (según la descripción
       del usuario — el archivo fuente `PENDIENTES_UAT_2026-07-28.md` no se
