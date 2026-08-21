@@ -526,12 +526,16 @@ export const ListaMasas: React.FC = () => {
                                         : '—')}
                                 </span>
                               </div>
-                              {p.apto_produccion === false && (
+                              {/* Independiente de apto_produccion a propósito (bug encontrado
+                                  2026-08-21): esa columna solo se escribe dentro de
+                                  aprobarMasaCore, así que una masa que todavía no pasó por
+                                  "Aprobar" nunca la tendría en false y el badge no aparecería
+                                  antes de intentar aprobar. campos_incompletos viaja en vivo
+                                  desde sap_articulos (fases.model.js) — no depende de que se
+                                  haya aprobado nada. */}
+                              {p.campos_incompletos && p.campos_incompletos.length > 0 && (
                                 <p className="text-[11px] text-amber-700 mt-0.5">
-                                  ⚠ Dato incompleto en SAP
-                                  {p.campos_incompletos && p.campos_incompletos.length > 0
-                                    ? ` (${p.campos_incompletos.map(c => CAMPOS_MAESTRO_LABELS[c] || c).join(', ')})`
-                                    : ''}
+                                  ⚠ Dato incompleto en SAP ({p.campos_incompletos.map(c => CAMPOS_MAESTRO_LABELS[c] || c).join(', ')})
                                   {' — no se produce hasta corregirlo en SAP.'}
                                 </p>
                               )}
