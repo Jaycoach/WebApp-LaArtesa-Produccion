@@ -876,6 +876,37 @@ const sincronizarDesdeOV = async (req, res, next) => {
         }
       }
 
+      // Dato maestro de producto (unidades_por_paquete, multiplo_divisor, tamanio,
+      // forma, peso_masa_dividida, dias_vencimiento) YA RESUELTO por Inventario/
+      // Artículos (sap_articulos) — se LEE aquí, no se recalcula. Decisión de negocio
+      // (sesión 2026-08-20, 3.8): si un item_code todavía no está sincronizado en
+      // sap_articulos, no se bloquea la creación de la masa — se usa el default
+      // histórico (1 para unidades_por_paquete, 0 para multiplo_divisor, null para el
+      // resto) con warning logueado, igual que el comportamiento previo de
+      // resolverUnidadesPorPaquete cuando no había ni SAP ni patrón de nombre.
+      const atributosMaestroPorItemCode = {};
+      const articulosMaestroResult = await client.query(
+        `SELECT item_code, sales_qty_per_pack, multiplo_divisor, tamanio, forma, peso_masa_dividida, dias_vencimiento
+         FROM sap_articulos WHERE item_code = ANY($1::varchar[])`,
+        [itemCodesGrupoCalc]
+      );
+      const articulosMaestroMap = Object.fromEntries(articulosMaestroResult.rows.map(r => [r.item_code, r]));
+      for (const itemCode of itemCodesGrupoCalc) {
+        const art = articulosMaestroMap[itemCode];
+        if (!art) {
+          logger.warn(`sincronizarDesdeOV: ${itemCode} sin sincronizar en sap_articulos (Inventario/Artículos) — usando defaults (unidades_por_paquete=1, multiplo_divisor=0, sin tamaño/forma/peso/vencimiento)`);
+        }
+        atributosMaestroPorItemCode[itemCode] = {
+          unidadesPorPaquete: art?.sales_qty_per_pack != null && parseFloat(art.sales_qty_per_pack) > 0
+            ? parseFloat(art.sales_qty_per_pack) : 1,
+          multiploDivisor: art?.multiplo_divisor != null ? parseInt(art.multiplo_divisor) : 0,
+          tamanio: art?.tamanio || null,
+          forma: art?.forma || null,
+          pesoMasaDividida: art?.peso_masa_dividida != null ? parseFloat(art.peso_masa_dividida) : null,
+          diasVencimiento: art?.dias_vencimiento != null ? parseInt(art.dias_vencimiento) : null,
+        };
+      }
+
       // Verificar si ya existe una masa de este tipo para esta fecha
       const masaExistenteResult = await client.query(
         `SELECT id, codigo_masa, estado, fase_actual
@@ -963,7 +994,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
           let productoMasaId;
           if (ppmResult.rows.length === 0) {
             // Producto nuevo en esta masa — insertar fila agregada
-            const multiploDivisor = prod.multiploDivisor || 0;
+            const atrMaestro = atributosMaestroPorItemCode[prod.itemCode];
             const insertPPM = await client.query(
               `INSERT INTO productos_por_masa (
                  masa_id, producto_codigo, producto_nombre, presentacion,
@@ -980,14 +1011,19 @@ const sincronizarDesdeOV = async (req, res, next) => {
                 prod.itemCode, prod.descripcion,
                 (kiloPorItemCode[prod.itemCode] || 0) * 1000,
                 prod.itemCode,
-                prod.unidadesPorPaquete || 1,
+                atrMaestro.unidadesPorPaquete,
                 0,
                 prod.docEntry, String(prod.docNum),
-                multiploDivisor,
-                prod.tamanio || null,
-                prod.forma || null,
-                prod.pesoMasaDividida || null,
-                prod.diasVencimiento || null,
+                atrMaestro.multiploDivisor,
+                atrMaestro.tamanio,
+                atrMaestro.forma,
+                atrMaestro.pesoMasaDividida,
+                atrMaestro.diasVencimiento,
+                // requiere_formado: excepción — no existe columna equivalente en
+                // sap_articulos (solo en productos_por_masa, migración 054). Se
+                // mantiene como paso directo del valor de SAP (U_JZ_Formado) que ya
+                // trae la respuesta de la OV, sin fallback/recalculo — no es el
+                // mismo tipo de dato ambiguo que unidades_por_paquete.
                 prod.esFormado || false,
               ]
             );
@@ -1022,14 +1058,9 @@ const sincronizarDesdeOV = async (req, res, next) => {
           );
           const totalUnidades = parseInt(totalesResult.rows[0].total_unidades);
           const kgPorPaquete = kiloPorItemCode[itemCode] || 0;
-          const prodMuestra = grupo.productos.find(p => p.itemCode === itemCode);
-          const multiploDivisor = prodMuestra?.multiploDivisor || 0;
-          // Misma lógica de fallback usada en el INSERT original (SAP > 1, si no regex " X4"/" X 20")
-          const unidadesPorPaquete = (() => {
-            if (prodMuestra?.unidadesPorPaquete && prodMuestra.unidadesPorPaquete > 1) return prodMuestra.unidadesPorPaquete;
-            const m = prodMuestra?.descripcion?.match(/ X ?(\d+)/i);
-            return m ? parseInt(m[1]) : 1;
-          })();
+          // Dato maestro ya resuelto (ver atributosMaestroPorItemCode arriba) — no se
+          // recalcula por su cuenta (antes: copia propia del fallback por nombre).
+          const { multiploDivisor, unidadesPorPaquete } = atributosMaestroPorItemCode[itemCode];
           const cantidadPaquetes = unidadesPorPaquete > 0 ? totalUnidades / unidadesPorPaquete : totalUnidades;
           // FIX 2026-08-10: mismo criterio que en la creación de masa — el divisor
           // es de panes, no de paquetes.
@@ -1187,17 +1218,14 @@ const sincronizarDesdeOV = async (req, res, next) => {
       // Insertar productos; ON CONFLICT acumula si el mismo ItemCode aparece en varias OV
       for (const prod of grupo.productos) {
         const unidadesPedidas = prod.unidadesPedidas || prod.cantidadPaquetes || 0;
-        const multiploDivisor = prod.multiploDivisor || 0;
+        // Dato maestro ya resuelto (ver atributosMaestroPorItemCode arriba) — no se
+        // recalcula por su cuenta (antes: copia propia del fallback por nombre).
+        const { multiploDivisor, unidadesPorPaquete: unidadesPorPaqueteCalc } = atributosMaestroPorItemCode[prod.itemCode];
         // FIX 2026-08-10: el multiplo_divisor es un divisor de PANES (piezas), no de
         // paquetes. Hay que llevar paquetes -> panes, redondear panes al multiplo,
         // y volver a paquetes. Validado contra 55 combinaciones reales: divisor
         // siempre es multiplo exacto de unidadesPorPaquete, asi que el resultado
         // siempre es un entero.
-        const unidadesPorPaqueteCalc = (() => {
-          if (prod.unidadesPorPaquete && prod.unidadesPorPaquete > 1) return prod.unidadesPorPaquete;
-          const m = prod.descripcion?.match(/ X ?(\d+)/i);
-          return m ? parseInt(m[1]) : 1;
-        })();
         const panesPedidos = unidadesPedidas * unidadesPorPaqueteCalc;
         const panesAjustados = (multiploDivisor > 0 && panesPedidos % multiploDivisor !== 0)
           ? (Math.floor(panesPedidos / multiploDivisor) + 1) * multiploDivisor
@@ -1261,19 +1289,20 @@ const sincronizarDesdeOV = async (req, res, next) => {
             prod.unidadesPedidas,                                   // $5 unidades_pedidas = paquetes
             kiloPorItemCode[prod.itemCode] * prod.unidadesPedidas, // $6 kilos
             prod.itemCode,                                          // $7 sap_item_code
-            // Ya resuelto en sap.service.js/hana_ov_sync.py (UDF → regex sobre
-            // nombre → default 1) — no se recalcula aquí.
-            prod.unidadesPorPaquete || 1,                           // $8 unidades_por_paquete
+            unidadesPorPaqueteCalc,                                 // $8 unidades_por_paquete — ya resuelto (sap_articulos)
             prod.cantidadPaquetes,                                  // $9
             prod.docEntry,                                          // $10
             String(prod.docNum),                                    // $11
-            multiploDivisor,                                        // $12
+            multiploDivisor,                                        // $12 — ya resuelto (sap_articulos)
             unidadesAjustadas,                                      // $13
             unidadesExcedente,                                      // $14
-            prod.tamanio || null,                                   // $15
-            prod.forma || null,                                     // $16
-            prod.pesoMasaDividida || null,                          // $17
-            prod.diasVencimiento || null,                           // $18
+            atributosMaestroPorItemCode[prod.itemCode].tamanio,          // $15 — ya resuelto (sap_articulos)
+            atributosMaestroPorItemCode[prod.itemCode].forma,           // $16 — ya resuelto (sap_articulos)
+            atributosMaestroPorItemCode[prod.itemCode].pesoMasaDividida, // $17 — ya resuelto (sap_articulos)
+            atributosMaestroPorItemCode[prod.itemCode].diasVencimiento, // $18 — ya resuelto (sap_articulos)
+            // requiere_formado: excepción — no existe columna equivalente en
+            // sap_articulos (solo en productos_por_masa, migración 054). Se
+            // mantiene como paso directo del valor de SAP (U_JZ_Formado).
             prod.esFormado || false,                                // $19
           ]
         );
@@ -1607,8 +1636,10 @@ const sincronizarTiposMasa = async (req, res, next) => {
 
 /**
  * @desc    Sincronizar Listas de Materiales (BOM) desde SAP
- *          Trae artículos con U_JZ_Tipos_Masa + sus ProductTrees y los guarda en
- *          sap_articulos y sap_bom_componentes.
+ *          Trae artículos con U_JZ_Tipos_Masa + sus ProductTrees y guarda
+ *          ÚNICAMENTE la lista de materiales en sap_bom_componentes — el dato
+ *          maestro del artículo (sap_articulos) es responsabilidad exclusiva de
+ *          sincronizarInventarioMP (sesión 2026-08-20, sección 3.8).
  *          v2: guarda uom, grupo_sap y es_empaque en sap_bom_componentes.
  * @route   POST /api/sap/sincronizar-bom
  * @access  Private (Admin/Supervisor)
@@ -1676,40 +1707,16 @@ const sincronizarBOM = async (req, res, next) => {
 
     for (const articulo of articulos) {
       try {
-        // 2. Upsert en sap_articulos
-        await db.query(
-          `INSERT INTO sap_articulos
-             (item_code, item_name, tipo_masa, sales_qty_per_pack, gramaje, multiplo_divisor, tamanio, forma, peso_masa_dividida, dias_vencimiento, activo, synced_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-           ON CONFLICT (item_code) DO UPDATE SET
-             item_name          = EXCLUDED.item_name,
-             tipo_masa          = EXCLUDED.tipo_masa,
-             sales_qty_per_pack = EXCLUDED.sales_qty_per_pack,
-             gramaje            = EXCLUDED.gramaje,
-             multiplo_divisor   = EXCLUDED.multiplo_divisor,
-             tamanio            = EXCLUDED.tamanio,
-             forma              = EXCLUDED.forma,
-             peso_masa_dividida = COALESCE(EXCLUDED.peso_masa_dividida, sap_articulos.peso_masa_dividida),
-             dias_vencimiento   = COALESCE(EXCLUDED.dias_vencimiento, sap_articulos.dias_vencimiento),
-             activo             = true,
-             synced_at          = CURRENT_TIMESTAMP,
-             updated_at         = CURRENT_TIMESTAMP`,
-          [
-            articulo.itemCode,
-            articulo.itemName,
-            articulo.tipoMasa,
-            articulo.salesQtyPerPack,
-            articulo.gramaje,
-            articulo.multiploDivisor || 0,
-            articulo.tamanio,
-            articulo.forma,
-            articulo.pesoMasaDividida,
-            articulo.diasVencimiento,
-          ]
-        );
+        // Dato maestro del artículo (sales_qty_per_pack, gramaje, multiplo_divisor,
+        // tamanio, forma, peso_masa_dividida, dias_vencimiento, tipo_masa) YA NO se
+        // escribe aquí — sincronizarBOM solo escribe listas de materiales
+        // (sap_bom_componentes). El único dueño de sap_articulos es
+        // sincronizarInventarioMP (ver sesión 2026-08-20, sección 3.8: eliminaba la
+        // race condition de dos fetches independientes de SAP escribiendo la misma
+        // fila en el mismo ciclo de cron).
         articulosUpserted++;
 
-        // 3. Obtener BOM del artículo — ya viene incluido si usamos HANA
+        // 2. Obtener BOM del artículo — ya viene incluido si usamos HANA
         const bomLines = usarHana
           ? (articulo.bom || []).map(c => ({
               ItemCode: c.itemCode, ItemName: c.itemName, Quantity: c.quantity,
@@ -1722,7 +1729,7 @@ const sincronizarBOM = async (req, res, next) => {
           continue;
         }
 
-        // 4. Obtener UoM e ItemsGroupCode de todos los componentes — ya viene incluido si usamos HANA
+        // 3. Obtener UoM e ItemsGroupCode de todos los componentes — ya viene incluido si usamos HANA
         const itemCodeComp = bomLines.map(l => l.ItemCode);
         const uomMap       = usarHana
           ? Object.fromEntries((articulo.bom || []).map(c => [
@@ -1730,7 +1737,7 @@ const sincronizarBOM = async (req, res, next) => {
             ]))
           : await sapService.getItemsUoM(itemCodeComp);
 
-        // 4b. Eliminar componentes que ya no existen en el BOM de SAP
+        // 3b. Eliminar componentes que ya no existen en el BOM de SAP
         //     Esto garantiza que la DB quede idéntica a lo que dice SAP.
         if (itemCodeComp.length > 0) {
           const deleted = await db.query(
@@ -1744,7 +1751,7 @@ const sincronizarBOM = async (req, res, next) => {
           }
         }
 
-        // 5. Upsert de cada componente con uom y grupo_sap
+        // 4. Upsert de cada componente con uom y grupo_sap
         for (const line of bomLines) {
           const uomInfo  = uomMap[line.ItemCode] || { uom: null, grupoSap: null, esDecoracion: false };
           const esEmpaque = uomInfo.grupoSap === 182;
@@ -1790,22 +1797,11 @@ const sincronizarBOM = async (req, res, next) => {
       }
     }
 
-    // Marcar como inactivos los artículos que ya no vienen de SAP — solo aplica
-    // a la corrida completa; en sync puntual no se puede saber qué más existe en SAP.
-    if (!esSyncPuntual) {
-      const itemCodesActivos = articulos.map(a => a.itemCode);
-      if (itemCodesActivos.length > 0) {
-        const inactivadosResult = await db.query(
-          `UPDATE sap_articulos SET activo = false, updated_at = CURRENT_TIMESTAMP
-           WHERE item_code != ALL($1::varchar[]) AND activo = true`,
-          [itemCodesActivos]
-        );
-        if (inactivadosResult.rowCount > 0)
-          logger.info(`BOM sync: ${inactivadosResult.rowCount} artículos marcados inactivos (ya no están en SAP)`);
-      }
-    }
+    // Marcar como inactivos ya NO es responsabilidad de sincronizarBOM —
+    // sap_articulos.activo es dato maestro, se movió a sincronizarInventarioMP
+    // (única dueña de sap_articulos, ver sesión 2026-08-20 sección 3.8).
 
-    // 5b. Propagar es_decoracion recién sincronizado a masas en PESAJE activo.
+    // 4b. Propagar es_decoracion recién sincronizado a masas en PESAJE activo.
     //     Solo masas que aún no confirmaron ese ingrediente (pesado != true) — nunca
     //     se toca histórico ya pesado/confirmado. Aplica también hacia futuro porque
     //     cada sync de BOM vuelve a correr esta cascada.
@@ -1837,7 +1833,7 @@ const sincronizarBOM = async (req, res, next) => {
       logger.warn(`BOM sync: cascada a ingredientes_masa falló (no crítico): ${cascadaErr.message}`);
     }
 
-    // 6. Registrar en log de sincronización
+    // 5. Registrar en log de sincronización
     await db.query(
       `INSERT INTO sap_sync_log (tipo_operacion, estado, request_payload, response_payload)
        VALUES ('BOM', 'SUCCESS', $1, $2)`,
@@ -2033,22 +2029,32 @@ const sincronizarInventarioMP = async (_req, res, next) => {
       }
     }
 
-    // 3. Actualizar atributos maestros de artículos PT (multiplo_divisor, tipo_masa, etc.)
-    // Esto evita depender del BOM (muy pesado) para sincronizar campos de producto.
+    // 3. Actualizar dato maestro de artículos PT — sincronizarInventarioMP es la
+    // ÚNICA función que escribe sap_articulos (sesión 2026-08-20, sección 3.8):
+    // antes también lo hacía sincronizarBOM, con un fetch de SAP independiente en
+    // el mismo ciclo de cron (server.js corre BOM y luego Inventario) — dos
+    // escrituras a la misma fila, orden de ejecución decidía cuál ganaba. Se
+    // consolidan aquí también tamanio/forma/peso_masa_dividida/dias_vencimiento
+    // (que solo escribía BOM) y la desactivación de artículos que ya no están en
+    // SAP (que también vivía en BOM).
     let articulosActualizados = 0;
     try {
       const articulosPT = await sapService.getArticulosConTipoMasa();
       for (const articulo of articulosPT) {
         await client.query(
           `INSERT INTO sap_articulos
-             (item_code, item_name, tipo_masa, sales_qty_per_pack, gramaje, multiplo_divisor, activo, synced_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, true, NOW(), NOW())
+             (item_code, item_name, tipo_masa, sales_qty_per_pack, gramaje, multiplo_divisor, tamanio, forma, peso_masa_dividida, dias_vencimiento, activo, synced_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, NOW(), NOW())
            ON CONFLICT (item_code) DO UPDATE SET
              item_name          = EXCLUDED.item_name,
              tipo_masa          = EXCLUDED.tipo_masa,
              sales_qty_per_pack = EXCLUDED.sales_qty_per_pack,
              gramaje            = EXCLUDED.gramaje,
              multiplo_divisor   = EXCLUDED.multiplo_divisor,
+             tamanio            = EXCLUDED.tamanio,
+             forma              = EXCLUDED.forma,
+             peso_masa_dividida = COALESCE(EXCLUDED.peso_masa_dividida, sap_articulos.peso_masa_dividida),
+             dias_vencimiento   = COALESCE(EXCLUDED.dias_vencimiento, sap_articulos.dias_vencimiento),
              activo             = true,
              synced_at          = NOW(),
              updated_at         = NOW()`,
@@ -2059,11 +2065,29 @@ const sincronizarInventarioMP = async (_req, res, next) => {
             articulo.salesQtyPerPack,
             articulo.gramaje,
             articulo.multiploDivisor || 0,
+            articulo.tamanio,
+            articulo.forma,
+            articulo.pesoMasaDividida,
+            articulo.diasVencimiento,
           ]
         );
         articulosActualizados++;
       }
       logger.info(`Inventario MP: ${articulosActualizados} artículos PT actualizados en sap_articulos`);
+
+      // Marcar como inactivos los artículos que ya no vienen de SAP (antes vivía
+      // en sincronizarBOM). sincronizarInventarioMP siempre corre completa (sin
+      // filtro puntual), así que siempre es seguro desactivar lo que no aparezca.
+      const itemCodesActivos = articulosPT.map(a => a.itemCode);
+      if (itemCodesActivos.length > 0) {
+        const inactivadosResult = await client.query(
+          `UPDATE sap_articulos SET activo = false, updated_at = NOW()
+           WHERE item_code != ALL($1::varchar[]) AND activo = true`,
+          [itemCodesActivos]
+        );
+        if (inactivadosResult.rowCount > 0)
+          logger.info(`Inventario MP: ${inactivadosResult.rowCount} artículos marcados inactivos (ya no están en SAP)`);
+      }
     } catch (ptErr) {
       // No crítico — el inventario MP ya sincronizó correctamente
       logger.warn(`Inventario MP: fallo al actualizar sap_articulos (no crítico): ${ptErr.message}`);
