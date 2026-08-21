@@ -7,10 +7,12 @@ la 3.9 (dueño único de `sap_articulos`), la consolidación de
 `requiere_formado` como dato maestro, el diseño e implementación del
 bloqueo de aprobación por producto con dato maestro incompleto, un bug de
 backend y dos bugs de frontend encontrados en la validación (uno de ellos
-por Jonathan directamente en el portal), y una limpieza de datos de staging
-corrida en paralelo por Jonathan. Mismo criterio que el documento de
-referencia: grep/SQL real antes de actuar, commits separados por pieza
-lógica, staging antes que producción.
+por Jonathan directamente en el portal), una limpieza de datos de staging
+corrida en paralelo por Jonathan, el fix del sync puntual de producto (no
+actualizaba atributos de `sap_articulos`), y un segundo bug de frontend en
+la aprobación masiva (también encontrado por Jonathan en el portal). Mismo
+criterio que el documento de referencia: grep/SQL real antes de actuar,
+commits separados por pieza lógica, staging antes que producción.
 
 ## 1. Arranque — UAT Ronda 2: validar 3.9 (dueño único de `sap_articulos`)
 
@@ -218,16 +220,158 @@ pantalla ni un botón para eso, no se pidió).
 
 ## 7. Limpieza de datos de staging
 
-Corrida por Jonathan en paralelo a la sesión (no por esta sesión), en dos
-momentos distintos — se notó por los saltos en `max(id)` de
+Corrida por Jonathan en paralelo a la sesión (no por esta sesión), en **al
+menos tres** momentos distintos — se notó por los saltos en `max(id)` de
 `masas_produccion` entre verificaciones sucesivas (llegó a masas con id
-~2034, después volvió a `2010` como máximo). Criterio informado por
-Jonathan: `sap_doc_entry_pesaje IS NULL`, sin filtro de fecha — elimina
-masas de prueba que nunca llegaron a transmitir pesaje real a SAP,
-independientemente de cuándo se crearon. No se corrió desde esta sesión ni
-se verificó el SQL exacto usado.
+~2034, volvió a `2010`, y más tarde en la misma sesión bajó de nuevo,
+haciendo desaparecer masas de prueba usadas pocos minutos antes — ver
+sección 9). Criterio informado por Jonathan: `sap_doc_entry_pesaje IS
+NULL`, sin filtro de fecha — elimina masas de prueba que nunca llegaron a
+transmitir pesaje real a SAP, independientemente de cuándo se crearon. No
+se corrió desde esta sesión ni se verificó el SQL exacto usado.
 
-## 8. Commits de la sesión, en orden
+## 8. Fix del sync puntual de producto — no actualizaba atributos de `sap_articulos`
+
+**Caso real de UAT**: `PAN CIABATTA MED X2 CONG` (`PANPAQ60`) bloqueado por
+falta de `dias_vencimiento`. Antes de proponer un fix, diagnóstico completo
+(Fase 1) de los 4 flujos de sincronización reales, con grep/cat del código
+— no de memoria ni de documentación:
+
+| Flujo | Endpoint | Trae de SAP | Escribe en `sap_articulos` |
+|---|---|---|---|
+| "Sincronizar BOM completo" | `POST /sincronizar-bom` (sin `items`) | Los 6 campos, vía HANA | Ninguno (solo `sap_bom_componentes`, desde 3f4796d) |
+| "Corregir un producto puntual" → mitad BOM | `POST /sincronizar-bom` (con `items`) — misma función | Los 6, del ítem filtrado | Ninguno |
+| "Corregir un producto puntual" → mitad lotes | `POST /sincronizar-lotes-item` | Solo stock/lotes | Ninguno (y valida contra materia prima, no PT — ver hallazgo aparte abajo) |
+| "Sincronizar Inventario y Lotes" | `POST /sincronizar-inventario-mp` | Los 6, vía Service Layer, **sin filtro puntual** | Los 6 completos |
+
+Conclusión: el botón "Corregir un producto puntual" decía *"Actualiza
+receta, atributos, stock y lotes"* pero nunca tocaba atributos — las dos
+llamadas que hacía (`sincronizarBOM` filtrado + `sincronizarLotesItem`)
+tienen cero escritura a `sap_articulos`. La única función que sí escribe
+esa tabla (`sincronizarInventarioMP`) no aceptaba filtro puntual, solo
+corrida completa (~204 productos, "un par de minutos").
+
+**Decisión de Jonathan**: no revivir la escritura en `sincronizarBOM` (el
+dueño único de `sap_articulos` sigue siendo `sincronizarInventarioMP`).
+Agregar en su lugar un parámetro opcional `items` a `sincronizarInventarioMP`.
+
+**Implementación** (`d67039a` backend, `0b1ce37` frontend):
+- `sap.service.js`: `getArticulosConTipoMasa(itemCodesFiltro = null)` — si
+  viene, acota el `$filter` de Service Layer a esos `ItemCode`.
+- `sap.controller.js`: `sincronizarInventarioMP` parsea `items` del body
+  (mismo patrón que `sincronizarBOM`) y lo pasa solo al paso 3 (dato
+  maestro PT) — los pasos 1-2 (stock/lotes de materia prima) siguen
+  corriendo completos siempre, eso no formaba parte del cambio pedido.
+  **Riesgo encontrado e implementado sin que se pidiera explícitamente**:
+  el bloque que marca artículos inactivos ("ya no vienen de SAP") asumía
+  que `articulosPT` era siempre el universo completo — con filtro puntual
+  habría desactivado por error los ~200+ productos restantes. Se protegió
+  con `if (!esSyncPuntualPT)`.
+- Frontend: el botón "3. Corregir un producto puntual" ahora hace **tres**
+  llamadas (BOM filtrado para receta, Inventario filtrado para atributos,
+  Lotes filtrado para stock — antes solo dos). Guard de UI agregado en la
+  tarjeta "2. Inventario y Lotes completo" (mismo patrón que ya existía
+  para la tarjeta de BOM) para no mostrar "materias primas sincronizadas"
+  cuando el disparo real fue puntual.
+
+**Validación end-to-end en staging, con `PANPAQ60`**:
+```
+ANTES:   dias_vencimiento=(null)  campos_incompletos={dias_vencimiento}  updated_at=04:41:10
+POST /sincronizar-inventario-mp {"items":"PANPAQ60"} → articulos_pt_actualizados: 1
+DESPUÉS: dias_vencimiento=(null)  campos_incompletos={dias_vencimiento}  updated_at=06:42:54
+```
+`updated_at` avanzó (el endpoint sí procesó el ítem — confirmado también
+por el log `"Inventario MP: 1 artículos PT actualizados"`, contra `"...204
+artículos..."` de las corridas completas), pero `dias_vencimiento` siguió
+vacío porque el UDF real en SAP **todavía no estaba corregido por Diana**
+en el momento de esta prueba — resultado esperado, no una falla del fix.
+Controles (`PANPAQ04`, `PANPAQ186`, `PANPAQ26`) sin cambios de `updated_at`
+— el filtro puntual no tocó nada más. Guard de desactivación verificado:
+`204` activos de `412` filas totales, el mismo número de siempre.
+
+**Cierre parcial, sin una segunda vuelta formal**: después de esta prueba,
+Jonathan confirmó que corrigió el UDF en SAP y logró aprobar la masa de
+`PANPAQ60` en el portal — lo cual, dado el bloqueo de la sección 4, es
+evidencia funcional fuerte de que `campos_incompletos` quedó vacío (una
+masa con `campos_incompletos` no vacío no puede aprobarse). Pero esta
+sesión no corrió un `SELECT` directo confirmando `dias_vencimiento` ya
+poblado tras esa corrección — queda como pendiente liviano en la sección 11.
+
+## 9. Bug de aprobación masiva — no mostraba éxitos ni fallos
+
+**Reporte de Jonathan, probando en el portal**: al aprobar varias masas de
+una vez, las que no podían aprobarse (dato incompleto) quedaban sin
+aprobar, sin ningún mensaje. Solo se veían las que sí se aprobaron, vía el
+refresco de la lista.
+
+**Diagnóstico (Fase 1)**: el botón es "✓ Aprobar todo (N)"
+(`ListaMasas.tsx:667-679`, selección múltiple por checkbox) → una sola
+llamada `PATCH /api/masas/aprobar-bulk` (el loop de `aprobarMasaCore` por
+cada id vive en el **backend**, no en el frontend). Reproducido en vivo
+contra staging (masa `1822` completa + `2055` incompleta, una sola
+request):
+```
+PATCH /api/masas/aprobar-bulk {"ids":[1822,2055]}
+→ {"success":true,"aprobadas":1,"fallidas":[{"id":2055,"error":"No se puede
+   aprobar: ningún producto de la masa tiene dato maestro completo en SAP.
+   Corregir en SAP y resincronizar: PAN DE SEMILLAS CON MASA MADRE GRANDE
+   (tamaño, forma, peso de masa dividida, unidades por paquete, días de
+   vencimiento)"}]}
+```
+El backend ya devolvía todo el detalle necesario — el bug es **100%
+frontend**, una sola línea: `masasService.ts:148` hacía `response.data!`,
+pero `apiService.patch<T>()` (`api.ts:192-199`) ya entrega el body completo
+de la respuesta — este endpoint en particular responde
+`{success, aprobadas, fallidas}` al **nivel superior**, no en el envelope
+estándar `{success, data: {...}}` que sí usan la mayoría de los demás. El
+`.data` ahí buscaba una propiedad inexistente → `undefined` → `bulkResultado`
+quedaba `undefined` → el modal de resultado (`ListaMasas.tsx:741-763`, ya
+bien escrito, sin tocar) nunca se renderizaba, ni para éxitos ni para
+fallos.
+
+**No es el mismo patrón que el bug ya corregido (`d7ec51b`)**: aquel era un
+`catch` silencioso (manejo de error faltante). Este es una
+desestructuración de datos rota en el **camino feliz** — la promesa sí
+resolvía, sin lanzar excepción, con `undefined` en vez del objeto real.
+
+**Fix** (`91bdef1`): `return response as unknown as {aprobadas, fallidas}`
+en vez de `response.data!`. No se tocó `apiService.patch` (rompería el
+envelope estándar de los demás endpoints) ni el bloque de UI.
+
+**Grep de otros candidatos al mismo patrón** (pedido explícitamente, sin
+corregir — ver sección 11): `masasService.ts:134` (`aprobarMasa`
+individual) y `masasService.ts:156` (`marcarPendiente`) tienen exactamente
+el mismo defecto estructural (`response.data!` sobre una respuesta de
+backend sin `data`), pero son inofensivos hoy porque ningún componente
+consume el valor resuelto de esas promesas — el error, cuando lo hay, ya
+viaja por el `catch`. Todos los demás usos de `.data!` en
+`masasService.ts`/`checklistService.ts` (19 en total) se verificaron uno
+por uno contra el `res.json` real de su endpoint — el resto sí sigue el
+envelope estándar.
+
+**Validación end-to-end con navegador real** (Playwright/Chromium, sesión
+logueada, staging en `91bdef1`): masa `1811` (CHOCOLATE, completa) + `1813`
+(GALLETINAS, 6 campos incompletos) → "Aprobar todo (2)" → modal:
+```
+⚠️ Completado con errores
+1 masa(s) aprobada(s) correctamente.
+Masa #1813: No se puede aprobar: ningún producto de la masa tiene dato
+maestro completo en SAP. Corregir en SAP y resincronizar: GALLETINAS
+(tamaño, forma, peso de masa dividida, múltiplo divisor, unidades por
+paquete, días de vencimiento)
+```
+Confirmado en DB: `1811 → APROBADA`, `1813 → PLANIFICACION` (sin cambios).
+`pm2-error.log` vacío durante toda la prueba.
+
+**Hallazgo aparte, no corregido**: `sincronizarLotesItem` devuelve un
+mensaje engañoso ("Falló: stock/lotes") cuando el input "Corregir un
+producto puntual" se usa con un código de producto terminado (ej.
+`PANPAQ60`) en vez de materia prima — el endpoint valida los códigos
+contra `sap_bom_componentes`/`ingredientes_masa` (diseñado para MP, no
+PT), así que el "fallo" es esperado pero el mensaje no lo explica. Sin fix
+asignado — ver sección 11.
+
+## 10. Commits de la sesión, en orden
 
 | Commit | Qué hace |
 |---|---|
@@ -240,17 +384,62 @@ se verificó el SQL exacto usado.
 | `6ac67f1` | Fix: `aprobarMasaCore` bloquea la aprobación completa si 0 productos quedan aptos (antes la masa avanzaba con 0 kg y "Iniciar Pesaje" fallaba con mensaje equivocado); reevaluación bidireccional de `apto_produccion`; defensa en profundidad en `completarFase`. |
 | `d7ec51b` | Fix FE: `confirmarAprobar` muestra `alert(error.message)` en vez de solo loguear a consola. |
 | `d8460ec` | Fix FE: el badge de dato incompleto pasa a depender de `campos_incompletos` en vez de `apto_produccion`. |
+| `d67039a` | Filtro puntual `items` en `sincronizarInventarioMP` (backend) — acota el dato maestro PT a ítems puntuales sin tocar stock/lotes de MP; guard contra desactivación masiva agregado. |
+| `0b1ce37` | El botón "Corregir un producto puntual" ahora también llama a `sincronizarInventarioMP` filtrado para atributos (antes solo llamaba a `sincronizarBOM`, que ya no escribe `sap_articulos`); guard de UI en tarjeta 2 para no mostrar resultado de sync completo cuando fue puntual. |
+| `91bdef1` | Fix: `masasService.aprobarMasaBulk` devolvía `undefined` por `response.data!` sobre una respuesta sin envelope — el modal de resultado de aprobación masiva nunca se renderizaba. |
 
-Todos pusheados a `origin/main` y deployados en staging durante la sesión
-(confirmado commit por commit con `git rev-parse HEAD` en el servidor tras
-cada `deploy.sh`).
+*(No se listan en esta tabla los 3 commits puramente de documentación de
+esta sesión — `fac69b0`, `9acb964`, `0d28f1e` — por ser meta-commits sobre
+este mismo archivo, no cambios de producto.)*
 
-## 9. Pendientes reales para la próxima sesión
+**Estado de push, confirmado explícitamente al cierre** (no asumido por
+haber corrido deploys): `git log --oneline origin/main..HEAD` → vacío.
+`git rev-parse HEAD` local = `git rev-parse origin/main` =
+`91bdef18a4e42ce9f9173aa62d60e45a649ddcb5`. Todos los commits de la sesión,
+incluidos `d67039a`/`0b1ce37`/`91bdef1`, están efectivamente pusheados a
+`origin/main`.
 
-- **Resto de UAT Ronda 2, no tocado hoy** (continuación de los pendientes ya
-  registrados en la sección 4 de `SESION_2026-08-20_RESUMEN.md`, punto 6/7/8b
-  de la fuente `PENDIENTES_UAT_2026-07-28.md`, que sigue sin existir en el
-  repo): timezone en toda la app, nombres de programas de horno.
+**Estado por ambiente**:
+- **Staging**: confirmado con `git log --oneline -1` corrido en el propio
+  servidor (`ubuntu@54.196.194.114:~/LaArtesa`) → `91bdef1`. Al día con
+  `origin/main`.
+- **Producción**: **no confirmado en esta sesión**. Existen credenciales
+  en el repo (`deployment/aws-prod/`, host `100.48.24.34`) y se ubicó el
+  path del repo en el servidor (`/home/ubuntu/LaArtesa`), pero el intento
+  de correr `git log --oneline -1` (solo lectura, sin deploy) quedó
+  bloqueado por el clasificador de permisos de la sesión — pedía
+  autorización explícita, distinta de la ya dada para staging. No se
+  insistió. Queda pendiente confirmar a qué commit está producción antes
+  de asumir que estos fixes llegaron ahí.
+
+## 11. Pendientes reales para la próxima sesión
+
+- **`PANPAQ60`/`dias_vencimiento`** — Jonathan confirmó haber corregido el
+  UDF en SAP y haber aprobado la masa exitosamente en el portal (evidencia
+  funcional fuerte, ya que el bloqueo de la sección 4 no deja aprobar con
+  `campos_incompletos` no vacío). Sin embargo, esta sesión no corrió un
+  `SELECT` directo confirmando `dias_vencimiento` poblado tras esa
+  corrección — pendiente liviano, bajo impacto, para cerrar del todo.
+- **Deuda técnica anotada, no corregida**: `masasService.ts:134`
+  (`aprobarMasa` individual) y `masasService.ts:156` (`marcarPendiente`)
+  comparten el defecto estructural de `aprobarMasaBulk`
+  (`response.data!` sobre una respuesta de backend sin envelope
+  `{data:...}`) — inofensivo hoy porque nada consume el valor resuelto de
+  esas promesas. Revisar si en el futuro algo empieza a depender de ese
+  valor de retorno.
+- **`sincronizarLotesItem` — mensaje engañoso para productos terminados**:
+  al usar "Corregir un producto puntual" con un código PT (ej.
+  `PANPAQ60`), la mitad de stock/lotes reporta "falló" porque el endpoint
+  valida contra materia prima/BOM, no contra productos terminados — el
+  comportamiento es esperado pero el mensaje no lo explica. Sin fix
+  asignado.
+- **Acceso a producción sin confirmar** (ver sección 10) — confirmar el
+  commit real de producción y, si corresponde, autorizar el deploy de los
+  fixes de esta sesión ahí.
+- **Resto de UAT Ronda 2, no tocado hoy** (continuación de los pendientes
+  ya registrados en la sección 4 de `SESION_2026-08-20_RESUMEN.md`, punto
+  6/7/8b de la fuente `PENDIENTES_UAT_2026-07-28.md`, que sigue sin existir
+  en el repo): timezone en toda la app, nombres de programas de horno.
 - **BATIDO como flujo distinto** — señalado en esta sesión (aparecen
   `tipo_masa` como `BATIDO_FRUTOS_ROJOS`, item codes con prefijo `PASPAQ`
   en vez de `PANPAQ`, ej. `PASPAQ06` confirmado como código legítimo, no
@@ -265,7 +454,8 @@ cada `deploy.sh`).
   pantalla/acción para esto, es diseño nuevo, no un ajuste del mecanismo
   actual.
 - Confirmar con Jonathan el criterio exacto de la limpieza de staging
-  (sección 7) si hace falta reproducirlo o documentarlo con más detalle.
+  (sección 7) si hace falta reproducirlo o documentarlo con más detalle —
+  ocurrió al menos tres veces durante esta sola sesión.
 
 ## Notas para no perder — decisiones y hallazgos que no viven en el código
 
@@ -274,6 +464,9 @@ cada `deploy.sh`).
   pushea y deploya él mismo, en paralelo, sin coordinación explícita en el
   momento. Detectado por accidente vía `git reflog` — no asumir en la
   próxima sesión que "local sin push" significa que nada llegó a staging.
+  Aun así, **al cierre de esta sesión se verificó explícitamente** con
+  `git log --oneline origin/main..HEAD` que no queda nada sin pushear — no
+  dar por sentado el patrón de push automático sin confirmar cada vez.
 - `PASPAQ06` no es un typo de `PANPAQ06` — es una serie de códigos
   legítima y distinta (pastelería/batidos), confirmado con `sap_articulos`
   real (`PASPAQ01` a `PASPAQ10`+).
@@ -282,3 +475,10 @@ cada `deploy.sh`).
   contradice el diagnóstico de "gap real sin patrón en el nombre" de la
   sección 3.7 del documento anterior. Ya no requiere acción de Diana para
   este ítem puntual.
+- Existen credenciales de acceso SSH a **producción** en el repo
+  (`deployment/aws-prod/artesa-produccion-key.pem`,
+  `deployment/aws-prod/prod-recursos.txt` — este último incluye la
+  contraseña de la base de datos de producción en texto plano; no
+  reproducida aquí). El acceso, incluso de solo lectura, requiere
+  autorización explícita separada de la de staging — quedó bloqueado por
+  el sistema de permisos en esta sesión al intentar un `git log` simple.
