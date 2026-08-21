@@ -703,19 +703,30 @@ class SAPService {
 
   /**
    * Obtiene todos los artículos con U_JZ_Tipos_Masa configurado (paginado automático).
+   * @param {string[]|null} itemCodesFiltro Opcional — si viene, acota el $filter de
+   *        Service Layer a esos ItemCode puntuales (sincronizarInventarioMP con
+   *        `items`, sesión 2026-08-21) en vez de traer los ~204 completos.
    * @returns {Array} [{ itemCode, itemName, tipoMasa, salesQtyPerPack, gramaje }]
    */
-  async getArticulosConTipoMasa() {
+  async getArticulosConTipoMasa(itemCodesFiltro = null) {
     await this.ensureSession();
 
     const todos = [];
     let skip = 0;
     const top = 20; // SAP limita a 20 registros por página en este ambiente
 
+    let filtro = "U_JZ_Tipos_Masa ne null and U_JZ_Tipos_Masa ne '' and Valid eq 'tYES' and Frozen eq 'tNO'";
+    if (itemCodesFiltro && itemCodesFiltro.length > 0) {
+      const filtroItems = itemCodesFiltro
+        .map(c => `ItemCode eq '${String(c).replace(/'/g, "''")}'`)
+        .join(' or ');
+      filtro += ` and (${filtroItems})`;
+    }
+
     while (true) {
       const response = await this.client.get('/Items', {
         params: {
-          $filter: "U_JZ_Tipos_Masa ne null and U_JZ_Tipos_Masa ne '' and Valid eq 'tYES' and Frozen eq 'tNO'",
+          $filter: filtro,
           $select: 'ItemCode,ItemName,U_JZ_Tipos_Masa,U_JZ_PanesPorBolsa,SalesUnitWeight1,U_JZ_MultiploDivisor,U_JZ_Tamanio,U_JZ_Forma,U_JZ_PesMasDiv,U_JZ_DiasExp,U_JZ_Formado,Valid,Frozen',
           $top: top,
           $skip: skip,

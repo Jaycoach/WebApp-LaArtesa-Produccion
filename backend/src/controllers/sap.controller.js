@@ -1891,10 +1891,23 @@ const sincronizarBOM = async (req, res, next) => {
 
 const LOCK_KEY_INVENTARIO_LOTES = 990001;
 
-const sincronizarInventarioMP = async (_req, res, next) => {
+const sincronizarInventarioMP = async (req, res, next) => {
   const client = await db.getClient();
   try {
     await client.query('BEGIN');
+
+    // Filtro puntual opcional (sesión 2026-08-21): { "items": "PANPAQ60" }
+    // acota el paso 3 (dato maestro PT) a esos ItemCode en vez de los ~204
+    // completos. Los pasos 1-2 (stock/lotes de materia prima) NO se acotan —
+    // siguen corriendo completos siempre, con o sin `items` — no es lo que
+    // pidió este cambio. Sin `items`, comportamiento idéntico al de hoy.
+    const itemsParamPT = req.body?.items;
+    const itemCodesFiltroPT = itemsParamPT
+      ? (Array.isArray(itemsParamPT) ? itemsParamPT : itemsParamPT.split(','))
+          .map(c => String(c).trim().toUpperCase())
+          .filter(c => c.length > 0)
+      : null;
+    const esSyncPuntualPT = !!(itemCodesFiltroPT && itemCodesFiltroPT.length > 0);
 
     const lockResult = await client.query(
       `SELECT pg_try_advisory_xact_lock($1) AS adquirido`,
@@ -2044,7 +2057,7 @@ const sincronizarInventarioMP = async (_req, res, next) => {
     // SAP (que también vivía en BOM).
     let articulosActualizados = 0;
     try {
-      const articulosPT = await sapService.getArticulosConTipoMasa();
+      const articulosPT = await sapService.getArticulosConTipoMasa(itemCodesFiltroPT);
       for (const articulo of articulosPT) {
         await client.query(
           `INSERT INTO sap_articulos
@@ -2092,17 +2105,21 @@ const sincronizarInventarioMP = async (_req, res, next) => {
       logger.info(`Inventario MP: ${articulosActualizados} artículos PT actualizados en sap_articulos`);
 
       // Marcar como inactivos los artículos que ya no vienen de SAP (antes vivía
-      // en sincronizarBOM). sincronizarInventarioMP siempre corre completa (sin
-      // filtro puntual), así que siempre es seguro desactivar lo que no aparezca.
-      const itemCodesActivos = articulosPT.map(a => a.itemCode);
-      if (itemCodesActivos.length > 0) {
-        const inactivadosResult = await client.query(
-          `UPDATE sap_articulos SET activo = false, updated_at = NOW()
-           WHERE item_code != ALL($1::varchar[]) AND activo = true`,
-          [itemCodesActivos]
-        );
-        if (inactivadosResult.rowCount > 0)
-          logger.info(`Inventario MP: ${inactivadosResult.rowCount} artículos marcados inactivos (ya no están en SAP)`);
+      // en sincronizarBOM). Solo es seguro cuando articulosPT representa el
+      // universo COMPLETO — con filtro puntual (itemCodesFiltroPT), articulosPT
+      // trae 1-2 ítems nada más, y este UPDATE desactivaría por error todo el
+      // resto de sap_articulos. Se salta explícitamente en sync puntual.
+      if (!esSyncPuntualPT) {
+        const itemCodesActivos = articulosPT.map(a => a.itemCode);
+        if (itemCodesActivos.length > 0) {
+          const inactivadosResult = await client.query(
+            `UPDATE sap_articulos SET activo = false, updated_at = NOW()
+             WHERE item_code != ALL($1::varchar[]) AND activo = true`,
+            [itemCodesActivos]
+          );
+          if (inactivadosResult.rowCount > 0)
+            logger.info(`Inventario MP: ${inactivadosResult.rowCount} artículos marcados inactivos (ya no están en SAP)`);
+        }
       }
     } catch (ptErr) {
       // No crítico — el inventario MP ya sincronizó correctamente
