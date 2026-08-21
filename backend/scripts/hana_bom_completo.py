@@ -15,6 +15,7 @@ import sys
 import os
 import json
 from hdbcli import dbapi
+from _sap_paquetes import resolver_unidades_por_paquete
 
 
 def main():
@@ -76,13 +77,16 @@ def main():
                     "itemCode": item_code,
                     "itemName": item_name,
                     "tipoMasa": tipo_masa,
-                    # A propósito SIN fallback por nombre (ver _sap_paquetes.py):
-                    # esto alimenta sap_articulos, la fuente de verdad de master
-                    # data para el backfill de productos_por_masa. Adivinar por
-                    # nombre aquí ocultaría los productos con UDF real sin
-                    # configurar en SAP en vez de dejarlos visibles como
-                    # pendientes de confirmar con Diana.
-                    "salesQtyPerPack": float(sales_qty_per_pack) if sales_qty_per_pack is not None else 1,
+                    # Corrección 2026-08-20 (validado con datos reales de staging):
+                    # sap_articulos debe guardar el valor YA RESUELTO (UDF real si
+                    # SAP trae algo distinto de vacío/NULL/0; si no, patrón " X<N>"
+                    # en el nombre; si no, 1) -- ver _sap_paquetes.py. Se pasa
+                    # sales_qty_per_pack CRUDO (puede ser None) sin coalescer aquí
+                    # antes -- antes se hacía "... if ... is not None else 1", que
+                    # colapsaba NULL a 1 antes de que el fallback por nombre
+                    # pudiera correr, dejando sap_articulos en 1 pese a que el
+                    # nombre tuviera un patrón claro (ej. PANPAQ26, "...X 4 CONG").
+                    "salesQtyPerPack": resolver_unidades_por_paquete(item_code, item_name, sales_qty_per_pack),
                     "gramaje": float(gramaje) if gramaje is not None else 0,
                     "multiploDivisor": round(float(multiplo_divisor)) if multiplo_divisor is not None else 0,
                     "tamanio": tamanio,

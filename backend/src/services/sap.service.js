@@ -45,20 +45,23 @@ function aplicarFallbacksAtributos(itemCode, { tamanio, forma, pesoMasaDividida,
 }
 
 // Resuelve unidades_por_paquete (paquete SAP, ex "SalPackUn") a partir del
-// UDF U_JZ_PanesPorBolsa, con el mismo fallback que ya se usaba disperso en
-// varios puntos del código (regex " X<N>" sobre el nombre del producto) y
-// default 1 si ninguno aplica. Se resuelve UNA sola vez aquí, en el punto de
-// lectura desde SAP del flujo de sincronización de OV (getArticulosInfo /
-// getDatosParaSincronizacion) — los consumidores del dato ya persistido en
-// productos_por_masa.unidades_por_paquete no deberían necesitar recalcular
-// este fallback.
-// IMPORTANTE: NO se aplica en getArticulosConTipoMasa (BOM-sync, alimenta
-// sap_articulos) a propósito — sap_articulos se usa como fuente de verdad de
-// master data para el backfill de productos_por_masa (ver sesión
-// 2026-08-20 sección 3.5/3.6), y adivinar por nombre ahí "arreglaría"
-// silenciosamente los 5 productos con conflicto/ausencia real de UDF en SAP
-// (PANPAQ13, PANPAQ11, PANPAQ05, PANPAQ26, PANPAQ20) sin que Diana confirme
-// el valor correcto primero.
+// UDF U_JZ_PanesPorBolsa: si SAP trae un valor real (no vacío/NULL, no 0) se
+// usa tal cual, sin excepción; si viene vacío/NULL o en 0, fallback al
+// patrón " X<N>" en el nombre del producto; si ninguno aplica, default 1. Se
+// usa tanto en el flujo de sincronización de OV (getArticulosInfo /
+// getDatosParaSincronizacion) como en el de BOM (getArticulosConTipoMasa /
+// hana_bom_completo.py, que alimentan sap_articulos).
+//
+// IMPORTANTE — el valor recibido debe ser el CRUDO de SAP, sin coalescer
+// antes de llegar aquí (nunca `item.U_JZ_PanesPorBolsa || 1` en el llamador):
+// esta función necesita distinguir "vacío/0" (dispara el fallback) de "SAP
+// trae un valor real" para no perder esa señal. Bug real detectado
+// 2026-08-20: `getArticulosConTipoMasa` y `hana_bom_completo.py` hacían ese
+// `|| 1` / `else 1` ANTES de que este fallback pudiera correr, así que
+// sap_articulos quedaba en 1 aunque el nombre tuviera un patrón claro (ej.
+// PANPAQ26, "...X 4 CONG" con UDF vacío/0 en SAP) — se corrigió pasando el
+// valor crudo directo. Un valor real explícito de SAP (ej. PANPAQ20 con
+// UDF=1 real) sigue prevaleciendo siempre sobre el nombre, sin excepción.
 function resolverUnidadesPorPaquete(itemCode, itemName, udfPanesPorBolsa) {
   const udf = Number(udfPanesPorBolsa);
   if (udf > 0) return udf;
@@ -718,10 +721,12 @@ class SAPService {
         itemCode:        item.ItemCode,
         itemName:        item.ItemName,
         tipoMasa:        item.U_JZ_Tipos_Masa,
-        // A propósito SIN resolverUnidadesPorPaquete/fallback por nombre — ver
-        // comentario junto a esa función. Esto alimenta sap_articulos, fuente
-        // de verdad de master data para el backfill de productos_por_masa.
-        salesQtyPerPack: item.U_JZ_PanesPorBolsa || 1,
+        // Antes: item.U_JZ_PanesPorBolsa || 1 — coalescía NULL/0 a 1 antes
+        // de que resolverUnidadesPorPaquete pudiera intentar el fallback por
+        // nombre. Se pasa el valor crudo (puede ser null/undefined/0) para
+        // que la función distinga "SAP no trae nada" de "SAP trae un valor
+        // real" — ver comentario junto a la función.
+        salesQtyPerPack: resolverUnidadesPorPaquete(item.ItemCode, item.ItemName, item.U_JZ_PanesPorBolsa),
         gramaje:         item.SalesUnitWeight1 || 0,
         multiploDivisor: atributos.multiploDivisor,
         tamanio:         atributos.tamanio,
