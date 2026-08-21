@@ -145,7 +145,16 @@ export const masasService = {
       `/masas/aprobar-bulk`,
       body
     );
-    return response.data!;
+    // Este endpoint no sigue el envelope estándar {success, data: {...}} —
+    // el backend (masas.controller.js: aprobarMasaBulk) devuelve
+    // {success, aprobadas, fallidas} al nivel superior. apiService.patch ya
+    // entrega el body completo del response (ver api.ts:197-198, `return
+    // response.data` sobre la respuesta de axios) — response.data aquí
+    // buscaría una propiedad que no existe y devolvía undefined, por lo que
+    // el modal de resultado (ListaMasas.tsx) nunca se renderizaba ni para
+    // éxitos ni para fallos (bug real encontrado en UAT Ronda 2, sesión
+    // 2026-08-21). Se devuelve response directamente.
+    return response as unknown as { aprobadas: number; fallidas: { id: number; error: string }[] };
   },
 
   /**
