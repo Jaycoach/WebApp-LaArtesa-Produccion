@@ -697,17 +697,67 @@ de Jonathan antes de cualquier implementación.**
   apruebe el diseño (en particular la decisión de negocio del punto
   anterior) antes de un prompt de implementación separado.
 
+### 3.9 — Implementación del diseño 3.8: dueño único de dato maestro (`sap_articulos`)
+
+**Estado: implementado — commit `3f4796d` (local, sin push). Paso 5
+(validación) documentado abajo, pendiente de que Jonathan lo corra en
+staging.**
+
+- Jonathan aprobó proceder con la implementación completa del diseño de
+  3.8 antes de seguir con UAT.
+- **`sincronizarBOM`**: deja de escribir `sap_articulos` por completo
+  (era la causa de la race condition real con `sincronizarInventarioMP`
+  en el mismo ciclo de cron). Solo escribe `sap_bom_componentes` — su
+  propósito real. Pasos renumerados 0-5.
+- **`sincronizarInventarioMP`**: único dueño de `sap_articulos` —
+  absorbe `tamanio/forma/peso_masa_dividida/dias_vencimiento` (antes
+  solo los escribía BOM) y la desactivación de artículos obsoletos
+  (antes vivía en BOM).
+- **`sincronizarDesdeOV`**: elimina las 2 copias adicionales del
+  fallback de `unidades_por_paquete` encontradas en esta sesión (no
+  detectadas en el refactor de deduplicación de 3.6, porque vivían
+  dentro de la propia sincronización, no en un consumidor de lectura).
+  Deja de escribir/resolver `unidades_por_paquete`, `multiplo_divisor`,
+  `tamanio`, `forma`, `peso_masa_dividida`, `dias_vencimiento` desde la
+  respuesta cruda de SAP — ahora hace un `SELECT` a `sap_articulos` (una
+  vez por grupo de `tipo_masa`, mismo patrón que `kiloPorItemCode` vía
+  `sap_bom_componentes`) y lee los valores ya resueltos.
+- **Decisión de negocio ya tomada por Jonathan, implementada tal cual**:
+  si un `item_code` no está sincronizado en `sap_articulos`, NO se
+  bloquea la creación de la masa — se usa el default histórico
+  (`unidades_por_paquete=1`, `multiplo_divisor=0`, resto `null`) con
+  `logger.warn` explícito. El negocio no se detiene por falta de sync.
+- **2 excepciones documentadas, no decididas en silencio**:
+  - `requiere_formado`: sin columna equivalente en `sap_articulos`
+    (solo existe en `productos_por_masa`, migración 054) — sigue como
+    paso directo de `U_JZ_Formado` desde la OV, sin fallback.
+  - `tipo_masa`: sigue resolviéndose directo desde SAP en el propio
+    fetch de OV — es lógica de *a qué masa pertenece esta línea*
+    (agrupación/creación), no una columna de `productos_por_masa`;
+    cambiar esto es un rediseño de flujo de control, fuera de alcance.
+- No se tocó `gramaje_unitario`/`kiloPorItemCode` (ya era BOM-primero
+  con fallback a `sap_articulos.gramaje`, patrón correcto preexistente).
+- No se tocó `productos_por_masa` con ningún `UPDATE` masivo — el
+  backfill ya lo corrió Jonathan por su cuenta, separado de este prompt.
+- **Paso 5 — validación, pendiente de Jonathan (sin acceso a
+  staging/HANA en este entorno)**: comandos y `SELECT` exactos (snapshot
+  antes, tras Sincronizar BOM, tras Sincronizar Inventario, tras
+  Sincronizar OV sobre `PANPAQ26`/`PANPAQ186`) documentados en la
+  respuesta completa de esta sesión — confirmar que `sap_articulos` deja
+  de moverse con BOM, sí se mueve con Inventario (incluidas las 4
+  columnas nuevas), y que `productos_por_masa` termina exactamente igual
+  a `sap_articulos` tras sincronizar OV (no un valor recalculado aparte).
+
 ## 4. Próximos pasos
 
-> ⚠️ **BLOQUEANTE (3.6/3.7)**: NO aprobar en staging/producción ninguna
-> masa nueva que contenga alguno de los 97 `sap_item_code` afectados hasta
-> que (1) el Paso 5 de 3.7 confirme que `sap_articulos` ya guarda el valor
-> resuelto (no el crudo) y (2) el backfill de
-> `fix-unidades-por-paquete-productos_por_masa.sql` corra y se confirme.
-> Antes del fix de 3.7, correr el backfill contra `sap_articulos` habría
-> sido una regresión real (sobrescribir con `1` valores ya correctos como
-> `PANPAQ26 = 4`) — motivo por el que sigue sin correrse. Ver detalle y
-> las queries de verificación en las secciones 3.6 ("7ª variante") y 3.7.
+> ✅ **Actualización 3.9**: el backfill de
+> `fix-unidades-por-paquete-productos_por_masa.sql` ya lo corrió Jonathan
+> por su cuenta, y la causa de fondo (dueño único de `sap_articulos`,
+> `sincronizarDesdeOV` ya no recalcula dato maestro) quedó implementada
+> en el commit `3f4796d`. El bloqueante original de 3.6/3.7 queda
+> resuelto en código — **solo falta el Paso 5 de 3.9** (validar en
+> staging real que `sap_articulos`/`productos_por_masa` se comportan
+> como se espera) antes de dar por cerrado el tema y hacer push.
 
 - [x] Implementar el fix 3.1 (bloqueo completar sin unidades empacadas) —
       hecho, app (`e5fa027`) + DB (`efffe83`, migración 059).
@@ -742,10 +792,16 @@ de Jonathan antes de cualquier implementación.**
       Inventario y Lotes" (o `sincronizarBOM` si `SAP_READ_MODE=hana`) y
       confirmar con el `SELECT` de la sección 3.7 que `PANPAQ26` pasa de
       `1.0000` a `4.0000` en `sap_articulos`, sin tocar `PANPAQ13`.
+- [ ] 3.9 — correr en staging real (Paso 5): validar con los comandos +
+      `SELECT` documentados que `sap_articulos` deja de moverse con
+      Sincronizar BOM y sí con Sincronizar Inventario (incluidas
+      tamanio/forma/peso_masa_dividida/dias_vencimiento), y que
+      `productos_por_masa` queda exacto a `sap_articulos` tras
+      Sincronizar OV para `PANPAQ26`/`PANPAQ186`.
 - [ ] Push consolidado de `8df5360`, `4cd7eea`, `e5fa027`, `efffe83`,
       `8f13e04`, `a9e4cf9`, `3a4b960`, `c816eb9`, `2fcd96b`, `d07a81d`,
-      `a1e384a` y `ce634d1` (los commits de Empaque/SAP-sync de esta
-      sesión) una vez Jonathan dé luz verde.
+      `a1e384a`, `ce634d1`, `ede5b63` y `3f4796d` (los commits de
+      Empaque/SAP-sync de esta sesión) una vez Jonathan dé luz verde.
 - [ ] Deploy a staging de todo el bloque 2 tras el push.
 - [ ] Pendientes de UAT no abordados en esta sesión (según la descripción
       del usuario — el archivo fuente `PENDIENTES_UAT_2026-07-28.md` no se
