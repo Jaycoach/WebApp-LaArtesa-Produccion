@@ -76,6 +76,12 @@ def main():
                     "itemCode": item_code,
                     "itemName": item_name,
                     "tipoMasa": tipo_masa,
+                    # A propósito SIN fallback por nombre (ver _sap_paquetes.py):
+                    # esto alimenta sap_articulos, la fuente de verdad de master
+                    # data para el backfill de productos_por_masa. Adivinar por
+                    # nombre aquí ocultaría los productos con UDF real sin
+                    # configurar en SAP en vez de dejarlos visibles como
+                    # pendientes de confirmar con Diana.
                     "salesQtyPerPack": float(sales_qty_per_pack) if sales_qty_per_pack is not None else 1,
                     "gramaje": float(gramaje) if gramaje is not None else 0,
                     "multiploDivisor": round(float(multiplo_divisor)) if multiplo_divisor is not None else 0,

@@ -44,6 +44,30 @@ function aplicarFallbacksAtributos(itemCode, { tamanio, forma, pesoMasaDividida,
   return { tamanio, forma, pesoMasaDividida, multiploDivisor };
 }
 
+// Resuelve unidades_por_paquete (paquete SAP, ex "SalPackUn") a partir del
+// UDF U_JZ_PanesPorBolsa, con el mismo fallback que ya se usaba disperso en
+// varios puntos del código (regex " X<N>" sobre el nombre del producto) y
+// default 1 si ninguno aplica. Se resuelve UNA sola vez aquí, en el punto de
+// lectura desde SAP del flujo de sincronización de OV (getArticulosInfo /
+// getDatosParaSincronizacion) — los consumidores del dato ya persistido en
+// productos_por_masa.unidades_por_paquete no deberían necesitar recalcular
+// este fallback.
+// IMPORTANTE: NO se aplica en getArticulosConTipoMasa (BOM-sync, alimenta
+// sap_articulos) a propósito — sap_articulos se usa como fuente de verdad de
+// master data para el backfill de productos_por_masa (ver sesión
+// 2026-08-20 sección 3.5/3.6), y adivinar por nombre ahí "arreglaría"
+// silenciosamente los 5 productos con conflicto/ausencia real de UDF en SAP
+// (PANPAQ13, PANPAQ11, PANPAQ05, PANPAQ26, PANPAQ20) sin que Diana confirme
+// el valor correcto primero.
+function resolverUnidadesPorPaquete(itemCode, itemName, udfPanesPorBolsa) {
+  const udf = Number(udfPanesPorBolsa);
+  if (udf > 0) return udf;
+  const m = (itemName || '').match(/ X ?(\d+)/i);
+  if (m) return parseInt(m[1], 10);
+  logger.warn(`SAP: ${itemCode} sin U_JZ_PanesPorBolsa y sin patrón "X<N>" en el nombre — fallback a 1`);
+  return 1;
+}
+
 class SAPService {
   constructor() {
     this.baseURL = config.sap.url;
@@ -521,7 +545,7 @@ class SAPService {
         });
         resultado[item.ItemCode] = {
           itemName:            item.ItemName,
-          salesQtyPerPackUnit: item.U_JZ_PanesPorBolsa || 1,
+          salesQtyPerPackUnit: resolverUnidadesPorPaquete(item.ItemCode, item.ItemName, item.U_JZ_PanesPorBolsa),
           tipoMasa:            item.U_JZ_Tipos_Masa || 'SIN_CLASIFICAR',
           gramaje:             item.SalesUnitWeight1 || 0,
           multiploDivisor:     atributos.multiploDivisor,
@@ -574,9 +598,9 @@ class SAPService {
 
       const unidadesPedidas = linea.quantity;
       const descripcion = art.itemName || linea.itemDescription || '';
-      const unidadesPorPaquete = (art.salesQtyPerPackUnit && art.salesQtyPerPackUnit > 1)
-        ? art.salesQtyPerPackUnit
-        : (() => { const m = descripcion.match(/ X ?(\d+)/i); return m ? parseInt(m[1]) : 1; })();
+      // Ya resuelto en getArticulosInfo (UDF → regex sobre nombre → default 1) —
+      // no se recalcula aquí.
+      const unidadesPorPaquete = art.salesQtyPerPackUnit;
       const cantidadPaquetes = unidadesPedidas;
 
       const gramaje = art.gramaje || 0;
@@ -694,6 +718,9 @@ class SAPService {
         itemCode:        item.ItemCode,
         itemName:        item.ItemName,
         tipoMasa:        item.U_JZ_Tipos_Masa,
+        // A propósito SIN resolverUnidadesPorPaquete/fallback por nombre — ver
+        // comentario junto a esa función. Esto alimenta sap_articulos, fuente
+        // de verdad de master data para el backfill de productos_por_masa.
         salesQtyPerPack: item.U_JZ_PanesPorBolsa || 1,
         gramaje:         item.SalesUnitWeight1 || 0,
         multiploDivisor: atributos.multiploDivisor,

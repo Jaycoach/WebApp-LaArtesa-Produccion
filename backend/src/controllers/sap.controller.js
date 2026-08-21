@@ -1261,12 +1261,9 @@ const sincronizarDesdeOV = async (req, res, next) => {
             prod.unidadesPedidas,                                   // $5 unidades_pedidas = paquetes
             kiloPorItemCode[prod.itemCode] * prod.unidadesPedidas, // $6 kilos
             prod.itemCode,                                          // $7 sap_item_code
-            (() => {
-              // Usar dato de SAP si viene > 1, si no extraer del nombre (ej: "X 4", "X6", "X 20")
-              if (prod.unidadesPorPaquete && prod.unidadesPorPaquete > 1) return prod.unidadesPorPaquete;
-              const m = prod.descripcion?.match(/ X ?(\d+)/i);
-              return m ? parseInt(m[1]) : 1;
-            })(),                                                   // $8 unidades_por_paquete
+            // Ya resuelto en sap.service.js/hana_ov_sync.py (UDF → regex sobre
+            // nombre → default 1) — no se recalcula aquí.
+            prod.unidadesPorPaquete || 1,                           // $8 unidades_por_paquete
             prod.cantidadPaquetes,                                  // $9
             prod.docEntry,                                          // $10
             String(prod.docNum),                                    // $11

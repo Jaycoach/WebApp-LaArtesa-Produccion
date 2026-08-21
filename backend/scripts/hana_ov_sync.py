@@ -10,8 +10,8 @@ Salida: JSON por stdout, lista de productos con el mismo shape que devuelve
 import sys
 import os
 import json
-import re
 from hdbcli import dbapi
+from _sap_paquetes import resolver_unidades_por_paquete
 
 ITEMS_EXCLUIDOS = {'PASPT12'}
 
@@ -95,7 +95,7 @@ def main():
             articulos[item_code] = {
                 'itemName': item_name,
                 'tipoMasa': tipo_masa,
-                'salPackUn': float(panes_por_bolsa) if panes_por_bolsa is not None else 1,
+                'unidadesPorPaquete': resolver_unidades_por_paquete(item_code, item_name, panes_por_bolsa),
                 'gramaje': float(sweight1) if sweight1 is not None else 0,
                 'multiploDivisor': round(float(multiplo)) if multiplo is not None else 0,
                 'tamanio': tamanio or None,
@@ -116,11 +116,8 @@ def main():
 
             unidades_pedidas = linea['quantity']
             descripcion = art['itemName'] or linea['itemDescription'] or ''
-            if art['salPackUn'] and art['salPackUn'] > 1:
-                unidades_por_paquete = art['salPackUn']
-            else:
-                m = re.search(r' X ?(\d+)', descripcion, re.IGNORECASE)
-                unidades_por_paquete = int(m.group(1)) if m else 1
+            # Ya resuelto al construir "articulos" (UDF → regex sobre nombre → default 1).
+            unidades_por_paquete = art['unidadesPorPaquete']
 
             gramaje = art['gramaje']
             kilos_pedidos = gramaje * unidades_pedidas
