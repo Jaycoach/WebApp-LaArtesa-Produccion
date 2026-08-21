@@ -106,11 +106,13 @@ export const useSincronizarBOM = () => {
   });
 };
 /**
- * Hook para sincronizar Inventario y Lotes completos desde SAP
+ * Hook para sincronizar Inventario y Lotes desde SAP. Sin argumento: corrida
+ * completa. Con un código (o varios separados por coma): acota el dato
+ * maestro de productos terminados a esos ítems puntuales.
  */
 export const useSincronizarInventarioMP = () => {
   return useMutation({
-    mutationFn: () => masasService.sincronizarInventarioMP(),
+    mutationFn: (items?: string) => masasService.sincronizarInventarioMP(items),
     onError: (error: any) => {
       if (error?.response?.status === 409) {
         return {

@@ -65,15 +65,21 @@ export const SincronizarSAP: React.FC = () => {
 
   const handleSyncInventario = async () => {
     try {
-      await sincronizarInventarioMutation.mutateAsync();
+      await sincronizarInventarioMutation.mutateAsync(undefined);
     } catch {
       // error manejado por isError
     }
   };
 
-  // Un solo botón, un solo clic: actualiza receta+atributos Y stock+lotes de un
-  // producto puntual, en secuencia. Reutiliza las mismas dos acciones que ya
-  // existen (BOM con filtro, lotes con filtro) sin duplicar lógica de backend.
+  // Un solo botón, un solo clic: actualiza receta, atributos, stock y lotes
+  // de un producto puntual, en secuencia. Reutiliza tres acciones que ya
+  // existen (BOM con filtro para receta, Inventario con filtro para atributos
+  // de sap_articulos, lotes con filtro) sin duplicar lógica de backend.
+  // Hasta el 2026-08-21, la parte de "atributos" llamaba a sincronizarBOM,
+  // que desde el refactor de dueño único de sap_articulos (3f4796d, 3.9) ya
+  // no escribe esa tabla — el botón nunca actualizaba tamaño/forma/días de
+  // vencimiento/etc. pese a decirlo. Ahora usa sincronizarInventarioMP
+  // filtrado, el único flujo que sí escribe sap_articulos.
   const handleSyncItemPuntual = async () => {
     if (!itemPuntual.trim()) return;
     setResultadoItemPuntual(null);
@@ -83,24 +89,38 @@ export const SincronizarSAP: React.FC = () => {
       .then(() => true)
       .catch(() => false);
 
+    const atributosOk = await sincronizarInventarioMutation
+      .mutateAsync(itemPuntual.trim())
+      .then(() => true)
+      .catch(() => false);
+
     const lotesOk = await sincronizarLotesItemMutation
       .mutateAsync(itemPuntual.trim())
       .then(() => true)
       .catch(() => false);
 
-    if (bomOk && lotesOk) {
+    if (bomOk && atributosOk && lotesOk) {
       setResultadoItemPuntual({ ok: true, mensaje: `${itemPuntual.trim()} actualizado: receta, atributos, stock y lotes.` });
-    } else if (bomOk && !lotesOk) {
-      setResultadoItemPuntual({ ok: false, mensaje: 'Receta y atributos actualizados, pero falló la parte de stock/lotes.' });
-    } else if (!bomOk && lotesOk) {
-      setResultadoItemPuntual({ ok: false, mensaje: 'Stock y lotes actualizados, pero falló la parte de receta/atributos.' });
     } else {
-      setResultadoItemPuntual({ ok: false, mensaje: 'No se pudo actualizar el producto. Verifica el código e intenta de nuevo.' });
+      const fallos: string[] = [];
+      if (!bomOk) fallos.push('receta');
+      if (!atributosOk) fallos.push('atributos');
+      if (!lotesOk) fallos.push('stock/lotes');
+      const exitos: string[] = [];
+      if (bomOk) exitos.push('receta');
+      if (atributosOk) exitos.push('atributos');
+      if (lotesOk) exitos.push('stock/lotes');
+      setResultadoItemPuntual({
+        ok: false,
+        mensaje: exitos.length > 0
+          ? `Actualizado: ${exitos.join(', ')}. Falló: ${fallos.join(', ')}.`
+          : 'No se pudo actualizar el producto. Verifica el código e intenta de nuevo.',
+      });
     }
   };
 
   const itemPuntualPendiente =
-    sincronizarBOMMutation.isPending || sincronizarLotesItemMutation.isPending;
+    sincronizarBOMMutation.isPending || sincronizarInventarioMutation.isPending || sincronizarLotesItemMutation.isPending;
 
   const errorInventarioMensaje = (sincronizarInventarioMutation.error as any)?.response?.status === 409
     ? 'Ya hay una sincronización de inventario/lotes en curso. Intenta nuevamente en unos minutos.'
@@ -178,22 +198,26 @@ export const SincronizarSAP: React.FC = () => {
 
           <Button
             variant="primary"
-            isLoading={sincronizarInventarioMutation.isPending}
+            isLoading={sincronizarInventarioMutation.isPending && !itemPuntual.trim()}
             disabled={algunaSincronizacionActiva}
             onClick={handleSyncInventario}
           >
-            {sincronizarInventarioMutation.isPending
+            {sincronizarInventarioMutation.isPending && !itemPuntual.trim()
               ? `Sincronizando... (${formatearTiempo(segundosTranscurridos)})`
               : 'Sincronizar Inventario y Lotes'}
           </Button>
 
-          {sincronizarInventarioMutation.isSuccess && sincronizarInventarioMutation.data && (
+          {/* Igual que en la tarjeta 1: sincronizarInventarioMutation ahora también
+              se dispara desde el flujo puntual (tarjeta 3) — se guarda con
+              !itemPuntual.trim() para no mostrar "materias primas sincronizadas"
+              cuando en realidad fue un sync de un solo producto. */}
+          {sincronizarInventarioMutation.isSuccess && sincronizarInventarioMutation.data && !itemPuntual.trim() && (
             <ul className="mt-2 text-sm text-green-700 space-y-0.5">
               <li>✓ {sincronizarInventarioMutation.data.sincronizados} materias primas sincronizadas</li>
               <li>✓ {sincronizarInventarioMutation.data.lotes_sincronizados} lotes sincronizados</li>
             </ul>
           )}
-          {sincronizarInventarioMutation.isError && (
+          {sincronizarInventarioMutation.isError && !itemPuntual.trim() && (
             <p className="mt-2 text-sm text-red-800">✗ {errorInventarioMensaje}</p>
           )}
         </div>

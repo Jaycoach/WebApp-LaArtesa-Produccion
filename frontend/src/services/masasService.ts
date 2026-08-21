@@ -39,11 +39,16 @@ export const masasService = {
     return response.data!;
   },
   /**
-   * Sincronizar Inventario y Lotes completos (todas las materias primas del BOM)
+   * Sincronizar Inventario y Lotes. Sin `items`: completo (todas las materias
+   * primas del BOM + dato maestro de los ~204 productos terminados). Con
+   * `items`: acota el dato maestro de productos terminados (sap_articulos) a
+   * esos códigos puntuales — stock/lotes de materia prima siguen corriendo
+   * completos igual (sesión 2026-08-21).
    */
-  sincronizarInventarioMP: async (): Promise<SincronizacionInventarioMPResponse> => {
+  sincronizarInventarioMP: async (items?: string): Promise<SincronizacionInventarioMPResponse> => {
     const response = await apiService.post<SincronizacionInventarioMPResponse>(
-      API_CONFIG.ENDPOINTS.SAP.SINCRONIZAR_INVENTARIO_MP
+      API_CONFIG.ENDPOINTS.SAP.SINCRONIZAR_INVENTARIO_MP,
+      items ? { items } : undefined
     );
     return response.data!;
   },
