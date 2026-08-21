@@ -390,11 +390,12 @@ haya corregido en SAP. Ver sección 3.6 para el diagnóstico completo
 
 ### 3.6 — Diagnóstico real con HANA: NO es `SalPackUn` (ya corregido hace 10 días) — falta propagación a masas existentes
 
-**Estado: función de fallback centralizada — commit `3a4b960` (local, sin
-push). SELECT de verificación para backfill — commit `c816eb9` (local, sin
-push, UPDATE comentado, no ejecutado). 5 casos de master data — reportados,
-no tocados. Validación real (paso 6) — pendiente, sin acceso a HANA/staging
-en este entorno.**
+**Estado: función de fallback centralizada en el punto de escritura —
+commit `3a4b960`. Las 6 copias de lectura migradas al helper compartido —
+commit `d07a81d`. SELECT de verificación para backfill — commit `c816eb9`
+(UPDATE comentado, no ejecutado). Todos locales, sin push. 5 casos de
+master data — reportados, no tocados. Validación real (paso 6) —
+pendiente, sin acceso a HANA/staging en este entorno.**
 
 - **Validación real con HANA (aportada por Jonathan, no por esta sesión —
   este entorno no tiene credenciales HANA)**: `OITM.SalPackUn` es `1` para
@@ -448,13 +449,39 @@ en este entorno.**
   ocultaría silenciosamente los 5 casos de conflicto/gap real (ver abajo)
   sin que Diana los confirme primero. Documentado inline en ambos
   archivos.
-- **Fuera de alcance, reportado en vez de decidido**: NO se tocó la
-  derivación de fallback en `fases.controller.js`, `pesaje.controller.js`,
-  `masas.controller.js` ni `DivisionMasa.tsx` (cada uno recalcula su
-  propio `upqDe`/`upq` a partir de `unidades_por_paquete` + nombre). Mover
-  esos consumidores a confiar ciegamente en la columna ya resuelta es un
-  refactor más grande que toca cálculo de División/Pesaje en producción —
-  amerita revisión propia, no se incluyó aquí sin aprobación explícita.
+- **Corrección (mismo día, turno posterior) — commit `d07a81d`**: Jonathan
+  señaló correctamente que dejar `fases.controller.js`,
+  `pesaje.controller.js` y `DivisionMasa.tsx` con su propia copia del
+  fallback (cada uno recalculando `upqDe`/`upq`/`xPaq` ad-hoc) habría sido
+  una 5ª/6ª copia en vez de una reducción real. Se migraron las **6**
+  copias encontradas (4 en `fases.controller.js` — no 1, el grep inicial
+  submuestreó; 1 en `pesaje.controller.js`; 2 en `DivisionMasa.tsx`) a un
+  helper compartido — `backend/src/utils/unidadesPorPaquete.js` y
+  `frontend/src/utils/unidadesPorPaquete.ts`, ambos `upqDesdeProducto`.
+  Cero cambio de comportamiento: misma fórmula, mismo umbral, mismo regex,
+  solo se dejó de copiar y pegar (confirmado con `tsc --noEmit` y
+  `node -c` en los 6 archivos tocados).
+  **A propósito NO se creó una única función panlingüística** — el umbral
+  es deliberadamente distinto al de `resolverUnidadesPorPaquete` (write-
+  time, `sap.service.js`): `upqDesdeProducto` confía en el valor
+  persistido solo si es `> 1` (porque puede seguir arrastrando el bug de
+  3.5/3.6 hasta que corra el backfill), mientras que
+  `resolverUnidadesPorPaquete` confía en el UDF fresco de SAP con
+  cualquier valor `> 0`. Unificar ambos umbrales sería incorrecto —
+  reintroduciría desconfianza sobre un dato que ya se sabe bueno en el
+  momento del sync, o al revés, confiaría ciegamente en un "1" que puede
+  seguir siendo el bug histórico.
+  **`sap.controller.js` no necesitó ningún cambio adicional**: desde el
+  commit anterior (`3a4b960`) ya confía directo en
+  `prod.unidadesPorPaquete` (resuelto río arriba, sin recalcular) — no es
+  una 7ª copia, es el punto de escritura que consume el valor ya resuelto.
+  **Hallazgo adicional, NO tocado**: `masas.controller.js:~402` (ajuste de
+  delta +2 paquetes en aprobación de masa) tiene una variante más simple
+  (`Math.max(1, unidades_por_paquete || 1)`, sin fallback por nombre) que
+  el usuario no mencionó entre las 4 copias conocidas. Unificarla con
+  `upqDesdeProducto` cambiaría comportamiento real de ajuste de pesaje en
+  producción (no es deduplicación pura) — queda reportado para revisión
+  aparte, no incluido en este commit.
 - **Backfill a masas existentes (commit `c816eb9`,
   `backend/database/fix-unidades-por-paquete-productos_por_masa.sql`)**:
   dos `SELECT` de verificación (conteo + detalle fila por fila) listos
@@ -510,8 +537,9 @@ en este entorno.**
       configurar) y `PANPAQ20` (UDF=1 vs. nombre "X3", conflicto activo) —
       no tocar por código hasta esa confirmación.
 - [ ] Push consolidado de `8df5360`, `4cd7eea`, `e5fa027`, `efffe83`,
-      `8f13e04`, `a9e4cf9`, `3a4b960` y `c816eb9` (los commits de Empaque/
-      SAP-sync de esta sesión) una vez Jonathan dé luz verde.
+      `8f13e04`, `a9e4cf9`, `3a4b960`, `c816eb9`, `2fcd96b` y `d07a81d`
+      (los commits de Empaque/SAP-sync de esta sesión) una vez Jonathan dé
+      luz verde.
 - [ ] Deploy a staging de todo el bloque 2 tras el push.
 - [ ] Pendientes de UAT no abordados en esta sesión (según la descripción
       del usuario — el archivo fuente `PENDIENTES_UAT_2026-07-28.md` no se
