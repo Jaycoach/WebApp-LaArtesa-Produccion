@@ -475,13 +475,56 @@ pendiente, sin acceso a HANA/staging en este entorno.**
   commit anterior (`3a4b960`) ya confía directo en
   `prod.unidadesPorPaquete` (resuelto río arriba, sin recalcular) — no es
   una 7ª copia, es el punto de escritura que consume el valor ya resuelto.
-  **Hallazgo adicional, NO tocado**: `masas.controller.js:~402` (ajuste de
-  delta +2 paquetes en aprobación de masa) tiene una variante más simple
-  (`Math.max(1, unidades_por_paquete || 1)`, sin fallback por nombre) que
-  el usuario no mencionó entre las 4 copias conocidas. Unificarla con
-  `upqDesdeProducto` cambiaría comportamiento real de ajuste de pesaje en
-  producción (no es deduplicación pura) — queda reportado para revisión
-  aparte, no incluido en este commit.
+  **Hallazgo adicional, NO tocado — 7ª variante, decisión final tomada por
+  Jonathan con el código a la vista**: `masas.controller.js:391-425`
+  (dentro de `aprobarMasaCore`, disparada por `PATCH /api/masas/:id/aprobar`
+  y `/masas/aprobar-bulk` — botón "Aprobar"/"Aprobar seleccionadas" de
+  Planificación, solo `admin`/`supervisor`). Usa
+  `Math.max(1, Number(prod.unidades_por_paquete) || 1)` — sin fallback por
+  nombre — para calcular el delta automático de +2 paquetes que se aplica
+  una sola vez por producto al aprobar (guardado por
+  `WHERE delta_ajuste IS NULL`), y ese resultado se escribe en
+  `unidades_programadas`/`kilos_programados`/`cantidad_paquetes`/
+  `unidades_ajustadas`/`unidades_excedente` de `productos_por_masa`.
+  Inmediatamente después, `recalcularTotalesMasa` (línea 458) suma
+  `gramaje_unitario × unidades_ajustadas` de todos los productos y escribe
+  `masas_produccion.total_kilos_base`/`total_kilos_con_merma` — es decir,
+  este valor determina cuántos kilos de masa se amasan realmente, y
+  alimenta el prorrateo de costos de `confirmarPesaje` (comentario propio
+  del código, línea 431-432).
+
+  **DECISIÓN: NO migrar al helper centralizado.** Arquitectónicamente
+  correcta tal como está — lee `unidades_por_paquete` ya resuelto de
+  `productos_por_masa` (la fuente de verdad, escrita en el sync vía
+  `resolverUnidadesPorPaquete`), sin necesidad de reimplementar el
+  fallback por nombre: ese fallback pertenece al punto de escritura, no a
+  cada consumidor. `Math.max(1, ... || 1)` es la protección correcta para
+  un consumidor downstream que confía en el dato ya sincronizado.
+
+  **CONDICIÓN BLOQUEANTE**: precisamente porque este punto NO tiene red de
+  seguridad por nombre (a diferencia de los otros 6 ya migrados), el
+  backfill de propagación (Parte A / sección 3.6 "Backfill a masas
+  existentes" abajo — el `UPDATE` de
+  `fix-unidades-por-paquete-productos_por_masa.sql`, todavía sin correr)
+  **debe** ejecutarse y confirmarse **antes** de aprobar cualquier masa
+  nueva que contenga alguno de los 97 `sap_item_code` afectados. Si una
+  masa se aprueba con `unidades_por_paquete = 1` sin resolver,
+  `aprobarMasaCore` lo hornea permanentemente en `kilos_programados`/
+  costeo — sin ningún mecanismo que lo detecte después.
+
+  **Pendiente de confirmar en staging (sin acceso a esa DB en este
+  entorno — credenciales del `.env` del repo ya no autentican contra el
+  puerto 5433, que ahora sí responde; el usuario corre las queries por su
+  SSH)**:
+  1. Si el `UPDATE` del backfill ya corrió (`SELECT count(*)` de filas
+     `productos_por_masa.unidades_por_paquete <> sap_articulos.sales_qty_per_pack`
+     — si da `0`, ya corrió o nunca hizo falta).
+  2. Si existen masas en `estado` distinto de `PLANIFICACION`/`PENDIENTE`/
+     `CANCELADA` (es decir, ya aprobadas o más adelante) con productos que
+     todavía muestran ese desajuste — esas quedarían **horneadas con el
+     dato viejo**. **No se corrigen retroactivamente sin decisión
+     explícita** (mismo criterio ya usado en el fix de costeo 3.2) — solo
+     se reportan si aparecen.
 - **Backfill a masas existentes (commit `c816eb9`,
   `backend/database/fix-unidades-por-paquete-productos_por_masa.sql`)**:
   dos `SELECT` de verificación (conteo + detalle fila por fila) listos
@@ -510,6 +553,12 @@ pendiente, sin acceso a HANA/staging en este entorno.**
   contra el valor real de HANA.
 
 ## 4. Próximos pasos
+
+> ⚠️ **BLOQUEANTE (3.6)**: NO aprobar en staging/producción ninguna masa
+> nueva que contenga alguno de los 97 `sap_item_code` afectados hasta que
+> el backfill de `fix-unidades-por-paquete-productos_por_masa.sql` corra y
+> se confirme. Ver detalle y las 2 queries de verificación en la sección
+> 3.6 ("7ª variante").
 
 - [x] Implementar el fix 3.1 (bloqueo completar sin unidades empacadas) —
       hecho, app (`e5fa027`) + DB (`efffe83`, migración 059).
