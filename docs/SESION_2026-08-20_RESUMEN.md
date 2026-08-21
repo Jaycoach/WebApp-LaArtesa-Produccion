@@ -552,13 +552,102 @@ pendiente, sin acceso a HANA/staging en este entorno.**
   `UPDATE`, correrlo y re-confirmar `PANPAQ186`/`PANPAQ19`/`PANPAQ03`
   contra el valor real de HANA.
 
+### 3.7 — `sap_articulos.sales_qty_per_pack` guardaba el valor crudo, no el resuelto — regresión real evitada a tiempo para el backfill
+
+**Estado: fix aplicado — commit `ce634d1` (local, sin push). Paso 5
+(validación con datos reales) documentado abajo, pendiente de que
+Jonathan lo corra — este entorno no tiene acceso a HANA/staging.**
+
+- **Validado por Jonathan con datos reales de staging tras un sync
+  real**: el fix de columna (3.6, `U_JZ_PanesPorBolsa` en vez de
+  `SalPackUn`) funciona — `PANPAQ03` trae `10`, `PANPAQ19` trae `12`,
+  exacto. Pero `PANPAQ13` y `PANPAQ26` traían `1.0000` en
+  `sap_articulos`, y ahí la historia se dividía:
+  - `PANPAQ13`: `1` es correcto — uno de los 5 casos con gap real de
+    master data (sin patrón en el nombre tampoco).
+  - `PANPAQ26` ("PAN ARTELLANO MED X 4 CONG"): `1` es **incorrecto** — el
+    nombre sí tiene el patrón " X 4", y `productos_por_masa` de masas
+    viejas **ya tenía el 4 correcto** para este producto, resuelto en su
+    momento por el fallback por nombre que sí corre en
+    `sincronizarDesdeOV`. `sap_articulos` quedándose en `1` era la
+    inconsistencia real — y de correr el backfill de 3.6 tal como estaba
+    contra `sap_articulos`, ese `1` habría **sobrescrito el 4 correcto**
+    en `productos_por_masa` (regresión real, evitada porque el backfill
+    sigue bloqueado a propósito).
+- **Paso 1 (inventario completo, grep exhaustivo de `sales_qty_per_pack`
+  en todo `backend/src`/`backend/scripts`) — solo 2 escritores**:
+  `sincronizarBOM` ([sap.controller.js:1681-1709](../backend/src/controllers/sap.controller.js))
+  y `sincronizarInventarioMP` paso 3
+  ([sap.controller.js:2042-2065](../backend/src/controllers/sap.controller.js)),
+  ambos escribiendo `articulo.salesQtyPerPack` proveniente de
+  `sapService.getArticulosConTipoMasa()` (Service Layer, siempre para el
+  segundo; según `SAP_READ_MODE` para el primero) o
+  `getArticulosConTipoMasaConBOMHANA()` (wrapper de `hana_bom_completo.py`,
+  que no transforma el valor).
+- **Paso 2/causa raíz real**: ninguno de los 3 puntos de cómputo usaba
+  `resolverUnidadesPorPaquete`/`resolver_unidades_por_paquete` (ya
+  existentes, sin reimplementar). Peor: `getArticulosConTipoMasa`
+  (`sap.service.js`) y `hana_bom_completo.py` **coalescían NULL/0 a `1`
+  ANTES** de que el fallback pudiera intentarse
+  (`item.U_JZ_PanesPorBolsa || 1` / `... if ... is not None else 1`) —
+  la función nunca llegaba a ver que el UDF venía vacío, así que nunca
+  probaba el patrón del nombre.
+- **Fix (commit `ce634d1`)**: se pasa el valor **crudo** de SAP (puede
+  ser `null`/`undefined`/`0`) directo a las funciones ya existentes, sin
+  coalescer antes. Cero cambio en la lógica/umbral de
+  `resolverUnidadesPorPaquete` — sigue siendo "SAP trae un valor real
+  (distinto de vacío/NULL/0) se confía siempre; si no, patrón del
+  nombre; si no, 1".
+- **Desvío propio en este mismo turno, documentado con transparencia**:
+  antes de encontrar la causa real, se intentó agregar un parámetro de
+  umbral (`umbralUdf: 1`) a `resolverUnidadesPorPaquete`, asumiendo
+  erróneamente que el UDF crudo de `PANPAQ26` era literalmente el número
+  `1` (en vez de vacío/NULL/0 coalescido a `1` por el bug real). Verificado
+  con datos de prueba: ese umbral SÍ arreglaba `PANPAQ26` pero **también
+  resolvía automáticamente `PANPAQ20`** (UDF=1 real según el reporte
+  original, nombre "X3" en conflicto activo) — exactamente lo que
+  Jonathan pidió no hacer sin confirmar con Diana. Se revirtió por
+  completo antes de commitear; el commit final no tiene ese parámetro.
+- **Paso 4 confirmado explícitamente, no asumido**: `hana_ov_sync.py` ya
+  usaba `resolver_unidades_por_paquete` desde 3.6 (sin cambios este
+  turno); `hana_bom_completo.py` ahora también, agregado en este fix. La
+  resolución queda centralizada en ambos scripts Python (no en el lado
+  Node) — el JS solo recibe y pasa el valor ya resuelto.
+- **Verificación funcional (node/python, sin acceso a HANA real)**: con
+  el UDF crudo simulado según cada caso reportado —
+  `PANPAQ26` (raw `null`/`0`) → `4`; `PANPAQ20` (raw `1` real) → `1`, sin
+  cambios; `PANPAQ13` (raw `null`, sin patrón) → `1`, sin cambios;
+  `PANPAQ03` (raw `10`) → `10`, sin cambios.
+- **Paso 5 — validación con datos reales, pendiente de Jonathan (esta
+  sesión no tiene credenciales HANA/staging)**:
+  1. Correr "Sincronizar Inventario y Lotes" (`sincronizarInventarioMP`)
+     en staging — o `sincronizarBOM` si `SAP_READ_MODE=hana` está
+     activo, para ejercitar también `hana_bom_completo.py`.
+  2. Confirmar con SQL:
+     ```sql
+     SELECT item_code, item_name, sales_qty_per_pack, updated_at
+     FROM sap_articulos
+     WHERE item_code IN ('PANPAQ26', 'PANPAQ13', 'PANPAQ03', 'PANPAQ19');
+     ```
+     Esperado: `PANPAQ26` pasa de `1.0000` a `4.0000`; `PANPAQ13` sigue
+     en `1.0000` (correcto, no tocar); `PANPAQ03`/`PANPAQ19` siguen en
+     `10.0000`/`12.0000` (sin cambios, ya estaban bien).
+- **Backfill de Parte A (3.6, paso 4) sigue bloqueado** — no se tocó en
+  este turno. Con `sap_articulos` ya corrigiéndose hacia adelante en cada
+  sync, falta que Jonathan valide el paso 5 antes de destrabar el
+  backfill hacia `productos_por_masa`.
+
 ## 4. Próximos pasos
 
-> ⚠️ **BLOQUEANTE (3.6)**: NO aprobar en staging/producción ninguna masa
-> nueva que contenga alguno de los 97 `sap_item_code` afectados hasta que
-> el backfill de `fix-unidades-por-paquete-productos_por_masa.sql` corra y
-> se confirme. Ver detalle y las 2 queries de verificación en la sección
-> 3.6 ("7ª variante").
+> ⚠️ **BLOQUEANTE (3.6/3.7)**: NO aprobar en staging/producción ninguna
+> masa nueva que contenga alguno de los 97 `sap_item_code` afectados hasta
+> que (1) el Paso 5 de 3.7 confirme que `sap_articulos` ya guarda el valor
+> resuelto (no el crudo) y (2) el backfill de
+> `fix-unidades-por-paquete-productos_por_masa.sql` corra y se confirme.
+> Antes del fix de 3.7, correr el backfill contra `sap_articulos` habría
+> sido una regresión real (sobrescribir con `1` valores ya correctos como
+> `PANPAQ26 = 4`) — motivo por el que sigue sin correrse. Ver detalle y
+> las queries de verificación en las secciones 3.6 ("7ª variante") y 3.7.
 
 - [x] Implementar el fix 3.1 (bloqueo completar sin unidades empacadas) —
       hecho, app (`e5fa027`) + DB (`efffe83`, migración 059).
@@ -581,14 +670,22 @@ pendiente, sin acceso a HANA/staging en este entorno.**
 - [ ] 3.6 — Jonathan debe confirmar el criterio de exclusión del `UPDATE`
       (¿solo `estado = 'COMPLETADA'`, o también `fase_actual = 'EMPAQUE'`
       sin `COMPLETADA`?) antes de correrlo.
-- [ ] 3.6 — Diana debe confirmar el valor correcto de `U_JZ_PanesPorBolsa`
-      en SAP para `PANPAQ13`, `PANPAQ11`, `PANPAQ05`, `PANPAQ26` (UDF sin
-      configurar) y `PANPAQ20` (UDF=1 vs. nombre "X3", conflicto activo) —
-      no tocar por código hasta esa confirmación.
+- [x] ~~3.6 — Diana debe confirmar `PANPAQ26`~~ — **corregido en 3.7**:
+      no era un gap real de master data, era que `sap_articulos` guardaba
+      el UDF vacío/0 coalescido a `1` antes de intentar el fallback por
+      nombre. Ya resuelto por código (commit `ce634d1`), sin necesidad de
+      Diana. Quedan solo 4 pendientes de Diana: `PANPAQ13`, `PANPAQ11`,
+      `PANPAQ05` (UDF sin configurar, sin patrón en el nombre tampoco) y
+      `PANPAQ20` (UDF=1 real vs. nombre "X3", conflicto activo) — no
+      tocar por código hasta esa confirmación.
+- [ ] 3.7 — correr en staging real (Paso 5, sesión con SSH): "Sincronizar
+      Inventario y Lotes" (o `sincronizarBOM` si `SAP_READ_MODE=hana`) y
+      confirmar con el `SELECT` de la sección 3.7 que `PANPAQ26` pasa de
+      `1.0000` a `4.0000` en `sap_articulos`, sin tocar `PANPAQ13`.
 - [ ] Push consolidado de `8df5360`, `4cd7eea`, `e5fa027`, `efffe83`,
-      `8f13e04`, `a9e4cf9`, `3a4b960`, `c816eb9`, `2fcd96b` y `d07a81d`
-      (los commits de Empaque/SAP-sync de esta sesión) una vez Jonathan dé
-      luz verde.
+      `8f13e04`, `a9e4cf9`, `3a4b960`, `c816eb9`, `2fcd96b`, `d07a81d`,
+      `a1e384a` y `ce634d1` (los commits de Empaque/SAP-sync de esta
+      sesión) una vez Jonathan dé luz verde.
 - [ ] Deploy a staging de todo el bloque 2 tras el push.
 - [ ] Pendientes de UAT no abordados en esta sesión (según la descripción
       del usuario — el archivo fuente `PENDIENTES_UAT_2026-07-28.md` no se
