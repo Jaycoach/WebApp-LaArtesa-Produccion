@@ -10,6 +10,19 @@ const { sendAprobacionMasaEmail, sendAprobacionMasaBulkEmail } = require('../ser
 const { devolverStockMasa } = require('./pesaje.controller');
 const { simularAjusteDivisorPorGrupo, recalcularTotalesMasa } = require('./fases.controller');
 
+// Etiquetas para el mensaje de bloqueo de aprobación — deben coincidir con
+// CAMPOS_MAESTRO_LABELS en frontend/src/pages/Planificacion/ListaMasas.tsx
+// (mismo criterio, dos capas distintas: backend arma el mensaje de error,
+// frontend arma el badge del listado).
+const CAMPOS_MAESTRO_LABELS = {
+  tamanio: 'tamaño',
+  forma: 'forma',
+  peso_masa_dividida: 'peso de masa dividida',
+  multiplo_divisor: 'múltiplo divisor',
+  sales_qty_per_pack: 'unidades por paquete',
+  dias_vencimiento: 'días de vencimiento',
+};
+
 /**
  * @desc    Obtener masas por fecha
  * @route   GET /api/masas?fecha=YYYY-MM-DD
@@ -353,20 +366,62 @@ const aprobarMasaCore = async (id, userId, opts = {}) => {
   // de ingredientes/notificación de empaque — el resto de la masa avanza igual.
   // requiere_formado (migración 060) queda fuera a propósito de este chequeo, ver
   // migración 061.
+  // Reevalúa en las DOS direcciones (no solo a false) — necesario para que un
+  // reintento de aprobación, después de corregir el dato en SAP y resincronizar
+  // Inventario, refleje el estado real: si no fuera bidireccional, un producto
+  // ya corregido seguiría bloqueado por el intento anterior fallido.
   await db.query(
     `UPDATE productos_por_masa pm
-     SET apto_produccion = false, updated_at = NOW()
-     WHERE pm.masa_id = $1
-       AND (
-         NOT EXISTS (SELECT 1 FROM sap_articulos sa WHERE sa.item_code = pm.sap_item_code)
-         OR EXISTS (
-           SELECT 1 FROM sap_articulos sa
-           WHERE sa.item_code = pm.sap_item_code
-             AND array_length(sa.campos_incompletos, 1) > 0
-         )
-       )`,
+     SET apto_produccion = NOT (
+       NOT EXISTS (SELECT 1 FROM sap_articulos sa WHERE sa.item_code = pm.sap_item_code)
+       OR EXISTS (
+         SELECT 1 FROM sap_articulos sa
+         WHERE sa.item_code = pm.sap_item_code
+           AND array_length(sa.campos_incompletos, 1) > 0
+       )
+     ),
+     updated_at = NOW()
+     WHERE pm.masa_id = $1`,
     [id]
   );
+
+  // Si NINGÚN producto quedó apto, no se puede aprobar la masa — bloquear por
+  // completo en vez de dejarla avanzar a APROBADA sin nada que producir. Bug
+  // real encontrado en sesión de validación (2026-08-21, masa 2025/BAGUETTE):
+  // sin este guard, la masa quedaba APROBADA con total_kilos_base=0 y
+  // "Iniciar Pesaje" fallaba después con un mensaje engañoso ("sin ItemCode
+  // SAP") que no reflejaba la causa real (dato maestro incompleto).
+  const aptosResult = await db.query(
+    `SELECT
+       COUNT(*) FILTER (WHERE pm.apto_produccion = true) AS aptos,
+       json_agg(
+         json_build_object(
+           'producto_nombre', pm.producto_nombre,
+           'sap_item_code', pm.sap_item_code,
+           'campos_incompletos', sa.campos_incompletos
+         )
+       ) FILTER (WHERE pm.apto_produccion = false) AS incompletos
+     FROM productos_por_masa pm
+     LEFT JOIN sap_articulos sa ON sa.item_code = pm.sap_item_code
+     WHERE pm.masa_id = $1`,
+    [id]
+  );
+  const { aptos, incompletos } = aptosResult.rows[0];
+  if (parseInt(aptos, 10) === 0) {
+    const detalle = (incompletos || [])
+      .map(p => {
+        const campos = (p.campos_incompletos || [])
+          .map(c => CAMPOS_MAESTRO_LABELS[c] || c)
+          .join(', ');
+        return `${p.producto_nombre} (${campos || 'sin sincronizar en SAP'})`;
+      })
+      .join('; ');
+    const err = new Error(
+      `No se puede aprobar: ningún producto de la masa tiene dato maestro completo en SAP. Corregir en SAP y resincronizar: ${detalle}`
+    );
+    err.statusCode = 400;
+    throw err;
+  }
 
   // Marcar masa como APROBADA
   await db.query(

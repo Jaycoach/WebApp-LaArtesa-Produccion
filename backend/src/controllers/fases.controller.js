@@ -1167,9 +1167,24 @@ const completarFase = async (req, res, next) => {
       );
 
       if (productosResult.rows.length === 0) {
+        // Defensa en profundidad (2026-08-21): aprobarMasaCore ya bloquea la
+        // aprobación si 0 productos quedan apto_produccion=true, así que este
+        // branch no debería alcanzarse por ese camino — pero si algo se cuela
+        // (dato corregido en SAP entre aprobar y completar, o un llamado que no
+        // pasó por aprobarMasaCore), el mensaje tiene que reflejar la causa
+        // real: "sin ItemCode SAP" es un diagnóstico distinto de "hay ItemCode
+        // pero ninguno tiene dato maestro completo".
+        const totalConItemCode = await db.query(
+          `SELECT COUNT(*) AS total FROM productos_por_masa
+           WHERE masa_id = $1 AND sap_item_code IS NOT NULL AND sap_item_code <> ''`,
+          [masaId]
+        );
+        const hayConItemCode = parseInt(totalConItemCode.rows[0].total, 10) > 0;
         return res.status(400).json({
           success: false,
-          message: 'La masa no tiene productos con ItemCode SAP. Verifique la sincronización de OV.',
+          message: hayConItemCode
+            ? 'Todos los productos de esta masa tienen dato maestro incompleto en SAP — no hay nada apto para producir. Corrija en SAP y vuelva a aprobar la masa.'
+            : 'La masa no tiene productos con ItemCode SAP. Verifique la sincronización de OV.',
         });
       }
 
