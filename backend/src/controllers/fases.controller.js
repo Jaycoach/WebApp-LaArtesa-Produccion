@@ -21,6 +21,7 @@
 const fasesModel = require('../models/fases.model');
 const logger     = require('../utils/logger');
 const db         = require('../database/connection');
+const { upqDesdeProducto } = require('../utils/unidadesPorPaquete');
 
 // ─────────────────────────────────────────────
 // CONSTANTES
@@ -384,9 +385,7 @@ function clasificarClaveAgrupacion(producto, tipoMasa) {
  * @returns {Array<{ productoId, unidadesProgramadasAnteriores, unidadesProgramadasNuevas, deltaPaquetes, clave }>}
  */
 function simularAjusteDivisorPorGrupo(productos, tipoMasa) {
-  const upqDe = (p) => (p.unidades_por_paquete && parseFloat(p.unidades_por_paquete) > 1)
-    ? parseFloat(p.unidades_por_paquete)
-    : (() => { const m = (p.producto_nombre || '').match(/ X ?(\d+)/i); return m ? parseInt(m[1]) : 1; })();
+  const upqDe = (p) => upqDesdeProducto(p.unidades_por_paquete, p.producto_nombre);
 
   const grupos = new Map();
   for (const prod of productos) {
@@ -479,9 +478,7 @@ function simularAjusteDivisorPorGrupo(productos, tipoMasa) {
  * queda como fase aparte si se confirma como necesidad real de negocio.
  */
 function agruparProductosEnTandas(productos, limiteKg, tipoMasa) {
-  const upqDe = (p) => (p.unidades_por_paquete && parseFloat(p.unidades_por_paquete) > 1)
-    ? parseFloat(p.unidades_por_paquete)
-    : (() => { const m = (p.producto_nombre || '').match(/ X ?(\d+)/i); return m ? parseInt(m[1]) : 1; })();
+  const upqDe = (p) => upqDesdeProducto(p.unidades_por_paquete, p.producto_nombre);
 
   const pendientes = productos.map(prod => {
     const upq = upqDe(prod);
@@ -699,9 +696,7 @@ async function distribuirProductosPorTandas(tandas, subMasaIds, qr = db) {
  * Inserta un producto en una sub-masa con las cantidades indicadas.
  */
 async function insertarProductoEnMasa(masaId, prod, unidadesProg, unidadesPedidas, kgPedidos, kgProgramados, qr = db) {
-  const upq = (prod.unidades_por_paquete && parseFloat(prod.unidades_por_paquete) > 1)
-    ? parseFloat(prod.unidades_por_paquete)
-    : (() => { const m = (prod.producto_nombre || '').match(/ X ?(\d+)/i); return m ? parseInt(m[1]) : 1; })();
+  const upq = upqDesdeProducto(prod.unidades_por_paquete, prod.producto_nombre);
   const cantPaquetes = unidadesProg;
 
   // Multiplo_divisor y peso_masa_dividida son atributos del artículo (no cambian al subdividir) —
@@ -1372,9 +1367,7 @@ const completarFase = async (req, res, next) => {
       for (const prod of productosResult.rows) {
         const cantidad = Number(cantidadesDivididasSeguro[prod.id] || 0);
         const requeridoFinal = parseInt(prod.unidades_ajustadas || prod.unidades_programadas);
-        const upqDiv = (prod.unidades_por_paquete && parseFloat(prod.unidades_por_paquete) > 1)
-          ? parseFloat(prod.unidades_por_paquete)
-          : (() => { const m = (prod.producto_nombre || '').match(/ X ?(\d+)/i); return m ? parseInt(m[1]) : 1; })();
+        const upqDiv = upqDesdeProducto(prod.unidades_por_paquete, prod.producto_nombre);
         const panesSugeridos  = parseInt(prod.unidades_pedidas) * upqDiv;
         const excedenteReal   = Math.max(0, cantidad - panesSugeridos);
         const faltante        = Math.max(0, requeridoFinal - cantidad);

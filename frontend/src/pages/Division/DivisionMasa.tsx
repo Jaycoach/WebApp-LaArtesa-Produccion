@@ -6,6 +6,7 @@ import { useCompletarFase } from '../../hooks/useFases';
 import { useMaquinasCorte } from '../../hooks/useConfig';
 import { ModalMO } from '../../components/common/ModalMO';
 import { BarraNavegacionFases } from '../../components/common/BarraNavegacionFases';
+import { upqDesdeProducto } from '../../utils/unidadesPorPaquete';
 
 export const DivisionMasa: React.FC = () => {
   const { masaId } = useParams<{ masaId: string }>();
@@ -83,9 +84,7 @@ export const DivisionMasa: React.FC = () => {
    * Ej: 130 panes, divisor 20 → sugiere 140.
    */
   const getPanesSugeridos = (producto: any): number => {
-    const xSAP = parseFloat(String(producto.unidades_por_paquete || 0));
-    const xNombre = producto.producto_nombre?.match(/ X ?(\d+)/i);
-    const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
+    const xPaq = upqDesdeProducto(producto.unidades_por_paquete, producto.producto_nombre);
     const programadas = parseInt(producto.unidades_programadas || producto.unidades_pedidas || 0);
     const panesBrutos = programadas * xPaq;
     const divisor = parseInt(producto.multiplo_divisor || 0);
@@ -557,9 +556,7 @@ export const DivisionMasa: React.FC = () => {
                             {/* Panes sugeridos — ya redondeados al múltiplo del divisor */}
                             <td className="px-4 py-3 text-right">
                               {(() => {
-                                const xSAP = parseFloat(String(producto.unidades_por_paquete || 0));
-                                const xNombre = producto.producto_nombre?.match(/ X ?(\d+)/i);
-                                const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
+                                const xPaq = upqDesdeProducto(producto.unidades_por_paquete, producto.producto_nombre);
                                 const programadas = parseInt(producto.unidades_programadas || producto.unidades_pedidas || 0);
                                 const panesBrutos = programadas * xPaq;
                                 const panesSugeridosAjustados = getPanesSugeridos(producto);

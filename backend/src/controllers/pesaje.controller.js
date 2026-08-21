@@ -15,6 +15,7 @@ const logger     = require('../utils/logger');
 const sapService    = require('../services/sap.service');
 const { ejecutarSubdivision, simularAjusteDivisorPorGrupo } = require('./fases.controller');
 const { sendPesajeCompletadoEmail } = require('../services/email.service');
+const { upqDesdeProducto } = require('../utils/unidadesPorPaquete');
 
 /**
  * Notifica a correos_empaque al completar pesaje. Fire-and-forget — nunca bloquea.
@@ -212,9 +213,7 @@ const getChecklist = async (req, res, next) => {
       [masaId]
     );
     const productosResumen = productosResult.rows.map(p => {
-      const upq = (p.unidades_por_paquete && parseFloat(p.unidades_por_paquete) > 1)
-        ? parseFloat(p.unidades_por_paquete)
-        : (() => { const m = new RegExp(' X ?(\\d+)', 'i').exec(p.producto_nombre || ''); return m ? parseInt(m[1]) : 1; })();
+      const upq = upqDesdeProducto(p.unidades_por_paquete, p.producto_nombre);
       // Usar unidades_ajustadas (múltiplo del divisor) si aplica, si no unidades_programadas
       const paqAProducir = (parseInt(p.multiplo_divisor) > 0 && parseInt(p.unidades_ajustadas) > 0)
         ? parseInt(p.unidades_ajustadas)
