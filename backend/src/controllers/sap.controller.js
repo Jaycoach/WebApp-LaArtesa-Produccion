@@ -1647,8 +1647,13 @@ const sincronizarTiposMasa = async (req, res, next) => {
 const sincronizarBOM = async (req, res, next) => {
   try {
     // Filtro puntual opcional: { "items": "MP0029,MP0080" } sincroniza solo esos
-    // artículos con TODOS los atributos (tamaño, forma, decoración, tipo de masa),
-    // no solo lotes/inventario como hacía antes sincronizar-lotes-item.
+    // artículos, pero desde 3f4796d (sección 3.9) esta función ya NO escribe
+    // sap_articulos (dato maestro: tamaño/forma/tipo de masa) — sincronizarBOM,
+    // puntual o completo, solo trae la lista de materiales (sap_bom_componentes,
+    // incluye uom/grupo_sap/es_decoracion de los componentes). Si se necesita
+    // forzar el dato maestro de un ítem puntual, hoy no hay forma — habría que
+    // agregar el mismo filtro a sincronizarInventarioMP (pendiente de decidir,
+    // no se asume aquí).
     const itemsParam = req.body?.items;
     const itemCodesFiltro = itemsParam
       ? (Array.isArray(itemsParam) ? itemsParam : itemsParam.split(','))
