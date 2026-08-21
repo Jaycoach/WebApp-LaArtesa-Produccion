@@ -1,11 +1,10 @@
-# Resumen de sesión — 20 de agosto de 2026 (UAT Ronda 2)
+# Resumen de sesión — 21 de agosto de 2026 (UAT Ronda 2)
 
-Continuación, mismo día calendario, de `docs/SESION_2026-08-20_RESUMEN.md`
+Continuación, un día después, de `docs/SESION_2026-08-20_RESUMEN.md`
 (bloque 1: Planificación/Listado; bloque 2: Empaque). Esta sesión arrancó
-inmediatamente después, con acceso SSH real a staging por primera vez, y
-cubre: validación real de la 3.9 (dueño único de `sap_articulos`), un bug de
-FE en el flujo de Formado dejado documentado en esa sesión, la consolidación
-de `requiere_formado` como dato maestro, el diseño e implementación del
+con acceso SSH real a staging por primera vez, y cubre: validación real de
+la 3.9 (dueño único de `sap_articulos`), la consolidación de
+`requiere_formado` como dato maestro, el diseño e implementación del
 bloqueo de aprobación por producto con dato maestro incompleto, un bug de
 backend y dos bugs de frontend encontrados en la validación (uno de ellos
 por Jonathan directamente en el portal), y una limpieza de datos de staging
