@@ -14,6 +14,17 @@ import { MasaProduccionResumen } from '../../types/api';
 import { ModalCancelarMasa } from '@/components/common/ModalCancelarMasa';
 import { MasasFiltroDropdown, masaCumpleFiltro } from '@/components/common/MasasFiltroDropdown';
 
+// Etiquetas para mostrarle a Lisette qué campo falta en SAP — deben coincidir
+// con los nombres que devuelve detectarCamposIncompletos (sap.service.js).
+const CAMPOS_MAESTRO_LABELS: Record<string, string> = {
+  tamanio: 'tamaño',
+  forma: 'forma',
+  peso_masa_dividida: 'peso de masa dividida',
+  multiplo_divisor: 'múltiplo divisor',
+  sales_qty_per_pack: 'unidades por paquete',
+  dias_vencimiento: 'días de vencimiento',
+};
+
 /**
  * Página: Lista de masas de producción del día
  */
@@ -497,17 +508,28 @@ export const ListaMasas: React.FC = () => {
                       {masa.productos_resumen && masa.productos_resumen.length > 0 ? (
                         <div className="rounded-lg bg-white border border-gray-100 divide-y divide-gray-100">
                           {masa.productos_resumen.map((p, i) => (
-                            <div key={i} className="flex items-center justify-between px-3 py-1.5">
-                              <span className="text-xs text-gray-700 truncate flex-1 mr-2" title={p.producto_nombre}>
-                                {p.producto_nombre}
-                              </span>
-                              <span className="text-xs font-bold text-emerald-700 shrink-0">
-                                {p.division_completada && Number(p.unidades_producidas) > 0
-                                  ? `${Math.round(Number(p.unidades_producidas) / Number(p.unidades_por_paquete || 1)).toLocaleString('es-CO')} paq · ${Number(p.unidades_producidas).toLocaleString('es-CO')} panes (cortado)`
-                                  : (Number(p.cantidad_paquetes) > 0
-                                      ? `${Number(p.cantidad_paquetes).toLocaleString('es-CO')} paq · ${(Number(p.cantidad_paquetes) * Number(p.unidades_por_paquete || 1)).toLocaleString('es-CO')} panes`
-                                      : '—')}
-                              </span>
+                            <div key={i} className="px-3 py-1.5">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs text-gray-700 truncate flex-1 mr-2" title={p.producto_nombre}>
+                                  {p.producto_nombre}
+                                </span>
+                                <span className="text-xs font-bold text-emerald-700 shrink-0">
+                                  {p.division_completada && Number(p.unidades_producidas) > 0
+                                    ? `${Math.round(Number(p.unidades_producidas) / Number(p.unidades_por_paquete || 1)).toLocaleString('es-CO')} paq · ${Number(p.unidades_producidas).toLocaleString('es-CO')} panes (cortado)`
+                                    : (Number(p.cantidad_paquetes) > 0
+                                        ? `${Number(p.cantidad_paquetes).toLocaleString('es-CO')} paq · ${(Number(p.cantidad_paquetes) * Number(p.unidades_por_paquete || 1)).toLocaleString('es-CO')} panes`
+                                        : '—')}
+                                </span>
+                              </div>
+                              {p.apto_produccion === false && (
+                                <p className="text-[11px] text-amber-700 mt-0.5">
+                                  ⚠ Dato incompleto en SAP
+                                  {p.campos_incompletos && p.campos_incompletos.length > 0
+                                    ? ` (${p.campos_incompletos.map(c => CAMPOS_MAESTRO_LABELS[c] || c).join(', ')})`
+                                    : ''}
+                                  {' — no se produce hasta corregirlo en SAP.'}
+                                </p>
+                              )}
                             </div>
                           ))}
                         </div>

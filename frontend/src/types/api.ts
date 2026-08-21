@@ -62,6 +62,8 @@ export interface MasaProduccionResumen {
     cantidad_paquetes: number;
     unidades_producidas?: number;
     division_completada?: boolean;
+    apto_produccion?: boolean;
+    campos_incompletos?: string[] | null;
   }[];
   es_repeticion: boolean;
   es_adicional?: boolean;
@@ -102,6 +104,8 @@ export interface ProductoMasa {
   kilos_producidos: number;
   unidades_por_paquete: number;
   cantidad_paquetes: number;
+  apto_produccion?: boolean;
+  campos_incompletos?: string[] | null;
 }
 
 // Ingrediente de una masa
