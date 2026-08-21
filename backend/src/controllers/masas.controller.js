@@ -346,6 +346,28 @@ const aprobarMasaCore = async (id, userId, opts = {}) => {
     throw err;
   }
 
+  // Bloqueo por producto — dato maestro incompleto (sesión 2026-08-21, migración
+  // 061). NO bloquea la masa completa: los productos con sap_articulos.campos_incompletos
+  // no vacío (o sin fila en sap_articulos, nunca sincronizado) quedan marcados
+  // apto_produccion=false y no participan de recalcularTotalesMasa/consolidación
+  // de ingredientes/notificación de empaque — el resto de la masa avanza igual.
+  // requiere_formado (migración 060) queda fuera a propósito de este chequeo, ver
+  // migración 061.
+  await db.query(
+    `UPDATE productos_por_masa pm
+     SET apto_produccion = false, updated_at = NOW()
+     WHERE pm.masa_id = $1
+       AND (
+         NOT EXISTS (SELECT 1 FROM sap_articulos sa WHERE sa.item_code = pm.sap_item_code)
+         OR EXISTS (
+           SELECT 1 FROM sap_articulos sa
+           WHERE sa.item_code = pm.sap_item_code
+             AND array_length(sa.campos_incompletos, 1) > 0
+         )
+       )`,
+    [id]
+  );
+
   // Marcar masa como APROBADA
   await db.query(
     `UPDATE masas_produccion
@@ -459,7 +481,7 @@ const aprobarMasaCore = async (id, userId, opts = {}) => {
 
   const totalPaquetesR = await db.query(
     `SELECT COALESCE(SUM(unidades_programadas), 0) AS total
-     FROM productos_por_masa WHERE masa_id = $1`,
+     FROM productos_por_masa WHERE masa_id = $1 AND apto_produccion = true`,
     [id]
   );
   const totalPaquetes = totalPaquetesR.rows[0]?.total || 0;
@@ -486,6 +508,7 @@ const aprobarMasaCore = async (id, userId, opts = {}) => {
            JOIN productos_por_masa pm ON pm.sap_item_code = bc.item_code_padre
            WHERE pm.masa_id = $1
              AND bc.es_empaque = true
+             AND pm.apto_produccion = true
            GROUP BY bc.item_code_comp, bc.item_name_comp, bc.uom`,
           [id]
         );

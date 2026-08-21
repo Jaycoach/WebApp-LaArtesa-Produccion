@@ -86,7 +86,7 @@ async function getLimiteKg(queryable, tipo_masa) {
 async function recalcularTotalesMasa(masaId, client) {
   const totalesResult = await client.query(
     `SELECT COALESCE(SUM(gramaje_unitario * COALESCE(unidades_ajustadas, unidades_programadas)), 0) / 1000.0 AS total_base
-     FROM productos_por_masa WHERE masa_id = $1`,
+     FROM productos_por_masa WHERE masa_id = $1 AND apto_produccion = true`,
     [masaId]
   );
   const totalKilosBase = parseFloat(totalesResult.rows[0].total_base) || 0;
@@ -1152,12 +1152,17 @@ const completarFase = async (req, res, next) => {
       // FIX 2026-08-10: se agrega unidades_ajustadas — es la cantidad REAL de
       // paquetes que va a salir de Division (redondeada al multiplo_divisor de
       // panes), la receta tiene que alcanzar para eso, no para unidades_programadas.
+      // FIX 2026-08-21 (migración 061): AND apto_produccion = true — los productos
+      // marcados por aprobarMasaCore (dato maestro incompleto en SAP) no deben
+      // sumar BOM a ingredientes_masa: no se van a pesar, no correspondía pedirle
+      // a Lisette que pese materia prima para algo que no se va a producir.
       const productosResult = await db.query(
         `SELECT sap_item_code, producto_nombre, unidades_programadas, unidades_ajustadas,
                 producto_codigo, presentacion, gramaje_unitario,
                 unidades_pedidas, kilos_pedidos, kilos_programados
          FROM productos_por_masa
-         WHERE masa_id = $1 AND sap_item_code IS NOT NULL AND sap_item_code <> ''`,
+         WHERE masa_id = $1 AND sap_item_code IS NOT NULL AND sap_item_code <> ''
+           AND apto_produccion = true`,
         [masaId]
       );
 

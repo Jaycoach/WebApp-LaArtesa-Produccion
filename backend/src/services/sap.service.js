@@ -71,6 +71,27 @@ function resolverUnidadesPorPaquete(itemCode, itemName, udfPanesPorBolsa) {
   return 1;
 }
 
+// Detecta, sobre el UDF CRUDO de SAP (no sobre el valor ya resuelto por
+// aplicarFallbacksAtributos/resolverUnidadesPorPaquete), qué campos de dato
+// maestro nunca se configuraron en SAP — el fallback sigue existiendo y se
+// sigue usando para los cálculos (evita división por cero en Formado/
+// División), pero esta señal aparte permite bloquear la aprobación de
+// productos con dato maestro incompleto para que la usuaria lo corrija en
+// SAP en vez de confiar en el valor adivinado indefinidamente (sesión
+// 2026-08-21). Se considera "incompleto" un patrón de nombre que sí resolvió
+// tamaño/forma/unidades por paquete — sigue siendo una adivinanza, no un
+// UDF real confirmado en SAP.
+function detectarCamposIncompletos(item) {
+  const incompletos = [];
+  if (!item.U_JZ_Tamanio) incompletos.push('tamanio');
+  if (!item.U_JZ_Forma) incompletos.push('forma');
+  if (item.U_JZ_PesMasDiv == null) incompletos.push('peso_masa_dividida');
+  if (!item.U_JZ_MultiploDivisor) incompletos.push('multiplo_divisor');
+  if (!(Number(item.U_JZ_PanesPorBolsa) > 0)) incompletos.push('sales_qty_per_pack');
+  if (item.U_JZ_DiasExp == null) incompletos.push('dias_vencimiento');
+  return incompletos;
+}
+
 class SAPService {
   constructor() {
     this.baseURL = config.sap.url;
@@ -734,6 +755,7 @@ class SAPService {
         pesoMasaDividida: atributos.pesoMasaDividida,
         diasVencimiento:  item.U_JZ_DiasExp != null ? Math.round(Number(item.U_JZ_DiasExp)) : null,
         esFormado:        String(item.U_JZ_Formado || '').trim().toUpperCase() === 'SI',
+        camposIncompletos: detectarCamposIncompletos(item),
       };
     });
   }

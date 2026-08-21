@@ -2048,8 +2048,8 @@ const sincronizarInventarioMP = async (_req, res, next) => {
       for (const articulo of articulosPT) {
         await client.query(
           `INSERT INTO sap_articulos
-             (item_code, item_name, tipo_masa, sales_qty_per_pack, gramaje, multiplo_divisor, tamanio, forma, peso_masa_dividida, dias_vencimiento, requiere_formado, activo, synced_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, NOW(), NOW())
+             (item_code, item_name, tipo_masa, sales_qty_per_pack, gramaje, multiplo_divisor, tamanio, forma, peso_masa_dividida, dias_vencimiento, requiere_formado, campos_incompletos, activo, synced_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, true, NOW(), NOW())
            ON CONFLICT (item_code) DO UPDATE SET
              item_name          = EXCLUDED.item_name,
              tipo_masa          = EXCLUDED.tipo_masa,
@@ -2061,6 +2061,7 @@ const sincronizarInventarioMP = async (_req, res, next) => {
              peso_masa_dividida = COALESCE(EXCLUDED.peso_masa_dividida, sap_articulos.peso_masa_dividida),
              dias_vencimiento   = COALESCE(EXCLUDED.dias_vencimiento, sap_articulos.dias_vencimiento),
              requiere_formado   = EXCLUDED.requiere_formado,
+             campos_incompletos = EXCLUDED.campos_incompletos,
              activo             = true,
              synced_at          = NOW(),
              updated_at         = NOW()`,
@@ -2079,6 +2080,11 @@ const sincronizarInventarioMP = async (_req, res, next) => {
             // de getArticulosConTipoMasa() (sap.service.js:736, misma fórmula que
             // sap.service.js:559 del flujo de OV) — no se reimplementa el parseo aquí.
             articulo.esFormado || false,
+            // campos_incompletos (migración 061): detectado sobre el UDF crudo de
+            // SAP (sap.service.js: detectarCamposIncompletos), no sobre el valor
+            // ya resuelto con fallback — insumo para el bloqueo de aprobación por
+            // dato maestro incompleto (masas.controller.js: aprobarMasaCore).
+            articulo.camposIncompletos || [],
           ]
         );
         articulosActualizados++;

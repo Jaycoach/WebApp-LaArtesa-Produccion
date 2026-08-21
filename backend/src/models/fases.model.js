@@ -88,11 +88,14 @@ const getMasasByFecha = async (fecha, fase = null) => {
           'unidades_por_paquete', pm.unidades_por_paquete,
           'cantidad_paquetes', pm.cantidad_paquetes,
           'unidades_producidas', pm.unidades_producidas,
-          'division_completada', COALESCE(pm.division_completada, false)
+          'division_completada', COALESCE(pm.division_completada, false),
+          'apto_produccion', pm.apto_produccion,
+          'campos_incompletos', sa.campos_incompletos
         ) ORDER BY pm.producto_nombre
       ) FILTER (WHERE pm.id IS NOT NULL) as productos_resumen
     FROM masas_produccion m
     LEFT JOIN productos_por_masa pm ON m.id = pm.masa_id
+    LEFT JOIN sap_articulos sa ON sa.item_code = pm.sap_item_code
     WHERE m.fecha_produccion = $1
     ${whereExtra}
     GROUP BY m.id
@@ -143,6 +146,7 @@ const getProductosByMasa = async (masaId) => {
   const result = await db.query(`
     SELECT ppm.*,
            sa.multiplo_divisor AS multiplo_divisor_sap_actual,
+           sa.campos_incompletos,
            COALESCE(ov.ordenes, '[]'::json) AS ordenes_venta
     FROM productos_por_masa ppm
     LEFT JOIN sap_articulos sa ON sa.item_code = ppm.sap_item_code
