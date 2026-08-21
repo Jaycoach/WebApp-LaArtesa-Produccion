@@ -637,6 +637,66 @@ Jonathan lo corra — este entorno no tiene acceso a HANA/staging.**
   sync, falta que Jonathan valide el paso 5 antes de destrabar el
   backfill hacia `productos_por_masa`.
 
+### 3.8 — Auditoría y propuesta de diseño: dueño único de master data de producto (NO implementado)
+
+**Estado: 100% diagnóstico, sin código tocado. Pendiente de aprobación
+de Jonathan antes de cualquier implementación.**
+
+- **Motivación**: la responsabilidad de "dato maestro de producto" está
+  repartida entre `sincronizarBOM`, `sincronizarInventarioMP` y
+  `sincronizarDesdeOV`, sin dueño único — causa raíz estructural detrás
+  de la regresión evitada por poco en 3.7 (`ce634d1`).
+- **Inventario completo (paso 1)**: las 3 sincronizaciones escriben en
+  `masas_produccion`, `productos_por_masa`, `productos_por_masa_ov`,
+  `ingredientes_masa`, `progreso_fases`, `sap_articulos`,
+  `sap_bom_componentes`, `sap_inventario_mp`, `sap_lotes_mp` — mapa
+  completo con archivo/línea en la respuesta de esa sesión (no
+  reproducido aquí por extensión; ver historial de conversación de esa
+  fecha si hace falta el detalle línea por línea).
+- **Hallazgo nuevo, no detectado en 3.6/3.7**: `sincronizarDesdeOV`
+  tiene **2 copias adicionales** del fallback por nombre de
+  `unidades_por_paquete` que no se limpiaron en el refactor de
+  deduplicación anterior (`d07a81d`) porque viven dentro de la propia
+  sincronización, no en un consumidor de lectura — `sap.controller.js`
+  líneas **1028-1032** (rama "merge OV en masa existente") y
+  **1196-1200** (rama "crear masa nueva"). Quedan pendientes de
+  eliminar como parte de este refactor, no de uno anterior.
+- **Redundancia activa confirmada**: en el cron (`server.js:332-350`),
+  `sincronizarBOM` escribe 10 columnas de `sap_articulos` y,
+  inmediatamente después en la misma corrida, `sincronizarInventarioMP`
+  vuelve a escribir 6 de esas mismas columnas, re-obtenidas por su
+  cuenta vía Service Layer (nunca HANA, sin importar `SAP_READ_MODE`) —
+  dos fetches independientes del mismo dato en el mismo ciclo, orden
+  de ejecución determina cuál "gana".
+- **Propuesta (paso 4, sin implementar)**: `sincronizarDesdeOV` deja de
+  escribir/resolver `unidades_por_paquete`, `tamanio`, `forma`,
+  `peso_masa_dividida`, `dias_vencimiento`, `requiere_formado` — pasa a
+  leerlos con un `SELECT` a `sap_articulos` antes del INSERT (mismo
+  patrón que ya usa para `gramaje` vía `sap_bom_componentes`).
+  `sincronizarBOM` deja de tocar `sap_articulos` en absoluto (solo
+  `sap_bom_componentes`) — toda la responsabilidad pasa a Inventario/
+  Artículos.
+- **Precedente real ya en el código**: la cascada `es_decoracion` →
+  `ingredientes_masa` en `sincronizarBOM` (línea 1814-1829) ya
+  implementa el patrón "dato maestro corregido se propaga hacia
+  adelante, protegiendo lo ya confirmado" (`im.pesado IS DISTINCT FROM
+  true`) — modelo a seguir para la propagación de `unidades_por_paquete`.
+- **Pregunta de negocio abierta, sin decidir**: qué hacer si
+  `sincronizarDesdeOV` corre para un producto sin `sap_articulos`
+  sincronizado — bloquear / default con advertencia / forzar sync de
+  Artículos primero. Ver tabla de tradeoffs en la respuesta completa de
+  esta sesión.
+- **Impacto estimado (paso 5)**: refactor quirúrgico en 2-3 funciones
+  de `sap.controller.js`, sin tocar frontend ni las 6 copias de lectura
+  ya centralizadas (`upqDesdeProducto`). Riesgo real: crea una
+  dependencia operativa nueva entre "¿corrió Inventario/Artículos
+  recientemente?" y "¿se puede crear una masa nueva?" que hoy no existe
+  — relevante en un ambiente nuevo o tras un gap de sincronización (ya
+  se vieron fallas reales de cron/acceso a HANA en esta misma sesión).
+- **No se implementó nada de esto** — queda pendiente de que Jonathan
+  apruebe el diseño (en particular la decisión de negocio del punto
+  anterior) antes de un prompt de implementación separado.
+
 ## 4. Próximos pasos
 
 > ⚠️ **BLOQUEANTE (3.6/3.7)**: NO aprobar en staging/producción ninguna
