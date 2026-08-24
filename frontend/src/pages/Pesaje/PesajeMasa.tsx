@@ -277,6 +277,9 @@ export const PesajeMasa: React.FC = () => {
         const sinLote: string[] = data?.sin_lote || [];
         const loteInvalido: string[] = data?.lote_invalido || [];
 
+        // Caso 2: snapshot de stock por lote desactualizado (validación previa a SAP, HTTP 409)
+        const lotesDesactualizados: any[] = data?.lotes_desactualizados || [];
+
         if (sinLote.length > 0 || loteInvalido.length > 0) {
           let textoError = `⚠ Lotes incompletos\n\n${mensaje}\n`;
           if (sinLote.length > 0) {
@@ -290,7 +293,17 @@ export const PesajeMasa: React.FC = () => {
           textoError += `\nCorrige el lote en el pesaje y vuelve a confirmar.`;
           alert(textoError);
 
-        // Caso 2: stock insuficiente en SAP (HTTP 502)
+        } else if (lotesDesactualizados.length > 0) {
+          let textoError = `⚠ Inventario desactualizado\n\n${mensaje}\n`;
+          textoError += `\nLotes con snapshot viejo:\n`;
+          lotesDesactualizados.forEach((l: any) => {
+            const horas = l.horas_desde_sync != null ? `hace ${l.horas_desde_sync}h` : 'nunca sincronizado';
+            textoError += `  • ${l.ingrediente} — lote ${l.lote} (${horas})\n`;
+          });
+          textoError += `\nSincroniza el inventario/lotes SAP (menú Sincronización) y vuelve a confirmar.`;
+          alert(textoError);
+
+        // Caso 3: stock insuficiente en SAP (HTTP 502)
         } else {
           const loteFallido = data?.lote_fallido || null;
           const alternativas: any[] = data?.alternativas || [];

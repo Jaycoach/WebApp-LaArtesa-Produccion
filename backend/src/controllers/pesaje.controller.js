@@ -787,6 +787,53 @@ const confirmarPesaje = async (req, res, next) => {
       });
     }
 
+    // ── Validar antigüedad del snapshot de stock por lote (Hallazgo 3) ───
+    // sap_lotes_mp.cantidad_disponible es un snapshot cacheado (sync
+    // programado 2x/día). Las reservas locales en pesaje_lotes_consumo NO
+    // lo descuentan (ver comentarios en fases.model.js) -- así que un lote
+    // puede seguir apareciendo "disponible" en Orbit por horas/días después
+    // de agotarse en SAP. Sin este chequeo, el checklist completo deja
+    // avanzar con normalidad y el error real de SAP solo aparece tarde, en
+    // esta misma llamada, después de que el usuario ya pesó todo. Se
+    // bloquea acá, antes de intentar SAP, si algún lote reservado para esta
+    // masa tiene un snapshot más viejo que el umbral configurado.
+    const umbralConfigResult = await db.query(
+      `SELECT valor FROM configuracion_sistema WHERE clave = 'pesaje_umbral_sync_lotes_horas'`
+    );
+    const umbralHoras = umbralConfigResult.rows.length > 0
+      ? parseFloat(umbralConfigResult.rows[0].valor)
+      : 6; // default: cron de sync corre 2x/día
+
+    const lotesUsadosResult = await db.query(
+      `SELECT DISTINCT im.ingrediente_nombre, plc.item_code, plc.batch, sl.ultimo_sync,
+              EXTRACT(EPOCH FROM (NOW() - sl.ultimo_sync)) / 3600 AS horas_desde_sync
+       FROM pesaje_lotes_consumo plc
+       JOIN ingredientes_masa im ON im.id = plc.ingrediente_id
+       LEFT JOIN sap_lotes_mp sl ON sl.item_code = plc.item_code AND sl.batch = plc.batch
+       WHERE plc.masa_id = $1 AND plc.confirmado_sap = false`,
+      [masaId]
+    );
+
+    const lotesDesactualizados = lotesUsadosResult.rows.filter(
+      l => l.ultimo_sync === null || parseFloat(l.horas_desde_sync) > umbralHoras
+    );
+
+    if (lotesDesactualizados.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `No se puede confirmar el pesaje: el inventario de ${lotesDesactualizados.length} lote(s) no se ha sincronizado en las últimas ${umbralHoras}h. Sincroniza el inventario SAP antes de confirmar.`,
+        data: {
+          lotes_desactualizados: lotesDesactualizados.map(l => ({
+            ingrediente:      l.ingrediente_nombre,
+            lote:             l.batch,
+            ultimo_sync:      l.ultimo_sync,
+            horas_desde_sync: l.ultimo_sync ? Math.round(parseFloat(l.horas_desde_sync) * 10) / 10 : null,
+          })),
+          instruccion: 'Sincroniza el inventario/lotes SAP y vuelve a intentar confirmar.',
+        },
+      });
+    }
+
     // Verificar que todos los ingredientes estén pesados
     const resultado = await fasesModel.checkTodosPesados(masaId);
     logger.info(`Verificación pesaje masa ${masaId}: ${JSON.stringify(resultado)}`);
