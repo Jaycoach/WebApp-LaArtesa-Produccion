@@ -429,9 +429,10 @@ exports.iniciarEmpaque = async (req, res) => {
     }
 
     await client.query(
-      `UPDATE progreso_fases SET estado = 'EN_PROGRESO', updated_at = NOW()
+      `UPDATE progreso_fases SET estado = 'EN_PROGRESO', usuario_responsable = $2,
+         fecha_inicio = COALESCE(fecha_inicio, NOW()), updated_at = NOW()
        WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
-      [masaId]
+      [masaId, req.user.id]
     );
     await client.query(
       `UPDATE masas_produccion SET fase_actual = 'EMPAQUE' WHERE id = $1`, [masaId]
@@ -922,9 +923,10 @@ exports.completarEmpaque = async (req, res) => {
       );
       await client.query(
         `UPDATE progreso_fases SET estado = 'COMPLETADA', porcentaje_completado = 100,
+           fecha_completado = NOW(), usuario_responsable = $2,
            updated_at = NOW()
          WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
-        [masaId]
+        [masaId, req.user.id]
       );
       await client.query(
         `UPDATE masas_produccion SET estado = 'COMPLETADA', fase_actual = 'EMPAQUE'

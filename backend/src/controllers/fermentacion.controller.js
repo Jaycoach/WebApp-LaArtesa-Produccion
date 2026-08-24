@@ -425,10 +425,11 @@ exports.completarFermentacion = async (req, res) => {
         estado = 'COMPLETADA',
         porcentaje_completado = 100,
         fecha_completado = NOW(),
+        usuario_responsable = $3,
         observaciones = $2
       WHERE masa_id = $1 AND fase = 'FERMENTACION'
     `;
-    await client.query(updateFaseQuery, [masaId, observaciones || null]);
+    await client.query(updateFaseQuery, [masaId, observaciones || null, usuario.id]);
 
     await client.query('COMMIT');
 

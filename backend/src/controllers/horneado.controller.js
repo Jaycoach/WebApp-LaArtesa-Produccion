@@ -837,6 +837,7 @@ exports.completarHorneado = async (req, res) => {
         estado = 'COMPLETADA',
         porcentaje_completado = 100,
         fecha_completado = NOW(),
+        usuario_responsable = $4,
         observaciones = $2,
         datos_fase = datos_fase || $3::jsonb
       WHERE masa_id = $1 AND fase = 'HORNEADO'
@@ -844,7 +845,8 @@ exports.completarHorneado = async (req, res) => {
     await client.query(updateFaseQuery, [
       masaId,
       observaciones || null,
-      JSON.stringify({ unidades_terminadas: unidades_terminadas ? parseInt(unidades_terminadas) : null })
+      JSON.stringify({ unidades_terminadas: unidades_terminadas ? parseInt(unidades_terminadas) : null }),
+      usuario.id,
     ]);
 
     // Avanzar masa a fase EMPAQUE
