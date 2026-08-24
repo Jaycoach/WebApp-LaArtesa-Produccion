@@ -22,6 +22,7 @@ export const AmasadoMasa: React.FC = () => {
   );
 
   const [showMO, setShowMO] = useState(false);
+  const [mostrarConfirmarModal, setMostrarConfirmarModal] = useState(false);
   const [formData, setFormData] = useState({
     temperatura_masa_final: '',
     velocidad_1_minutos: '',
@@ -31,28 +32,30 @@ export const AmasadoMasa: React.FC = () => {
     observaciones: '',
   });
 
-  const handleCompletar = async () => {
+  const handleCompletarClick = () => {
     if (!formData.temperatura_masa_final || !formData.velocidad_1_minutos || !formData.velocidad_2_minutos) {
       alert('Por favor completa todos los campos requeridos');
       return;
     }
+    setMostrarConfirmarModal(true);
+  };
 
-    if (confirm('¿Confirmar que el amasado está completo?')) {
-      await completarMutation.mutateAsync({
-        masaId: masaId!,
-        fase: 'amasado',
-        data: {
-          datos: {
-            temperatura_masa_final: Number(formData.temperatura_masa_final),
-            velocidad_1_minutos: Number(formData.velocidad_1_minutos),
-            velocidad_2_minutos: Number(formData.velocidad_2_minutos),
-            temperatura_agua: Number(formData.temperatura_agua),
-            amasadora_id: Number(formData.amasadora_id),
-            observaciones: formData.observaciones,
-          },
+  const ejecutarCompletar = async () => {
+    setMostrarConfirmarModal(false);
+    await completarMutation.mutateAsync({
+      masaId: masaId!,
+      fase: 'amasado',
+      data: {
+        datos: {
+          temperatura_masa_final: Number(formData.temperatura_masa_final),
+          velocidad_1_minutos: Number(formData.velocidad_1_minutos),
+          velocidad_2_minutos: Number(formData.velocidad_2_minutos),
+          temperatura_agua: Number(formData.temperatura_agua),
+          amasadora_id: Number(formData.amasadora_id),
+          observaciones: formData.observaciones,
         },
-      });
-    }
+      },
+    });
   };
 
   if (loadingMasa) {
@@ -254,7 +257,7 @@ export const AmasadoMasa: React.FC = () => {
             </button>
             {masa.fase_actual === 'AMASADO' && (
               <button
-                onClick={handleCompletar}
+                onClick={handleCompletarClick}
                 disabled={completarMutation.isPending}
                 className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-semibold"
               >
@@ -264,6 +267,31 @@ export const AmasadoMasa: React.FC = () => {
           </div>
         </div>
         {showMO && <ModalMO masaId={masaIdNum} fase="AMASADO" onClose={() => setShowMO(false)} />}
+
+        {mostrarConfirmarModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+              <h3 className="font-bold text-lg mb-3 text-gray-800">Confirmar Amasado</h3>
+              <p className="text-sm text-gray-600 mb-5">
+                ¿Confirmar que el amasado está completo? Esto desbloqueará la siguiente fase.
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setMostrarConfirmarModal(false)}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm font-medium"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={ejecutarCompletar}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium"
+                >
+                  Completar Amasado
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

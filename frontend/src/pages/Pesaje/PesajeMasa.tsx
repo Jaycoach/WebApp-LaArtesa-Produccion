@@ -698,7 +698,11 @@ export const PesajeMasa: React.FC = () => {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Peso teórico BOM (g)</label>
                       <div className="w-full px-3 py-2 border border-gray-200 rounded bg-gray-100 text-gray-700 font-semibold">
-                        {formData.peso_real || '—'}
+                        {/* Nota menor: valor fijo de la receta — antes se mostraba
+                            formData.peso_real, que se recalcula con cada edición de
+                            lote, así que mostraba sumas parciales ("1" en vez de
+                            "308") mientras el usuario todavía estaba repartiendo. */}
+                        {ing.cantidad_gramos != null ? Number(ing.cantidad_gramos).toFixed(2) : '—'}
                       </div>
                     </div>
                     <div className="col-span-3">
@@ -804,32 +808,36 @@ export const PesajeMasa: React.FC = () => {
                                     {l.expiration_date && ` · vence ${formatDate(l.expiration_date.slice(0, 10))}`}
                                   </div>
                                 </div>
-                                {seleccionado && (
-                                  <div className="flex items-center gap-1 flex-shrink-0">
-                                    <input
-                                      type="number"
-                                      step="1"
-                                      min="1"
-                                      placeholder="g"
-                                      value={entrada?.cantidad_kg ?? ''}
-                                      onChange={(e) => {
-                                        const nuevos = formData.lotes_consumo.map(lc =>
-                                          lc.batch === l.batch ? { ...lc, cantidad_kg: e.target.value } : lc
-                                        );
-                                        // Recalcular peso_real como suma de lotes — el campo mostrado como
-                                        // "Peso teórico BOM (g)" debe reflejar lo que realmente se va a guardar,
-                                        // no quedar congelado en el valor con el que se abrió el formulario.
-                                        // Bug detectado 2026-07-28: bloqueaba ajustes de supervisor en modo edición
-                                        // porque comparaba contra el peso_real original, nunca actualizado.
-                                        const nuevaSuma = nuevos.reduce((s, lc) => s + (parseFloat(lc.cantidad_kg) || 0), 0);
-                                        setFormData({ ...formData, lotes_consumo: nuevos, peso_real: String(nuevaSuma) });
-                                        setStockError(null);
-                                      }}
-                                      className="w-24 px-2 py-1 border border-purple-300 rounded text-sm focus:ring-2 focus:ring-purple-400"
-                                    />
-                                    <span className="text-xs text-gray-500">g</span>
-                                  </div>
-                                )}
+                                {/* Nota menor: el input queda siempre reservado en el layout (solo se
+                                    oculta con invisible/disabled) en vez de montarse/desmontarse con
+                                    seleccionado — evita que la fila cambie de ancho/alto al marcar el
+                                    checkbox, que corría las filas de abajo y hacía que un clic rápido
+                                    cayera en la fila equivocada. */}
+                                <div className={`flex items-center gap-1 flex-shrink-0 ${seleccionado ? '' : 'invisible'}`}>
+                                  <input
+                                    type="number"
+                                    step="1"
+                                    min="1"
+                                    placeholder="g"
+                                    disabled={!seleccionado}
+                                    value={entrada?.cantidad_kg ?? ''}
+                                    onChange={(e) => {
+                                      const nuevos = formData.lotes_consumo.map(lc =>
+                                        lc.batch === l.batch ? { ...lc, cantidad_kg: e.target.value } : lc
+                                      );
+                                      // Recalcular peso_real como suma de lotes — el campo mostrado como
+                                      // "Peso teórico BOM (g)" debe reflejar lo que realmente se va a guardar,
+                                      // no quedar congelado en el valor con el que se abrió el formulario.
+                                      // Bug detectado 2026-07-28: bloqueaba ajustes de supervisor en modo edición
+                                      // porque comparaba contra el peso_real original, nunca actualizado.
+                                      const nuevaSuma = nuevos.reduce((s, lc) => s + (parseFloat(lc.cantidad_kg) || 0), 0);
+                                      setFormData({ ...formData, lotes_consumo: nuevos, peso_real: String(nuevaSuma) });
+                                      setStockError(null);
+                                    }}
+                                    className="w-24 px-2 py-1 border border-purple-300 rounded text-sm focus:ring-2 focus:ring-purple-400"
+                                  />
+                                  <span className="text-xs text-gray-500">g</span>
+                                </div>
                               </div>
                             );
                           })}

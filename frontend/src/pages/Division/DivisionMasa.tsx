@@ -19,6 +19,7 @@ export const DivisionMasa: React.FC = () => {
   const completarMutation = useCompletarFase();
 
   const [showMO, setShowMO] = useState(false);
+  const [advertenciasPendientes, setAdvertenciasPendientes] = useState<string[] | null>(null);
   const [formData, setFormData] = useState({
     maquina_corte_id: '',
     temperatura_entrada: '',
@@ -207,14 +208,15 @@ export const DivisionMasa: React.FC = () => {
     }
 
     if (advertencias.length > 0) {
-      const confirmar = window.confirm(
-        'Atención — división con faltantes:\n\n' +
-        advertencias.join('\n') +
-        '\n\n¿Confirmar y registrar como división parcial?'
-      );
-      if (!confirmar) return;
+      setAdvertenciasPendientes(advertencias);
+      return;
     }
 
+    await ejecutarCompletarDivision();
+  };
+
+  const ejecutarCompletarDivision = async () => {
+    setAdvertenciasPendientes(null);
     const tiempoReposo = calcularTiempoReposo();
 
     try {
@@ -763,6 +765,32 @@ export const DivisionMasa: React.FC = () => {
           </div>
         </div>
         {showMO && <ModalMO masaId={Number(masaId)} fase="DIVISION" onClose={() => setShowMO(false)} />}
+
+        {advertenciasPendientes && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+              <h3 className="font-bold text-lg mb-3 text-amber-700">División con faltantes</h3>
+              <ul className="text-sm text-gray-700 mb-4 list-disc list-inside space-y-1">
+                {advertenciasPendientes.map((a, i) => <li key={i}>{a}</li>)}
+              </ul>
+              <p className="text-sm text-gray-600 mb-5">¿Confirmar y registrar como división parcial?</p>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setAdvertenciasPendientes(null)}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm font-medium"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={ejecutarCompletarDivision}
+                  className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium"
+                >
+                  Confirmar división parcial
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
       </div>
     </div>
