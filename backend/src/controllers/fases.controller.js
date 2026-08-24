@@ -1452,7 +1452,7 @@ const completarFase = async (req, res, next) => {
         masaId, 'DIVISION', 'COMPLETADA', 100, req.user.id,
         { ...(restosDatos || {}), cantidades_divididas: cantidadesDivididasSeguro }
       );
-      const siguienteFase = await fasesModel.desbloquearSiguienteFase(masaId, 'DIVISION');
+      const siguienteFase = await fasesModel.desbloquearSiguienteFase(masaId, 'DIVISION', req.user.id);
 
       const hayFaltantes = productosResult.rows.some(p => {
         const cant = Number(cantidadesDivididasSeguro[p.id] || 0);

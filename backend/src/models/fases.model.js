@@ -622,7 +622,7 @@ const updateEstadoFase = async (masaId, fase, estado, porcentaje, userId, datosF
   return result.rows[0];
 };
 
-const desbloquearSiguienteFase = async (masaId, faseActual) => {
+const desbloquearSiguienteFase = async (masaId, faseActual, usuarioId = null) => {
   const fasesOrden = {
     PLANIFICACION: 'PESAJE',
     PESAJE: 'AMASADO',
@@ -651,12 +651,15 @@ const desbloquearSiguienteFase = async (masaId, faseActual) => {
     const requiereFormado = reqResult.rows[0]?.requiere_formado === true;
 
     if (!requiereFormado) {
-      // Saltar FORMADO: marcarlo COMPLETADA automáticamente y abrir FERMENTACION
+      // Saltar FORMADO: marcarlo COMPLETADA automáticamente y abrir FERMENTACION.
+      // Se firma con el usuario que completó DIVISION (quien disparó este auto-skip)
+      // ya que no hay una acción manual propia de FORMADO que lo firme en este caso.
       await db.query(`
         UPDATE progreso_fases
-        SET estado = 'COMPLETADA', porcentaje_completado = 100, fecha_completado = NOW(), updated_at = NOW()
+        SET estado = 'COMPLETADA', porcentaje_completado = 100, fecha_completado = NOW(),
+            usuario_responsable = $2, updated_at = NOW()
         WHERE masa_id = $1 AND fase = 'FORMADO'
-      `, [masaIdNum]);
+      `, [masaIdNum, usuarioId]);
 
       const result = await db.query(`
         UPDATE progreso_fases
