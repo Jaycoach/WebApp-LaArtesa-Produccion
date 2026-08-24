@@ -118,13 +118,43 @@ export const PesajeMasa: React.FC = () => {
     handleEditar(ingrediente);
   };
 
-  const handleEditar = (ingrediente: any) => {
+  /**
+   * @param lotesFrescos Hallazgo 6: cuando se abre este formulario tras un
+   * rechazo de SAP por stock insuficiente (Hallazgo 5), el reparto guardado
+   * (lote agotado con el 100% de la cantidad) ya no sirve — se recalcula con
+   * la misma lógica de auto-split FEFO de más abajo, pero contra el stock
+   * real que la propia respuesta de error de SAP acaba de entregar (el lote
+   * fallido + las alternativas con cantidad_disponible), en vez de dejar la
+   * cantidad completa asignada al lote sin stock esperando corrección manual.
+   */
+  const handleEditar = (ingrediente: any, lotesFrescos?: { batch: string; cantidad_disponible: number; expiration_date?: string | null }[]) => {
     setEditando(ingrediente.id);
 
     // Auto-llenado FEFO: si el backend calculó el reparto automático (lotes_consumo_sugerido)
     // y el ingrediente aún no fue pesado, se usa completo — el operario solo revisa y da "Guardar".
-    const yaPesado = ingrediente.pesado && ingrediente.peso_real;
-    const sugeridoAuto = (!yaPesado && ingrediente.lotes_consumo_sugerido?.length > 0)
+    // Con lotesFrescos, se fuerza el mismo recálculo aunque ya esté pesado.
+    const yaPesado = !lotesFrescos && ingrediente.pesado && ingrediente.peso_real;
+    const requeridoG = Number(ingrediente.peso_real ?? ingrediente.cantidad_gramos ?? 0);
+
+    const sugeridoAuto = lotesFrescos && lotesFrescos.length > 0 && requeridoG > 0
+      ? (() => {
+          let restanteG = requeridoG;
+          const reparto: { batch: string; cantidad_kg: string; fecha_vencimiento: string }[] = [];
+          for (const l of lotesFrescos) {
+            if (restanteG <= 0) break;
+            const disponibleG = Number(l.cantidad_disponible) * 1000;
+            const aTomarG = Math.max(0, Math.min(disponibleG, restanteG));
+            if (aTomarG <= 0) continue;
+            reparto.push({
+              batch: l.batch,
+              cantidad_kg: String(Number(aTomarG.toFixed(2))),
+              fecha_vencimiento: l.expiration_date ? l.expiration_date.substring(0, 10) : '',
+            });
+            restanteG -= aTomarG;
+          }
+          return reparto.length > 0 ? reparto : null;
+        })()
+      : (!yaPesado && ingrediente.lotes_consumo_sugerido?.length > 0)
       ? ingrediente.lotes_consumo_sugerido.map((l: any) => {
           const loteInfo = ingrediente.lotes?.find((x: any) => x.batch === l.batch);
           return {
@@ -332,7 +362,18 @@ export const PesajeMasa: React.FC = () => {
             const ingConError = checklist?.ingredientes.find(
               (i: any) => i.ingrediente_sap_code === loteFallido.item_code
             );
-            if (ingConError && puedeEditar) handleEditar(ingConError);
+            if (ingConError && puedeEditar) {
+              // Hallazgo 6: recalcular el reparto FEFO contra el stock real —
+              // el lote fallido con lo poco (o nada) que le quede de verdad,
+              // más las alternativas que la propia respuesta de SAP acaba de
+              // traer — en vez de reabrir con el 100% asignado al lote agotado.
+              const loteFallidoInfo = ingConError.lotes?.find((l: any) => l.batch === loteFallido.batch);
+              const lotesFrescos = [
+                { batch: loteFallido.batch, cantidad_disponible: Number(loteFallidoInfo?.cantidad_disponible ?? 0), expiration_date: loteFallidoInfo?.expiration_date },
+                ...alternativas.map((a: any) => ({ batch: a.batch, cantidad_disponible: Number(a.cantidad_disponible), expiration_date: a.expiration_date })),
+              ];
+              handleEditar(ingConError, lotesFrescos);
+            }
             setStockError({
               ingredienteId: ingConError?.id ?? -1,
               mensaje: mensaje,
