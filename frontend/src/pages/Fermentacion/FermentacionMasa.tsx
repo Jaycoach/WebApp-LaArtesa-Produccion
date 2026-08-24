@@ -6,7 +6,7 @@
  * del catálogo, incluida la fría). La fase se completa explícitamente
  * cuando todas las líneas tienen salida registrada.
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ModalMO } from '../../components/common/ModalMO';
@@ -63,6 +63,7 @@ export const FermentacionMasa: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState('');
   const [entradaForms, setEntradaForms] = useState<Record<number, EntradaFormState>>({});
   const [salidaForms, setSalidaForms] = useState<Record<number, SalidaFormState>>({});
+  const [observaciones, setObservaciones] = useState('');
 
   // Hora actual en Bogotá (fija, no depende del timezone del navegador/equipo del usuario)
   const ahoraLocal = () => bogotaNowForDatetimeLocal();
@@ -108,13 +109,21 @@ export const FermentacionMasa: React.FC = () => {
   });
 
   const mutacionCompletar = useMutation({
-    mutationFn: async () => apiPost(`/api/fermentacion/${masaId}/completar`, {}),
+    mutationFn: async () => apiPost(`/api/fermentacion/${masaId}/completar`, { observaciones }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['fermentacion', masaId] });
       setErrorMsg('');
     },
     onError: (e: any) => setErrorMsg(e.message)
   });
+
+  // Rehidratar observaciones ya guardadas (registros_fermentacion.observaciones)
+  // para que no se pierdan al navegar fuera y volver, ni al revisar el histórico.
+  useEffect(() => {
+    if (data?.registro_actual?.observaciones != null) {
+      setObservaciones(data.registro_actual.observaciones);
+    }
+  }, [data]);
 
   if (isLoading) {
     return (
@@ -363,6 +372,27 @@ export const FermentacionMasa: React.FC = () => {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Observaciones — mismo patrón que las demás fases */}
+        {faseCompletada ? (
+          observaciones && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              <div className="text-xs text-gray-500 mb-1">Observaciones</div>
+              <div className="text-gray-800 whitespace-pre-wrap">{observaciones}</div>
+            </div>
+          )
+        ) : (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Observaciones</label>
+            <textarea
+              value={observaciones}
+              onChange={e => setObservaciones(e.target.value)}
+              rows={3}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              placeholder="Observaciones opcionales..."
+            />
           </div>
         )}
 
