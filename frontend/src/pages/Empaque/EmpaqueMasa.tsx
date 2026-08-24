@@ -1122,9 +1122,9 @@ const PanelEmpaqueMasa: React.FC<{
                       <td className="p-2 text-right">
                         {empaque_iniciado ? (
                           <span className={`font-mono text-sm font-bold ${
-                            faltante > 0 ? 'text-red-600' : faltante < 0 ? 'text-blue-600' : 'text-green-600'
+                            faltante > 0 ? 'text-red-600' : faltante < 0 ? 'text-blue-600' : guardadoIds.has(p.id) ? 'text-green-600' : 'text-gray-400'
                           }`}>
-                            {faltante > 0 ? `−${faltante}` : faltante < 0 ? `+${Math.abs(faltante)}` : '✓'}
+                            {faltante > 0 ? `−${faltante}` : faltante < 0 ? `+${Math.abs(faltante)}` : guardadoIds.has(p.id) ? '✓' : '0'}
                           </span>
                         ) : (
                           <span className="text-gray-400">—</span>
