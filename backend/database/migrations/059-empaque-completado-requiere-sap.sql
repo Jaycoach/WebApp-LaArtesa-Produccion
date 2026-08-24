@@ -70,7 +70,12 @@ ALTER TABLE registros_empaque
   ADD CONSTRAINT check_empaque_completado_requiere_sap CHECK (
     estado <> 'COMPLETADO'
     OR (sap_doc_entry_entrada IS NOT NULL AND sap_doc_entry_salida IS NOT NULL)
-  );
+  ) NOT VALID;
+-- NOT VALID: excepción documentada para 3 masas históricas de producción
+-- (id 16/masa 62, 25/masa 229, 26/masa 228, jun-2026) completadas antes de
+-- que existiera esta regla, con entrada SAP registrada pero sin salida de
+-- materiales de empaque transmitida. No se revierte su estado retroactivamente;
+-- el CHECK sí aplica a todo INSERT/UPDATE nuevo desde este punto en adelante.
 
 -- ============================================================
 -- 2. Trigger — progreso_fases (fase EMPAQUE → COMPLETADA) exige
