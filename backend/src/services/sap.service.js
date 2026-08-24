@@ -1044,7 +1044,14 @@ class SAPService {
         if (rows.length === 0) continue;
         resultado[itemCode] = rows.map(row => ({
           batch:               row.DistNumber,
-          cantidad_disponible: parseFloat(parseFloat(row.Quantity).toFixed(3)),
+          // FIX 2026-08-24 (Hallazgo 7): toFixed(3) redondeaba a gramo entero
+          // (1g de resolución) el stock disponible cacheado por lote. Un real
+          // de 0.6g quedaba mostrado como "1g" disponible — Orbit pedía
+          // exactamente eso y SAP lo rechazaba por insuficiente, porque el
+          // real seguía siendo menor. Mismo patrón que los fixes de precisión
+          // de ingredientes_masa/pesaje_lotes_consumo, aplicado aquí al
+          // snapshot de inventario por lote.
+          cantidad_disponible: parseFloat(parseFloat(row.Quantity).toFixed(6)),
           admissionDate:       parseFechaSAP(row.CreateDate),
           expirationDate:      parseFechaSAP(row.ExpDate),
           manufacturingDate:   parseFechaSAP(row.MnfDate),

@@ -64,7 +64,12 @@ def main():
             item_code, dist_number, quantity, exp_date, mnf_date, create_date = row
             resultado.setdefault(item_code, []).append({
                 "batch": dist_number,
-                "cantidad_disponible": round(float(quantity), 3),
+                # FIX 2026-08-24 (Hallazgo 7): redondear a 3 decimales (1g de
+                # resolucion) hacia arriba mostraba como "1g disponible" un
+                # real de, por ejemplo, 0.6g -- Orbit pedia exactamente eso y
+                # SAP lo rechazaba por insuficiente. Misma precision que el
+                # resto de los fixes de esta sesion.
+                "cantidad_disponible": round(float(quantity), 6),
                 "admissionDate": parse_fecha_sap(create_date),
                 "expirationDate": parse_fecha_sap(exp_date),
                 "manufacturingDate": parse_fecha_sap(mnf_date),
