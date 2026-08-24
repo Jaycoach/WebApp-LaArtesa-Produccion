@@ -80,6 +80,8 @@ export const HorneadoMasa: React.FC = () => {
       setTipoHornoId(reg.tipo_horno_id);
     } else setEtapa('completado');
 
+    setObservaciones(reg.observaciones || '');
+
     // Inicializar inputs por producto con datos existentes si los hay
     if (reg.unidades_terminadas_por_producto && data?.productos_horneado?.length) {
       const init: Record<number, string> = {};
