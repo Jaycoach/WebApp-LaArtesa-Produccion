@@ -506,9 +506,11 @@ const autoCompletarDecoracion = async (masaId, usuarioId) => {
          SET disponible = true, verificado = true, pesado = true,
              peso_real = COALESCE(peso_real, cantidad_gramos),
              lote = COALESCE($2, lote),
+             usuario_peso = COALESCE(usuario_peso, $3),
+             timestamp_peso = COALESCE(timestamp_peso, NOW()),
              updated_at = NOW()
          WHERE id = $1`,
-        [ing.id, loteAsignado]
+        [ing.id, loteAsignado, usuarioId]
       );
     }
 
