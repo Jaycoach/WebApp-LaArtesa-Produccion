@@ -1517,7 +1517,7 @@ const completarFase = async (req, res, next) => {
       logger.info(`Masa ${masaId}: registro de amasado guardado (amasadora_id=${amasadora_id})`);
 
       const faseActualizada = await fasesModel.updateEstadoFase(
-        masaId, 'AMASADO', 'COMPLETADA', 100, req.user.id, datos
+        masaId, 'AMASADO', 'COMPLETADA', 100, req.user.id, datosAmasado
       );
       const siguienteFase = await fasesModel.desbloquearSiguienteFase(masaId, 'AMASADO');
 

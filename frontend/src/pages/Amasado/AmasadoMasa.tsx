@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { Card } from '@/components/common';
 import { useMasaDetail, useComposicion } from '../../hooks/useMasas';
 import { useAmasadoras } from '../../hooks/useConfig';
-import { useCompletarFase } from '../../hooks/useFases';
+import { useCompletarFase, useFases } from '../../hooks/useFases';
 import { ModalMO } from '../../components/common/ModalMO';
 import { BarraNavegacionFases } from '../../components/common/BarraNavegacionFases';
 
@@ -14,6 +14,7 @@ export const AmasadoMasa: React.FC = () => {
   const { data: masa, isLoading: loadingMasa } = useMasaDetail(masaIdNum);
   const { data: composicion } = useComposicion(masaIdNum);
   const { data: amasadoras } = useAmasadoras();
+  const { data: fasesProgreso } = useFases(masaId!);
   const completarMutation = useCompletarFase();
 
   // Solo lo que Kevin pidió ver en Amasado: harina y agua ya pesadas en Pesaje.
@@ -31,6 +32,26 @@ export const AmasadoMasa: React.FC = () => {
     amasadora_id: '1',
     observaciones: '',
   });
+
+  // Rehidratar formData desde progreso_fases.datos_fase — sin esto se pierde
+  // al desmontar/remontar el componente (ej. navegar a División y volver),
+  // mismo patrón que DivisionMasa.tsx. Compatible con filas históricas donde
+  // datos_fase quedó envuelto como {datos: {...}} (bug de doble-anidado ya
+  // corregido en el backend, pero los registros viejos conservan esa forma).
+  useEffect(() => {
+    const faseAmasado = (fasesProgreso as unknown as any[])?.find((f: any) => f.fase === 'AMASADO');
+    const guardado = faseAmasado?.datos_fase?.datos ?? faseAmasado?.datos_fase;
+    if (guardado && Object.keys(guardado).length > 0) {
+      setFormData(prev => ({
+        temperatura_masa_final: guardado.temperatura_masa_final != null ? String(guardado.temperatura_masa_final) : prev.temperatura_masa_final,
+        velocidad_1_minutos:    guardado.velocidad_1_minutos != null ? String(guardado.velocidad_1_minutos) : prev.velocidad_1_minutos,
+        velocidad_2_minutos:    guardado.velocidad_2_minutos != null ? String(guardado.velocidad_2_minutos) : prev.velocidad_2_minutos,
+        temperatura_agua:       guardado.temperatura_agua != null ? String(guardado.temperatura_agua) : prev.temperatura_agua,
+        amasadora_id:           guardado.amasadora_id != null ? String(guardado.amasadora_id) : prev.amasadora_id,
+        observaciones:          guardado.observaciones ?? prev.observaciones,
+      }));
+    }
+  }, [fasesProgreso]);
 
   const handleCompletarClick = () => {
     if (!formData.temperatura_masa_final || !formData.velocidad_1_minutos || !formData.velocidad_2_minutos) {
