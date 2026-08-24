@@ -1654,7 +1654,7 @@ const sincronizarBOM = async (req, res, next) => {
     // forzar el dato maestro de un ítem puntual, hoy no hay forma — habría que
     // agregar el mismo filtro a sincronizarInventarioMP (pendiente de decidir,
     // no se asume aquí).
-    const itemsParam = req.body?.items;
+    const itemsParam = req?.body?.items;
     const itemCodesFiltro = itemsParam
       ? (Array.isArray(itemsParam) ? itemsParam : itemsParam.split(','))
           .map(c => String(c).trim().toUpperCase())
@@ -1901,7 +1901,7 @@ const sincronizarInventarioMP = async (req, res, next) => {
     // completos. Los pasos 1-2 (stock/lotes de materia prima) NO se acotan —
     // siguen corriendo completos siempre, con o sin `items` — no es lo que
     // pidió este cambio. Sin `items`, comportamiento idéntico al de hoy.
-    const itemsParamPT = req.body?.items;
+    const itemsParamPT = req?.body?.items;
     const itemCodesFiltroPT = itemsParamPT
       ? (Array.isArray(itemsParamPT) ? itemsParamPT : itemsParamPT.split(','))
           .map(c => String(c).trim().toUpperCase())
