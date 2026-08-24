@@ -819,17 +819,21 @@ const confirmarPesaje = async (req, res, next) => {
     );
 
     if (lotesDesactualizados.length > 0) {
+      // Hallazgo 4: mensaje en lenguaje llano (sin "snapshot") — item_code se
+      // incluye para que el frontend pueda ofrecer "Sincronizar ahora" sobre
+      // justo estos ítems, sin que el usuario navegue a otra pantalla.
       return res.status(409).json({
         success: false,
-        message: `No se puede confirmar el pesaje: el inventario de ${lotesDesactualizados.length} lote(s) no se ha sincronizado en las últimas ${umbralHoras}h. Sincroniza el inventario SAP antes de confirmar.`,
+        message: `El stock de ${lotesDesactualizados.length} producto(s) no se ha actualizado en las últimas ${umbralHoras} horas. Sincroniza el inventario antes de confirmar.`,
         data: {
           lotes_desactualizados: lotesDesactualizados.map(l => ({
             ingrediente:      l.ingrediente_nombre,
+            item_code:        l.item_code,
             lote:             l.batch,
             ultimo_sync:      l.ultimo_sync,
             horas_desde_sync: l.ultimo_sync ? Math.round(parseFloat(l.horas_desde_sync) * 10) / 10 : null,
           })),
-          instruccion: 'Sincroniza el inventario/lotes SAP y vuelve a intentar confirmar.',
+          instruccion: 'Sincroniza el inventario y vuelve a intentar confirmar.',
         },
       });
     }

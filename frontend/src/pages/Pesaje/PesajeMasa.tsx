@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card } from '@/components/common';
 import { useChecklist, useUpdateIngrediente, useConfirmarPesaje, useAjustesPendientes, useConfirmarAjustesPendientes } from '../../hooks/useChecklist';
+import { useSincronizarLotesItem } from '../../hooks/useMasas';
 import { ModalMO } from '../../components/common/ModalMO';
 import { ModalCancelarMasa } from '@/components/common/ModalCancelarMasa';
 import { BarraNavegacionFases } from '../../components/common/BarraNavegacionFases';
@@ -30,6 +31,7 @@ export const PesajeMasa: React.FC = () => {
   const ingredienteRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const { data: ajustesData, isLoading: cargandoAjustes } = useAjustesPendientes(masaIdNum, mostrarAjustes);
   const confirmarAjustesMutation = useConfirmarAjustesPendientes();
+  const sincronizarLotesMutation = useSincronizarLotesItem();
 
   const parseFechaVencimiento = (raw: string): string | null => {
     const s = raw.replace(/[^0-9]/g, ''); // solo dígitos
@@ -260,15 +262,26 @@ export const PesajeMasa: React.FC = () => {
   };
 
   const [confirmando, setConfirmando] = useState(false);
+  const [mostrarConfirmarModal, setMostrarConfirmarModal] = useState(false);
+  const [resultadoConfirmacion, setResultadoConfirmacion] = useState<{ docNum: string | number } | null>(null);
+  const [inventarioDesactualizado, setInventarioDesactualizado] = useState<{
+    mensaje: string;
+    lotes: { ingrediente: string; item_code: string; lote: string; horas_desde_sync: number | null }[];
+  } | null>(null);
 
-  const handleConfirmar = async () => {
+  const handleConfirmarClick = () => {
     if (confirmando || confirmarMutation.isPending) return;
-    if (!confirm('¿Confirmar pesaje completo? Esto enviará el consumo a SAP y desbloqueará el amasado.')) return;
+    setMostrarConfirmarModal(true);
+  };
+
+  const ejecutarConfirmacion = async () => {
+    setMostrarConfirmarModal(false);
+    if (confirmando || confirmarMutation.isPending) return;
     setConfirmando(true);
     try {
       const resultado = await confirmarMutation.mutateAsync(masaIdNum);
       const docNum = resultado?.sap_doc_num ?? resultado?.sap_doc_entry ?? '—';
-      alert(`✅ Pesaje confirmado exitosamente.\nSalida SAP Nº ${docNum} creada.\n\nPuedes continuar a Amasado con el botón de arriba cuando estés listo.`);
+      setResultadoConfirmacion({ docNum });
     } catch (err: any) {
         const data = err?.data || {};
         const mensaje = err?.message || 'Error al confirmar pesaje';
@@ -277,7 +290,7 @@ export const PesajeMasa: React.FC = () => {
         const sinLote: string[] = data?.sin_lote || [];
         const loteInvalido: string[] = data?.lote_invalido || [];
 
-        // Caso 2: snapshot de stock por lote desactualizado (validación previa a SAP, HTTP 409)
+        // Caso 2: stock desactualizado por lote (validación previa a SAP, HTTP 409)
         const lotesDesactualizados: any[] = data?.lotes_desactualizados || [];
 
         if (sinLote.length > 0 || loteInvalido.length > 0) {
@@ -294,14 +307,7 @@ export const PesajeMasa: React.FC = () => {
           alert(textoError);
 
         } else if (lotesDesactualizados.length > 0) {
-          let textoError = `⚠ Inventario desactualizado\n\n${mensaje}\n`;
-          textoError += `\nLotes con snapshot viejo:\n`;
-          lotesDesactualizados.forEach((l: any) => {
-            const horas = l.horas_desde_sync != null ? `hace ${l.horas_desde_sync}h` : 'nunca sincronizado';
-            textoError += `  • ${l.ingrediente} — lote ${l.lote} (${horas})\n`;
-          });
-          textoError += `\nSincroniza el inventario/lotes SAP (menú Sincronización) y vuelve a confirmar.`;
-          alert(textoError);
+          setInventarioDesactualizado({ mensaje, lotes: lotesDesactualizados });
 
         // Caso 3: stock insuficiente en SAP (HTTP 502)
         } else {
@@ -327,6 +333,21 @@ export const PesajeMasa: React.FC = () => {
       } finally {
         setConfirmando(false);
       }
+  };
+
+  // Sincroniza puntualmente los ítems del bloqueo por inventario desactualizado
+  // y, si sale bien, reintenta la confirmación automáticamente — evita que el
+  // usuario tenga que cerrar el modal, ir al menú Sincronización y volver.
+  const handleSincronizarYReintentar = async () => {
+    if (!inventarioDesactualizado) return;
+    const items = Array.from(new Set(inventarioDesactualizado.lotes.map(l => l.item_code).filter(Boolean))).join(',');
+    try {
+      await sincronizarLotesMutation.mutateAsync(items);
+      setInventarioDesactualizado(null);
+      await ejecutarConfirmacion();
+    } catch (err: any) {
+      alert(`No se pudo sincronizar el inventario: ${err?.message || 'error desconocido'}. Intenta de nuevo o hazlo desde el menú Sincronización.`);
+    }
   };
 
   if (isLoading) {
@@ -387,7 +408,7 @@ export const PesajeMasa: React.FC = () => {
             checklist.todosPesados && !checklist.pesaje_completado
               ? {
                   label: '✅ Confirmar Pesaje Completo',
-                  onClick: handleConfirmar,
+                  onClick: handleConfirmarClick,
                   loading: confirmarMutation.isPending || confirmando,
                 }
               : undefined
@@ -1007,6 +1028,102 @@ export const PesajeMasa: React.FC = () => {
           onClose={() => setMostrarCancelar(false)}
           onCancelada={() => navigate('/planificacion')}
         />
+
+        {mostrarConfirmarModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+              <h3 className="font-bold text-lg mb-3 text-gray-800">Confirmar pesaje completo</h3>
+              <p className="text-sm text-gray-600 mb-5">
+                Esto enviará el consumo de materia prima a SAP y desbloqueará Amasado. No se puede deshacer.
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setMostrarConfirmarModal(false)}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm font-medium"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={ejecutarConfirmacion}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+                >
+                  Confirmar Pesaje
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {resultadoConfirmacion && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-2xl">✅</span>
+                <h3 className="font-bold text-lg text-green-700">Pesaje confirmado</h3>
+              </div>
+              <div className="bg-green-50 border border-green-200 rounded p-3 mb-4 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Salida SAP</span>
+                  <span className="font-mono font-semibold text-gray-800">Nº {resultadoConfirmacion.docNum}</span>
+                </div>
+              </div>
+              <p className="text-sm text-gray-600 mb-4">
+                Puedes continuar a Amasado con el botón de arriba cuando estés listo.
+              </p>
+              <div className="flex justify-end">
+                <button
+                  onClick={() => setResultadoConfirmacion(null)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+                >
+                  Entendido
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {inventarioDesactualizado && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-lg max-h-[85vh] overflow-y-auto">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-2xl">⚠️</span>
+                <h3 className="font-bold text-lg text-amber-700">Inventario desactualizado</h3>
+              </div>
+              <p className="text-sm text-gray-700 mb-4">
+                El stock de estos productos no se ha actualizado en las últimas horas. Antes de confirmar,
+                sincroniza el inventario para asegurarte de que las cantidades disponibles sean correctas.
+              </p>
+              <div className="border border-amber-200 rounded-lg divide-y divide-amber-100 mb-4">
+                {inventarioDesactualizado.lotes.map((l, i) => (
+                  <div key={i} className="flex justify-between items-center px-3 py-2 text-sm bg-amber-50/50">
+                    <div>
+                      <p className="font-medium text-gray-800">{l.ingrediente}</p>
+                      <p className="text-xs text-gray-500">Lote {l.lote}</p>
+                    </div>
+                    <span className="text-xs font-semibold text-amber-700">
+                      {l.horas_desde_sync != null ? `hace ${l.horas_desde_sync}h` : 'nunca sincronizado'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setInventarioDesactualizado(null)}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm font-medium"
+                >
+                  Cerrar
+                </button>
+                <button
+                  onClick={handleSincronizarYReintentar}
+                  disabled={sincronizarLotesMutation.isPending || confirmando}
+                  className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 text-sm font-medium"
+                >
+                  {sincronizarLotesMutation.isPending ? 'Sincronizando...' : confirmando ? 'Confirmando...' : 'Sincronizar ahora'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
