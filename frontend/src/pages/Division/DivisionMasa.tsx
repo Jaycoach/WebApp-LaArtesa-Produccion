@@ -20,6 +20,7 @@ export const DivisionMasa: React.FC = () => {
 
   const [showMO, setShowMO] = useState(false);
   const [advertenciasPendientes, setAdvertenciasPendientes] = useState<string[] | null>(null);
+  const [mostrarConfirmarModal, setMostrarConfirmarModal] = useState(false);
   const [formData, setFormData] = useState({
     maquina_corte_id: '',
     temperatura_entrada: '',
@@ -212,11 +213,12 @@ export const DivisionMasa: React.FC = () => {
       return;
     }
 
-    await ejecutarCompletarDivision();
+    setMostrarConfirmarModal(true);
   };
 
   const ejecutarCompletarDivision = async () => {
     setAdvertenciasPendientes(null);
+    setMostrarConfirmarModal(false);
     const tiempoReposo = calcularTiempoReposo();
 
     try {
@@ -765,6 +767,31 @@ export const DivisionMasa: React.FC = () => {
           </div>
         </div>
         {showMO && <ModalMO masaId={Number(masaId)} fase="DIVISION" onClose={() => setShowMO(false)} />}
+
+        {mostrarConfirmarModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+              <h3 className="font-bold text-lg mb-3 text-gray-800">Confirmar División</h3>
+              <p className="text-sm text-gray-600 mb-5">
+                ¿Confirmar que la división está completa? Esto desbloqueará la siguiente fase.
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setMostrarConfirmarModal(false)}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm font-medium"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={ejecutarCompletarDivision}
+                  className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 text-sm font-medium"
+                >
+                  Completar División
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {advertenciasPendientes && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
