@@ -237,6 +237,9 @@ export const PesajeMasa: React.FC = () => {
         },
       });
       setEditando(null);
+      if (ing?.ingrediente_sap_code && ing.ingrediente_sap_code === ingredienteConErrorSap) {
+        setIngredienteConErrorSap(null);
+      }
     } catch (err: any) {
       // handleError de api.ts transforma el error — usa err?.status (no err?.response?.status)
       if (err?.status === 409) {
@@ -268,6 +271,11 @@ export const PesajeMasa: React.FC = () => {
     mensaje: string;
     lotes: { ingrediente: string; item_code: string; lote: string; horas_desde_sync: number | null }[];
   } | null>(null);
+  // Hallazgo 5: item_code del ingrediente cuyo envío a SAP fue rechazado al
+  // confirmar (ya estaba "pesado", pero ese lote específico no tenía stock
+  // real) — marca visualmente el ingrediente como pendiente de corrección
+  // en vez de dejarlo indistinguible de los demás ya confirmados.
+  const [ingredienteConErrorSap, setIngredienteConErrorSap] = useState<string | null>(null);
 
   const handleConfirmarClick = () => {
     if (confirmando || confirmarMutation.isPending) return;
@@ -309,26 +317,32 @@ export const PesajeMasa: React.FC = () => {
         } else if (lotesDesactualizados.length > 0) {
           setInventarioDesactualizado({ mensaje, lotes: lotesDesactualizados });
 
-        // Caso 3: stock insuficiente en SAP (HTTP 502)
+        // Caso 3: stock insuficiente en SAP (HTTP 502) — el ingrediente ya estaba
+        // "pesado", pero ese lote específico no tiene stock real en SAP. En vez de
+        // un alert() ciego, se marca el ingrediente como pendiente de corrección
+        // y se abre su formulario de edición con el mismo aviso de lote fallido +
+        // alternativas que ya usa el flujo manual (stockError) — así el usuario ve
+        // exactamente cuál ingrediente corregir y con qué lotes, sin adivinar.
         } else {
           const loteFallido = data?.lote_fallido || null;
           const alternativas: any[] = data?.alternativas || [];
-          let textoError = `⚠ Error SAP\n\n${mensaje}`;
-          if (loteFallido) {
-            textoError += `\n\nIngrediente: ${loteFallido.item_name || loteFallido.item_code}`;
-            textoError += `\nLote sin stock suficiente en SAP: ${loteFallido.batch}`;
-          }
-          if (alternativas.length > 0) {
-            textoError += `\n\nLotes alternativos disponibles:`;
-            alternativas.forEach((a: any) => {
-              textoError += `\n  • Lote ${a.batch}: ${Number(a.cantidad_disponible).toFixed(3)} kg`;
-              if (a.expiration_date) textoError += ` (vence ${formatDate(a.expiration_date.slice(0, 10))})`;
+
+          if (loteFallido?.item_code) {
+            setIngredienteConErrorSap(loteFallido.item_code);
+            const ingConError = checklist?.ingredientes.find(
+              (i: any) => i.ingrediente_sap_code === loteFallido.item_code
+            );
+            if (ingConError && puedeEditar) handleEditar(ingConError);
+            setStockError({
+              ingredienteId: ingConError?.id ?? -1,
+              mensaje: mensaje,
+              lote_fallido: loteFallido.batch,
+              disponible: null,
+              lotes_actuales: alternativas,
             });
-            textoError += `\n\nCambia el lote en el pesaje y vuelve a confirmar.`;
-          } else if (loteFallido) {
-            textoError += `\n\nNo hay lotes alternativos con stock. Sincroniza el inventario SAP o contacta al supervisor.`;
+          } else {
+            alert(`⚠ Error SAP\n\n${mensaje}`);
           }
-          alert(textoError);
         }
       } finally {
         setConfirmando(false);
@@ -398,6 +412,17 @@ export const PesajeMasa: React.FC = () => {
     );
   }
 
+  // Hallazgo 5: si un ingrediente quedó marcado con error de SAP al confirmar,
+  // el checklist del backend lo sigue contando como "pesado" (la validación en
+  // sí fue correcta, lo que falló fue el envío de ESE lote a SAP) — se ajusta
+  // la vista para no mostrarlo como completo mientras no se corrija, y ocultar
+  // "Confirmar Pesaje Completo" para no reintentar a ciegas la misma falla.
+  const totalNoDecoracion = checklist.ingredientes.filter((i: any) => !i.es_decoracion).length;
+  const todosPesadosAjustado = ingredienteConErrorSap ? false : checklist.todosPesados;
+  const progresoAjustado = ingredienteConErrorSap && totalNoDecoracion > 0
+    ? Math.max(0, Math.round(checklist.progreso - (100 / (totalNoDecoracion * 3))))
+    : checklist.progreso;
+
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -405,7 +430,7 @@ export const PesajeMasa: React.FC = () => {
           masaId={masaId!}
           codigoMasa={checklist.codigo_masa}
           accionExtra={
-            checklist.todosPesados && !checklist.pesaje_completado
+            todosPesadosAjustado && !checklist.pesaje_completado
               ? {
                   label: '✅ Confirmar Pesaje Completo',
                   onClick: handleConfirmarClick,
@@ -458,11 +483,11 @@ export const PesajeMasa: React.FC = () => {
             </div>
             <div className="text-right">
               <div className="text-sm text-gray-600">Progreso</div>
-              <div className="text-3xl font-bold text-blue-600">{checklist.progreso}%</div>
+              <div className="text-3xl font-bold text-blue-600">{progresoAjustado}%</div>
               <div className="w-48 bg-gray-200 rounded-full h-2 mt-2">
                 <div
                   className="bg-blue-600 h-2 rounded-full"
-                  style={{ width: `${checklist.progreso}%` }}
+                  style={{ width: `${progresoAjustado}%` }}
                 ></div>
               </div>
             </div>
@@ -498,9 +523,9 @@ export const PesajeMasa: React.FC = () => {
                 <span className="font-medium text-gray-900">Verificados</span>
               </div>
             </div>
-            <div className={`p-4 rounded-lg ${checklist.todosPesados ? 'bg-green-50' : 'bg-gray-50'}`}>
+            <div className={`p-4 rounded-lg ${todosPesadosAjustado ? 'bg-green-50' : 'bg-gray-50'}`}>
               <div className="flex items-center gap-2">
-                {checklist.todosPesados ? (
+                {todosPesadosAjustado ? (
                   <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                   </svg>
@@ -551,6 +576,11 @@ export const PesajeMasa: React.FC = () => {
                       {ing.sin_stock && (
                         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-800 border border-red-300">
                           ⚠ SIN STOCK
+                        </span>
+                      )}
+                      {ing.ingrediente_sap_code && ing.ingrediente_sap_code === ingredienteConErrorSap && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-800 border border-red-300">
+                          ⚠ SAP rechazó este lote — requiere corrección
                         </span>
                       )}
                     </div>
