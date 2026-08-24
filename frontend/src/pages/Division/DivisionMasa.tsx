@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { Card } from '@/components/common';
 import { useMasaDetail, useProductos } from '../../hooks/useMasas';
-import { useCompletarFase } from '../../hooks/useFases';
+import { useCompletarFase, useFases } from '../../hooks/useFases';
 import { useMaquinasCorte } from '../../hooks/useConfig';
 import { ModalMO } from '../../components/common/ModalMO';
 import { BarraNavegacionFases } from '../../components/common/BarraNavegacionFases';
@@ -15,6 +15,7 @@ export const DivisionMasa: React.FC = () => {
   const { data: masa, isLoading: loadingMasa } = useMasaDetail(masaIdNum);
   const { data: productos, isLoading: loadingProductos } = useProductos(masaIdNum);
   const { data: maquinasCorte } = useMaquinasCorte();
+  const { data: fasesProgreso } = useFases(masaId!);
   const completarMutation = useCompletarFase();
 
   const [showMO, setShowMO] = useState(false);
@@ -43,6 +44,25 @@ export const DivisionMasa: React.FC = () => {
       });
     }
   }, [masa?.fase_actual, productos]);
+
+  // Rehidratar formData (máquina, temperatura, reposo, observaciones) desde
+  // progreso_fases.datos_fase — sin esto se pierde al desmontar/remontar el
+  // componente (ej. navegar a Formado y volver), porque formData solo vivía
+  // en useState local. Mismo patrón que FormadoMasa.tsx.
+  useEffect(() => {
+    const faseDivision = (fasesProgreso as unknown as any[])?.find((f: any) => f.fase === 'DIVISION');
+    const guardado = faseDivision?.datos_fase;
+    if (guardado && Object.keys(guardado).length > 0) {
+      setFormData(prev => ({
+        maquina_corte_id:    guardado.maquina_corte_id != null ? String(guardado.maquina_corte_id) : prev.maquina_corte_id,
+        temperatura_entrada: guardado.temperatura_entrada != null ? String(guardado.temperatura_entrada) : prev.temperatura_entrada,
+        requiere_reposo:     guardado.requiere_reposo ?? prev.requiere_reposo,
+        hora_inicio_reposo:  guardado.hora_inicio_reposo ?? prev.hora_inicio_reposo,
+        hora_fin_reposo:     guardado.hora_fin_reposo ?? prev.hora_fin_reposo,
+        observaciones:       guardado.observaciones ?? prev.observaciones,
+      }));
+    }
+  }, [fasesProgreso]);
 
   // Preseleccionar la primera máquina del catálogo al cargar, sin pisar una
   // selección que el usuario ya haya hecho.
