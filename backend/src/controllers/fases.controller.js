@@ -1411,6 +1411,42 @@ const completarFase = async (req, res, next) => {
         `División masa ${masaId}: cantidades guardadas para ${productosResult.rows.length} productos`
       );
 
+      // 3b. Registrar en registros_division (histórico consultable con JOIN,
+      // igual que registros_amasado) — hasta ahora este dato solo vivía en
+      // progreso_fases.datos_fase (JSON sin estructura), sin llegar nunca a
+      // la tabla dedicada que ya existe en el esquema (Hallazgo 9).
+      await db.query(`
+        INSERT INTO registros_division
+          (masa_id, maquina_corte_id, maquina_nombre,
+           requiere_reposo, hora_inicio_reposo, hora_fin_reposo, tiempo_reposo_minutos,
+           temperatura_entrada, usuario_id, observaciones)
+        VALUES (
+          $1, $2, (SELECT nombre FROM maquinas_corte WHERE id = $2),
+          $3, $4, $5, $6, $7, $8, $9
+        )
+        ON CONFLICT (masa_id) DO UPDATE SET
+          maquina_corte_id      = EXCLUDED.maquina_corte_id,
+          maquina_nombre        = EXCLUDED.maquina_nombre,
+          requiere_reposo       = EXCLUDED.requiere_reposo,
+          hora_inicio_reposo    = EXCLUDED.hora_inicio_reposo,
+          hora_fin_reposo       = EXCLUDED.hora_fin_reposo,
+          tiempo_reposo_minutos = EXCLUDED.tiempo_reposo_minutos,
+          temperatura_entrada   = EXCLUDED.temperatura_entrada,
+          usuario_id            = EXCLUDED.usuario_id,
+          observaciones         = EXCLUDED.observaciones,
+          updated_at            = NOW()
+      `, [
+        masaId,
+        restosDatos.maquina_corte_id ? Number(restosDatos.maquina_corte_id) : null,
+        !!restosDatos.requiere_reposo,
+        restosDatos.hora_inicio_reposo || null,
+        restosDatos.hora_fin_reposo || null,
+        restosDatos.tiempo_reposo_minutos != null ? Number(restosDatos.tiempo_reposo_minutos) : null,
+        restosDatos.temperatura_entrada != null ? Number(restosDatos.temperatura_entrada) : null,
+        req.user.id,
+        restosDatos.observaciones || null,
+      ]);
+
       // 4. Completar fase y desbloquear siguiente
       const faseActualizada = await fasesModel.updateEstadoFase(
         masaId, 'DIVISION', 'COMPLETADA', 100, req.user.id,
