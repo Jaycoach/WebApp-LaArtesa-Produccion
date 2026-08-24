@@ -127,7 +127,11 @@ export const PesajeMasa: React.FC = () => {
           const loteInfo = ingrediente.lotes?.find((x: any) => x.batch === l.batch);
           return {
             batch: l.batch,
-            cantidad_kg: String(Math.round(l.cantidad_kg * 1000)),
+            // FIX 2026-08-24: Math.round truncaba a gramo entero SIEMPRE, perdiendo
+            // la precisión decimal real de la báscula en todo pesaje autosugerido.
+            // peso_real es NUMERIC(10,2) — 2 decimales de gramo es la precisión
+            // real que soporta la columna, no hace falta más.
+            cantidad_kg: String(Number((l.cantidad_kg * 1000).toFixed(2))),
             fecha_vencimiento: loteInfo?.expiration_date ? loteInfo.expiration_date.substring(0, 10) : '',
           };
         })

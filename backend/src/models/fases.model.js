@@ -326,6 +326,16 @@ const updateIngredienteChecklist = async (ingredienteId, data) => {
 
       // Validar y descontar cada lote nuevo — SELECT FOR UPDATE evita concurrencia
       for (const lc of lotes_consumo) {
+        // FIX 2026-08-24: sin este chequeo, una cantidad que resuelve a 0 (o
+        // negativa) llegaba intacta hasta el INSERT y violaba el
+        // CHECK (cantidad_kg > 0) de pesaje_lotes_consumo — una excepción de
+        // Postgres sin manejar que el controller devolvía como 500 vacío.
+        if (!(parseFloat(lc.cantidad_kg) > 0)) {
+          throw Object.assign(
+            new Error(`Cantidad inválida para el lote ${lc.batch}: debe ser mayor a 0 kg.`),
+            { status: 422, lote: lc.batch }
+          );
+        }
         const lockRow = await client.query(
           `SELECT cantidad_disponible FROM sap_lotes_mp
            WHERE item_code = $1 AND batch = $2

@@ -151,7 +151,13 @@ const getChecklist = async (req, res, next) => {
             if (restante <= 0) break;
             const aTomar = Math.min(parseFloat(l.cantidad_disponible), restante);
             if (aTomar > 0) {
-              sugerido.push({ batch: l.batch, cantidad_kg: Number(aTomar.toFixed(3)) });
+              // FIX 2026-08-24: toFixed(3) redondeaba a gramo entero (0.001 kg),
+              // colapsando a 0 cualquier ingrediente traza del BOM (< 0.5 g, ej.
+              // AJONJOLI NEGRO a 0.00001 kg) — con eso, la fila que se insertaba
+              // en pesaje_lotes_consumo (cantidad_kg NUMERIC(12,6), CHECK > 0)
+              // violaba el CHECK y tiraba un 500 sin mensaje. toFixed(6) conserva
+              // la misma precisión que ya trae sap_bom_componentes.cantidad.
+              sugerido.push({ batch: l.batch, cantidad_kg: Number(aTomar.toFixed(6)) });
               restante -= aTomar;
             }
           }
@@ -326,6 +332,13 @@ const updateIngrediente = async (req, res, next) => {
           disponible:     error.disponible  ?? null,
           lotes_actuales: error.lotes_actuales || [],
         },
+      });
+    }
+    if (error.status === 422) {
+      return res.status(422).json({
+        success: false,
+        message: error.message,
+        data: { lote_fallido: error.lote || null },
       });
     }
     logger.error('Error al actualizar ingrediente:', error);
