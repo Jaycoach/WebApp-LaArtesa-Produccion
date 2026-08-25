@@ -8,6 +8,7 @@ import { ModalCancelarMasa } from '@/components/common/ModalCancelarMasa';
 import { BarraNavegacionFases } from '../../components/common/BarraNavegacionFases';
 import { useAuthStore } from '../../store/useAuthStore';
 import { formatDate } from '@/utils/formatters';
+import { displayLote } from '../../types/api';
 
 export const PesajeMasa: React.FC = () => {
   const { masaId } = useParams<{ masaId: string }>();
@@ -469,7 +470,7 @@ export const PesajeMasa: React.FC = () => {
       <div className="max-w-7xl mx-auto space-y-6">
         <BarraNavegacionFases
           masaId={masaId!}
-          codigoMasa={checklist.codigo_masa}
+          codigoMasa={displayLote(checklist)}
           accionExtra={
             todosPesadosAjustado && !checklist.pesaje_completado
               ? {

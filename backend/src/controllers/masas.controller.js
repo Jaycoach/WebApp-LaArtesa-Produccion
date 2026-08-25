@@ -6,9 +6,12 @@ const db = require('../database/connection');
 const fasesModel = require('../models/fases.model');
 const sapService = require('../services/sap.service');
 const logger = require('../utils/logger');
-const { sendAprobacionMasaEmail, sendAprobacionMasaBulkEmail } = require('../services/email.service');
+const { sendAprobacionMasaEmail, sendAprobacionMasaBulkEmail, sendLoteActualizadoEmail } = require('../services/email.service');
 const { devolverStockMasa } = require('./pesaje.controller');
-const { simularAjusteDivisorPorGrupo, recalcularTotalesMasa } = require('./fases.controller');
+const {
+  simularAjusteDivisorPorGrupo, recalcularTotalesMasa,
+  simularPlanLotes, guardarPlanLotes,
+} = require('./fases.controller');
 
 // Etiquetas para el mensaje de bloqueo de aprobación — deben coincidir con
 // CAMPOS_MAESTRO_LABELS en frontend/src/pages/Planificacion/ListaMasas.tsx
@@ -319,10 +322,68 @@ const updateUnidadesProgramadas = async (req, res, next) => {
 
     await recalcularTotalesMasa(masaId, db);
 
+    // ── Migración 068: re-simular plan de lotes tras el cambio de delta ────
+    // El BOM/kg total puede cruzar (en cualquier dirección) el límite de
+    // amasadora, cambiando si la masa necesita subdivisión y/o cuántas tandas.
+    // Se reemplaza masas_lotes_simulados completo y, si la estructura de
+    // lotes cambió respecto al plan anterior, se avisa a Empaque (correo
+    // aparte del de aprobación, que ya se envió una vez con el plan inicial).
+    const planAnteriorResult = await db.query(
+      `SELECT tanda_letra, lote_produccion FROM masas_lotes_simulados
+       WHERE masa_id = $1 ORDER BY tanda_letra NULLS FIRST`,
+      [masaId]
+    );
+    const lotesAnteriores = planAnteriorResult.rows.map(r => r.lote_produccion);
+
+    const nuevoPlan = await simularPlanLotes(masaId, db);
+    let lotesNuevos = [];
+    if (nuevoPlan) {
+      await guardarPlanLotes(masaId, nuevoPlan, req.user.id, db);
+      lotesNuevos = nuevoPlan.tandas.map(t => t.lote);
+    } else {
+      // Sin productos aptos con BOM (todos quedaron fuera) — no hay plan que simular.
+      await db.query(`DELETE FROM masas_lotes_simulados WHERE masa_id = $1`, [masaId]);
+    }
+
+    const estructuraCambio = lotesAnteriores.length !== lotesNuevos.length
+      || lotesAnteriores.some((l, i) => l !== lotesNuevos[i]);
+
+    // Solo avisa si YA había un plan previo (masa recién aprobada, primer
+    // ajuste de delta) — el correo de aprobación ya cubrió el aviso inicial.
+    if (estructuraCambio && lotesAnteriores.length > 0) {
+      setImmediate(async () => {
+        const clienteEmail = await db.getClient();
+        try {
+          const correosCfg = await clienteEmail.query(
+            `SELECT valor FROM configuracion_sistema WHERE clave = 'correos_empaque'`
+          );
+          const destinatarios = (correosCfg.rows[0]?.valor || '').split(',').map(e => e.trim()).filter(Boolean);
+          if (!destinatarios.length) return;
+
+          const masaInfoR = await clienteEmail.query(
+            `SELECT codigo_masa, tipo_masa, fecha_produccion FROM masas_produccion WHERE id = $1`,
+            [masaId]
+          );
+          await sendLoteActualizadoEmail({
+            to: destinatarios.join(','),
+            masa: masaInfoR.rows[0],
+            lotesAnteriores,
+            lotesNuevos,
+          });
+          logger.info(`Notificación lote actualizado enviada para masa ${masaId} a: ${destinatarios.join(', ')}`);
+        } catch (emailErr) {
+          logger.warn(`Notificación lote actualizado masa ${masaId} falló (no crítico): ${emailErr.message}`);
+        } finally {
+          clienteEmail.release();
+        }
+      });
+    }
+
     res.json({
       success: true,
       data: producto,
       message: `Ajuste aplicado: ${delta_paquetes > 0 ? '+' : ''}${delta_paquetes} paquetes`,
+      lotes_simulados: lotesNuevos,
     });
   } catch (error) {
     logger.error('Error al actualizar unidades programadas:', error);
@@ -534,6 +595,20 @@ const aprobarMasaCore = async (id, userId, opts = {}) => {
 
   await recalcularTotalesMasa(id, db);
 
+  // ── Migración 068: simular plan de lotes (BOM + posible subdivisión en
+  // tandas + lote por tanda) al momento de aprobar, para que el correo de
+  // alistamiento a Empaque (más abajo) ya muestre el/los lote(s) reales en
+  // vez de solo codigo_masa. Se persiste en masas_lotes_simulados;
+  // ejecutarSubdivision() lo consume después, al confirmar el pesaje.
+  const planLotes = await simularPlanLotes(id, db);
+  let lotesGenerados = [];
+  if (planLotes) {
+    await guardarPlanLotes(id, planLotes, userId, db);
+    lotesGenerados = planLotes.tandas.map(t => t.lote);
+  } else {
+    logger.warn(`aprobarMasaCore: masa ${id} sin productos aptos con BOM — no se pudo simular plan de lotes.`);
+  }
+
   const totalPaquetesR = await db.query(
     `SELECT COALESCE(SUM(unidades_programadas), 0) AS total
      FROM productos_por_masa WHERE masa_id = $1 AND apto_produccion = true`,
@@ -574,6 +649,7 @@ const aprobarMasaCore = async (id, userId, opts = {}) => {
             ...masa.rows[0],
             fecha_produccion: masa.rows[0].fecha_produccion || new Date(),
             total_paquetes: totalPaquetes,
+            lotes: lotesGenerados,
           },
           productosEmpaque: empaqueConNombre.rows,
         });

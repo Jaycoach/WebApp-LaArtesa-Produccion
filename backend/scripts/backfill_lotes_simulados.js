@@ -1,0 +1,143 @@
+/**
+ * Backfill de masas_lotes_simulados (migración 068).
+ *
+ * Cubre masas que quedaron APROBADAS / en PLANIFICACION ANTES de este deploy
+ * (nunca pasaron por aprobarMasaCore/updateUnidadesProgramadas con la
+ * simulación nueva) — sin este backfill, confirmarPesaje las cubriría igual
+ * vía su propio fallback (simula al vuelo si no encuentra plan), pero
+ * Empaque ya se habría quedado sin el correo de aprobación con el lote real
+ * y sin poder verlo en pantalla antes del pesaje. Ver FASE de implementación
+ * (2026-08-24), paso 10.
+ *
+ * Alcance: SOLO estado='APROBADA'. Se evaluó también incluir estado='PENDIENTE'
+ * (masas aún no aprobadas por un supervisor) y se descartó a propósito: esas
+ * masas todavía no pasaron por el delta+2 default ni por la simulación de
+ * grupo (simularAjusteDivisorPorGrupo) que solo corren dentro de
+ * aprobarMasaCore, así que cualquier plan calculado ahora sobre unidades sin
+ * ajustar quedaría estructuralmente distinto al que se generaría al aprobar
+ * de verdad — y guardarPlanLotes() fijaría lote_produccion en una masa que
+ * el supervisor ni siquiera revisó todavía. Si Jonathan confirma que sí hace
+ * falta cubrir PENDIENTE, se ajusta el filtro de abajo.
+ *
+ * Uso:
+ *   node scripts/backfill_lotes_simulados.js --dry-run   (BEGIN + ROLLBACK, no persiste nada)
+ *   node scripts/backfill_lotes_simulados.js             (BEGIN + COMMIT real)
+ *
+ * Idempotente: la selección de candidatas ya filtra
+ * "NOT EXISTS masas_lotes_simulados para esa masa", así que correr el script
+ * dos veces no vuelve a tocar una masa ya backfilleada (equivalente en
+ * efecto a ON CONFLICT DO NOTHING, sin necesitarlo: guardarPlanLotes() hace
+ * DELETE+INSERT completo por diseño para la re-simulación en vivo — usar
+ * ON CONFLICT DO NOTHING ahí sería incorrecto para ese otro caso de uso).
+ */
+
+const { Pool } = require('pg');
+require('dotenv').config();
+const config = require('../src/config');
+const { simularPlanLotes, guardarPlanLotes } = require('../src/controllers/fases.controller');
+
+const DRY_RUN = process.argv.includes('--dry-run');
+
+const pool = new Pool({
+  host:     config.database.host,
+  port:     config.database.port,
+  database: config.database.name,
+  user:     config.database.user,
+  password: config.database.password,
+  ssl:      config.database.ssl,
+});
+
+async function main() {
+  const client = await pool.connect();
+  const resumen = { ok: [], sinBom: [], error: [] };
+
+  try {
+    await client.query('BEGIN');
+
+    const candidatas = await client.query(`
+      SELECT mp.id, mp.codigo_masa, mp.fecha_produccion
+      FROM masas_produccion mp
+      WHERE mp.estado = 'APROBADA'
+        AND mp.fase_actual = 'PLANIFICACION'
+        AND NOT EXISTS (
+          SELECT 1 FROM ingredientes_masa im
+          WHERE im.masa_id = mp.id AND im.pesado = true
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM masas_lotes_simulados mls WHERE mls.masa_id = mp.id
+        )
+      ORDER BY mp.fecha_produccion
+    `);
+
+    console.log(`${DRY_RUN ? '[DRY-RUN] ' : ''}Candidatas para backfill: ${candidatas.rows.length}`);
+
+    for (const m of candidatas.rows) {
+      try {
+        const plan = await simularPlanLotes(m.id, client);
+        if (!plan) {
+          console.warn(`  [SIN BOM] masa ${m.id} (${m.codigo_masa}, ${m.fecha_produccion.toISOString().slice(0, 10)}) — sin productos aptos con BOM, se omite.`);
+          resumen.sinBom.push(m.id);
+          continue;
+        }
+        // simulado_por = NULL explícito: esta simulación la corrió el script,
+        // no un usuario real — mismo criterio de "no inventar autoría" que la
+        // migración 067 (Case B, usuario_id NULL cuando no hay quién firmarlo).
+        await guardarPlanLotes(m.id, plan, null, client);
+        const lotes = plan.tandas.map(t => t.lote).join(', ');
+        console.log(`  [OK] masa ${m.id} (${m.codigo_masa}, ${m.fecha_produccion.toISOString().slice(0, 10)}) → ${lotes}`);
+        resumen.ok.push(m.id);
+      } catch (err) {
+        console.error(`  [ERROR] masa ${m.id} (${m.codigo_masa}): ${err.message}`);
+        resumen.error.push(m.id);
+      }
+    }
+
+    if (resumen.error.length > 0) {
+      throw new Error(`${resumen.error.length} masa(s) fallaron durante la simulación — abortando transacción completa (nada se persiste). IDs: ${resumen.error.join(', ')}`);
+    }
+
+    // Verificación dentro de la misma transacción, antes de decidir commit/rollback
+    const verificacion = await client.query(`
+      SELECT mp.id, mp.codigo_masa, mp.fecha_produccion, mp.estado,
+             COUNT(mls.id) AS filas_lote_simulado
+      FROM masas_produccion mp
+      LEFT JOIN masas_lotes_simulados mls ON mls.masa_id = mp.id
+      WHERE mp.estado = 'APROBADA' AND mp.fase_actual = 'PLANIFICACION'
+      GROUP BY mp.id, mp.codigo_masa, mp.fecha_produccion, mp.estado
+      ORDER BY mp.fecha_produccion
+    `);
+    console.log('\n── Verificación (APROBADA + PLANIFICACION, todas) ──');
+    console.table(verificacion.rows.map(r => ({
+      id: r.id, codigo_masa: r.codigo_masa,
+      fecha: r.fecha_produccion.toISOString().slice(0, 10),
+      estado: r.estado, filas_lote_simulado: r.filas_lote_simulado,
+    })));
+    const enCero = verificacion.rows.filter(r => parseInt(r.filas_lote_simulado, 10) === 0);
+    if (enCero.length > 0) {
+      console.warn(`\n⚠️  ${enCero.length} masa(s) APROBADA/PLANIFICACION quedan con filas_lote_simulado=0 (posible: ya tenían ingrediente pesado, o sin BOM):`);
+      console.table(enCero.map(r => ({ id: r.id, codigo_masa: r.codigo_masa, fecha: r.fecha_produccion.toISOString().slice(0, 10) })));
+    } else {
+      console.log('\n✅ Ninguna masa APROBADA/PLANIFICACION quedó con filas_lote_simulado=0.');
+    }
+
+    if (DRY_RUN) {
+      await client.query('ROLLBACK');
+      console.log('\n[DRY-RUN] ROLLBACK aplicado — nada quedó persistido.');
+    } else {
+      await client.query('COMMIT');
+      console.log('\nCOMMIT aplicado.');
+    }
+
+    console.log(`\nResumen: ${resumen.ok.length} OK, ${resumen.sinBom.length} sin BOM (omitidas), ${resumen.error.length} con error.`);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('\nERROR — transacción revertida por completo, nada quedó persistido.');
+    console.error(err);
+    process.exitCode = 1;
+  } finally {
+    client.release();
+    await pool.end();
+  }
+}
+
+main();

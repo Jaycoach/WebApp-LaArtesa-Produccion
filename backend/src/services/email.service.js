@@ -312,6 +312,14 @@ const sendAprobacionMasaEmail = async ({ to, masa, productosEmpaque }) => {
     day: '2-digit', month: 'long', year: 'numeric',
   });
 
+  // Migración 068: lote(s) simulado(s) al aprobar (masa.lotes), en vez de
+  // codigo_masa — Empaque necesita el lote real de producción, no el código
+  // interno de la masa. Fallback a codigo_masa si por algún motivo no hay
+  // lotes (p.ej. la masa no tenía productos aptos con BOM al aprobar).
+  const lotesStr = (masa.lotes && masa.lotes.length > 0)
+    ? masa.lotes.join(', ')
+    : masa.codigo_masa;
+
   const filasEmpaque = productosEmpaque.map(p => `
     <tr>
       <td style="padding:8px 12px;color:#1e293b;font-size:13px;border-bottom:1px solid #f1f5f9;">${p.item_code}</td>
@@ -345,8 +353,8 @@ const sendAprobacionMasaEmail = async ({ to, masa, productosEmpaque }) => {
                   <tr><td style="padding:20px;">
                     <table width="100%" cellpadding="0" cellspacing="0">
                       <tr>
-                        <td style="padding:6px 0;color:#64748b;font-size:13px;width:140px;">Código masa</td>
-                        <td style="padding:6px 0;color:#1e293b;font-size:13px;font-weight:600;">${masa.codigo_masa}</td>
+                        <td style="padding:6px 0;color:#64748b;font-size:13px;width:140px;">Lote${masa.lotes && masa.lotes.length > 1 ? 's' : ''}</td>
+                        <td style="padding:6px 0;color:#dc2626;font-size:13px;font-weight:700;">${lotesStr}</td>
                       </tr>
                       <tr>
                         <td style="padding:6px 0;color:#64748b;font-size:13px;">Tipo</td>
@@ -397,7 +405,94 @@ const sendAprobacionMasaEmail = async ({ to, masa, productosEmpaque }) => {
 
   return sendEmail({
     to,
-    subject: `📦 Alistamiento empaque — ${masa.tipo_masa} (${masa.codigo_masa}) · ${fecha}`,
+    subject: `📦 Alistamiento empaque — ${masa.tipo_masa} (${lotesStr}) · ${fecha}`,
+    html,
+  });
+};
+
+/**
+ * Correo de aviso a Empaque cuando cambia el plan de lotes de una masa ya
+ * aprobada (edición de delta que hace crecer/reducir el kg total y cambia si
+ * hace falta subdividir, o en cuántas tandas). Se envía solo cuando la
+ * estructura de lotes simulada realmente cambió (masas.controller.js decide
+ * eso comparando el plan anterior con el nuevo antes de llamar aquí).
+ */
+const sendLoteActualizadoEmail = async ({ to, masa, lotesAnteriores, lotesNuevos }) => {
+  const fechaStr = typeof masa.fecha_produccion === 'string'
+    ? masa.fecha_produccion.slice(0, 10)
+    : masa.fecha_produccion.toISOString().slice(0, 10);
+  const fecha = new Date(`${fechaStr}T12:00:00`).toLocaleDateString('es-CO', {
+    day: '2-digit', month: 'long', year: 'numeric',
+  });
+
+  const html = `
+    <!DOCTYPE html>
+    <html lang="es">
+    <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+    <body style="margin:0;padding:0;background:#F5F0E4;font-family:Inter,Arial,sans-serif;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:#F5F0E4;padding:40px 0;">
+        <tr><td align="center">
+          <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+            <tr>
+              <td style="background:#dc2626;padding:32px 40px;text-align:center;">
+                <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;letter-spacing:-0.5px;">🍞 La Artesa Panadería</h1>
+                <p style="margin:8px 0 0;color:#fecaca;font-size:14px;">Sistema de Control de Producción</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:40px;">
+                <h2 style="margin:0 0 8px;color:#1e293b;font-size:20px;">⚠️ Lote actualizado</h2>
+                <p style="margin:0 0 24px;color:#475569;font-size:15px;line-height:1.6;">
+                  Se editó la cantidad de esta masa después de aprobarla y el plan de lote(s) cambió.
+                  Si ya alistó materiales de empaque con el lote anterior, revíselos.
+                </p>
+                <table width="100%" cellpadding="0" cellspacing="0"
+                       style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:24px;">
+                  <tr><td style="padding:20px;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="padding:6px 0;color:#64748b;font-size:13px;width:140px;">Código masa</td>
+                        <td style="padding:6px 0;color:#1e293b;font-size:13px;font-weight:600;">${masa.codigo_masa}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;color:#64748b;font-size:13px;">Tipo</td>
+                        <td style="padding:6px 0;color:#1e293b;font-size:13px;font-weight:600;">${masa.tipo_masa}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;color:#64748b;font-size:13px;">Fecha producción</td>
+                        <td style="padding:6px 0;color:#1e293b;font-size:13px;font-weight:600;">${fecha}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;color:#64748b;font-size:13px;">Lote(s) anterior(es)</td>
+                        <td style="padding:6px 0;color:#94a3b8;font-size:13px;font-weight:600;text-decoration:line-through;">${lotesAnteriores.join(', ') || '—'}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;color:#64748b;font-size:13px;">Lote(s) nuevo(s)</td>
+                        <td style="padding:6px 0;color:#dc2626;font-size:13px;font-weight:700;">${lotesNuevos.join(', ') || '—'}</td>
+                      </tr>
+                    </table>
+                  </td></tr>
+                </table>
+                <p style="margin:0;color:#94a3b8;font-size:13px;line-height:1.5;">
+                  Este aviso se generó automáticamente al detectar el cambio en el sistema de producción.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="background:#f8fafc;padding:20px 40px;text-align:center;">
+                <p style="margin:0;color:#94a3b8;font-size:12px;">© ${new Date().getFullYear()} La Artesa SAS — Bogotá, Colombia</p>
+              </td>
+            </tr>
+          </table>
+        </td></tr>
+      </table>
+    </body>
+    </html>
+  `;
+
+  return sendEmail({
+    to,
+    subject: `⚠️ Lote actualizado — ${masa.tipo_masa} (${masa.codigo_masa}) · ${fecha}`,
     html,
   });
 };
@@ -477,5 +572,6 @@ module.exports = {
   sendPasswordResetEmail,
   sendPesajeCompletadoEmail,
   sendAprobacionMasaEmail,
+  sendLoteActualizadoEmail,
   sendAprobacionMasaBulkEmail,
 };

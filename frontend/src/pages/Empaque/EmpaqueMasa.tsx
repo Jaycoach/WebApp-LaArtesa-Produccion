@@ -838,7 +838,7 @@ const PanelEmpaqueMasa: React.FC<{
     <div className="space-y-5">
       <BarraNavegacionFases
         masaId={masa.id}
-        codigoMasa={masa.codigo_masa}
+        codigoMasa={masa.lote_produccion || masa.codigo_masa}
         faseAnterior={{ label: 'Horneado', ruta: `/horneado/${masa.id}` }}
       />
       <div className="flex items-center gap-3">

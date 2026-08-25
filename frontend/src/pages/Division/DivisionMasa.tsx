@@ -7,6 +7,7 @@ import { useMaquinasCorte } from '../../hooks/useConfig';
 import { ModalMO } from '../../components/common/ModalMO';
 import { BarraNavegacionFases } from '../../components/common/BarraNavegacionFases';
 import { upqDesdeProducto } from '../../utils/unidadesPorPaquete';
+import { displayLote } from '../../types/api';
 
 export const DivisionMasa: React.FC = () => {
   const { masaId } = useParams<{ masaId: string }>();
@@ -277,7 +278,7 @@ export const DivisionMasa: React.FC = () => {
 
         <BarraNavegacionFases
           masaId={masaId!}
-          codigoMasa={masa.codigo_masa}
+          codigoMasa={displayLote(masa)}
           faseAnterior={{ label: 'Amasado', ruta: `/amasado/${masaId}` }}
           faseSiguiente={{
             label: 'Formado',

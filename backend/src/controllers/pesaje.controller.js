@@ -13,7 +13,7 @@ const fasesModel = require('../models/fases.model');
 const db        = require('../database/connection');
 const logger     = require('../utils/logger');
 const sapService    = require('../services/sap.service');
-const { ejecutarSubdivision, simularAjusteDivisorPorGrupo } = require('./fases.controller');
+const { ejecutarSubdivision, simularAjusteDivisorPorGrupo, simularPlanLotes, guardarPlanLotes, cargarPlanLotes } = require('./fases.controller');
 const { sendPesajeCompletadoEmail } = require('../services/email.service');
 const { upqDesdeProducto } = require('../utils/unidadesPorPaquete');
 
@@ -239,6 +239,8 @@ const getChecklist = async (req, res, next) => {
     const checklist = {
       masa_id:              masa.id,
       codigo_masa:          masa.codigo_masa,
+      lote_produccion:      masa.lote_produccion,
+      lotes_simulados:      masa.lotes_simulados,
       tipo_masa:            masa.tipo_masa,
       fase_actual:          masa.fase_actual,
       es_repeticion:        masa.es_repeticion ?? false,
@@ -859,44 +861,28 @@ const confirmarPesaje = async (req, res, next) => {
     // No se hacen cambios de fase aquí para evitar estados inconsistentes
     logger.info(`Fase PESAJE validada para masa ${masaId}, esperando confirmación SAP`);
 
-    // ── Asignar lote_produccion si aún no tiene ────────────────
-    try {
-      const masaLoteResult = await db.query(
-        `SELECT mp.id, mp.tipo_masa, mp.fecha_produccion,
-                mp.lote_produccion, mp.subdivision_letra,
-                ctm.codigo_lote
-         FROM masas_produccion mp
-         LEFT JOIN catalogo_tipos_masa ctm ON mp.tipo_masa = ctm.tipo_masa
-         WHERE mp.id = $1
-         LIMIT 1`,
-        [masaId]
-      );
-
-      if (masaLoteResult.rows.length > 0) {
-        const m = masaLoteResult.rows[0];
-
-        // Solo asignar si aún no tiene lote
-        if (!m.lote_produccion) {
-          const codigoBase = m.codigo_lote || m.tipo_masa.substring(0, 4).toUpperCase();
-          const fecha      = new Date(m.fecha_produccion);
-          const dd   = String(fecha.getUTCDate()).padStart(2, '0');
-          const mm   = String(fecha.getUTCMonth() + 1).padStart(2, '0');
-          const yy   = String(fecha.getUTCFullYear()).slice(-2);
-          const sufijo     = m.subdivision_letra ? `-${m.subdivision_letra}` : '';
-          const lote       = `${codigoBase}${dd}${mm}${yy}${sufijo}`;
-
-          await db.query(
-            `UPDATE masas_produccion SET lote_produccion = $1 WHERE id = $2`,
-            [lote, masaId]
-          );
-          logger.info(`Lote asignado a masa ${masaId}: ${lote}`);
+    // ── Migración 068: cargar el plan de lotes ya simulado al aprobar/editar
+    // delta (masas_lotes_simulados) — ya no se asigna lote_produccion aquí
+    // de forma ad-hoc, eso lo hizo guardarPlanLotes() en aprobarMasaCore/
+    // updateUnidadesProgramadas (masas.controller.js). Fallback defensivo:
+    // si por algún motivo no existe plan (masa aprobada antes de este
+    // cambio y el backfill de la migración 068 todavía no corrió), se
+    // simula ahora mismo antes de subdividir, para no dejar la masa sin
+    // lote_produccion ni a las sub-masas sin lote.
+    let planLotes = await cargarPlanLotes(masaId, db);
+    if (!planLotes) {
+      logger.warn(`confirmarPesaje: masa ${masaId} sin plan de lotes simulado (migración 068) — simulando ahora como fallback.`);
+      try {
+        const planFallback = await simularPlanLotes(masaId, db);
+        if (planFallback) {
+          await guardarPlanLotes(masaId, planFallback, req.user.id, db);
+          planLotes = await cargarPlanLotes(masaId, db);
         }
+      } catch (planErr) {
+        logger.error(`Error simulando plan de lotes de fallback para masa ${masaId}:`, planErr);
       }
-    } catch (loteErr) {
-      // No interrumpir el flujo si falla la asignación de lote
-      logger.error(`Error asignando lote a masa ${masaId}:`, loteErr);
     }
-    // ── Fin asignación lote ────────────────────────────────────
+    // ── Fin carga de plan de lotes ────────────────────────────────
 
     // Fase 4 (12-ago-2026): segunda pasada de la simulación de grupo, ya
     // con los números confirmados por el pesador — antes de que
@@ -930,10 +916,26 @@ const confirmarPesaje = async (req, res, next) => {
     // ── NUEVO v4: Intentar subdivisión con pesaje heredado ─────────
     let subdivision = null;
     try {
-      subdivision = await ejecutarSubdivision(masaId, req.user.id, true /* conPesaje */);
+      subdivision = await ejecutarSubdivision(masaId, req.user.id, true /* conPesaje */, planLotes);
     } catch (subErr) {
-      // Si falla la subdivisión, NO cortamos el flujo: el pesaje ya se confirmó.
-      // Logueamos el error para investigación.
+      // Migración 068: si el plan de lotes quedó desactualizado respecto a la
+      // subdivisión real (drift de BOM por el sync automático 6:00/21:00,
+      // ajuste de grupo por múltiplo divisor, etc.), ejecutarSubdivision ya
+      // hizo ROLLBACK de su propia transacción — pero SÍ hay que cortar el
+      // flujo de confirmarPesaje: no se marcó PESAJE completado ni se llamó
+      // a SAP todavía (ver nota más arriba), así que es seguro devolver el
+      // error al usuario en vez de seguir como si no hubiera pasado nada.
+      if (subErr.codigo === 'PLAN_LOTES_DESACTUALIZADO') {
+        logger.error(`Pesaje de masa ${masaId} bloqueado — plan de lotes desactualizado: ${subErr.message}`);
+        return res.status(subErr.statusCode || 409).json({
+          success: false,
+          message: subErr.message,
+          codigo: subErr.codigo,
+        });
+      }
+      // Cualquier otro error de subdivisión (no relacionado al plan de
+      // lotes): comportamiento previo — NO cortar el flujo, el pesaje ya se
+      // validó como completo. Se loguea para investigación.
       logger.error(`Error durante subdivisión de masa ${masaId}:`, subErr);
     }
 

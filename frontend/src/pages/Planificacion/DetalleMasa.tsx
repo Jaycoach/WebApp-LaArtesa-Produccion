@@ -10,6 +10,7 @@ import { masasService } from '../../services/masasService';
 import { formatBogotaTime } from '../../utils/timezone';
 import { ModalCancelarMasa } from '@/components/common/ModalCancelarMasa';
 import { BarraNavegacionFases } from '@/components/common/BarraNavegacionFases';
+import { displayLote } from '../../types/api';
 
 // ── Iconos SVG inline para cada fase ────────────────────────
 const FaseIcono: React.FC<{ fase: string; estado: string }> = ({ fase, estado }) => {
@@ -214,7 +215,7 @@ export const DetalleMasa: React.FC = () => {
       <div className="max-w-7xl mx-auto space-y-6">
         <BarraNavegacionFases
           masaId={masaId}
-          codigoMasa={masa.codigo_masa}
+          codigoMasa={displayLote(masa)}
           faseSiguiente={masa.fase_actual === 'PLANIFICACION' ? {
             label: 'Iniciar Pesaje',
             ruta: `/pesaje/${masaId}`,
@@ -250,11 +251,9 @@ export const DetalleMasa: React.FC = () => {
               <h1 className={`text-3xl font-bold ${masa.es_repeticion ? 'text-red-600' : masa.prioridad ? 'text-purple-600' : 'text-gray-900'}`}>{masa.tipo_masa}</h1>
               <p className="text-gray-600 mt-1">{masa.nombre_masa}</p>
               <p className="text-sm text-gray-500 mt-1">Código: {masa.codigo_masa}</p>
-              {masa.lote_produccion && (
-                <p className="text-sm font-semibold text-indigo-700 mt-1">
-                  Lote: {masa.lote_produccion}
-                </p>
-              )}
+              <p className="text-sm font-semibold text-indigo-700 mt-1">
+                Lote{masa.lotes_simulados && masa.lotes_simulados.length > 1 ? 's (simulados, se confirman al pesar)' : ''}: {displayLote(masa)}
+              </p>
             </div>
             <div className="text-right">
               <span className={`px-4 py-2 rounded-full text-sm font-medium border ${getFaseColor(masa.estado)}`}>

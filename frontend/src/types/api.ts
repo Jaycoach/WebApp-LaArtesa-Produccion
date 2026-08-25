@@ -73,6 +73,26 @@ export interface MasaProduccionResumen {
   masa_adicional_referencia_id?: number | null;
   lote_produccion?: string;
   numeros_ov?: string[];
+  // Migración 068: plan de lotes simulado (fallback de lote_produccion
+  // mientras la masa sigue en PLANIFICACION, antes de subdivisión física).
+  lotes_simulados?: { letra: string | null; lote: string }[] | null;
+}
+
+/**
+ * Muestra el lote de producción a mostrar al usuario.
+ * masas_produccion.lote_produccion ya se fija al aprobar (base, sin sufijo)
+ * aunque la masa todavía vaya a subdividirse — por eso, si el plan simulado
+ * anticipa más de una tanda, se prioriza mostrar TODOS los lotes simulados
+ * (con sufijo -A/-B/...) en vez del lote base, que sería engañoso antes de
+ * que la subdivisión física ocurra. Fallback final: codigo_masa.
+ */
+export function displayLote(masa: Pick<MasaProduccionResumen, 'lote_produccion' | 'lotes_simulados' | 'codigo_masa'>): string {
+  if (masa.lotes_simulados && masa.lotes_simulados.length > 1) {
+    return masa.lotes_simulados.map(l => l.lote).join(', ');
+  }
+  if (masa.lote_produccion) return masa.lote_produccion;
+  if (masa.lotes_simulados && masa.lotes_simulados.length === 1) return masa.lotes_simulados[0].lote;
+  return masa.codigo_masa;
 }
 
 // Masa de producción (detalle completo)
@@ -162,6 +182,8 @@ export interface ProgresoFase {
 export interface ChecklistPesaje {
   masa_id: number;
   codigo_masa: string;
+  lote_produccion?: string;
+  lotes_simulados?: { letra: string | null; lote: string }[] | null;
   tipo_masa: string;
   fase_actual?: string;
   es_repeticion: boolean;

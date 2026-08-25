@@ -10,7 +10,7 @@ import {
   useMarcarPendiente,
 } from '../../hooks/useMasas';
 import { useAuthStore } from '@/store';
-import { MasaProduccionResumen } from '../../types/api';
+import { MasaProduccionResumen, displayLote } from '../../types/api';
 import { ModalCancelarMasa } from '@/components/common/ModalCancelarMasa';
 import { MasasFiltroDropdown, masaCumpleFiltro } from '@/components/common/MasasFiltroDropdown';
 
@@ -52,7 +52,8 @@ export const ListaMasas: React.FC = () => {
     const cumpleBusqueda = !q || (
       m.tipo_masa?.toLowerCase().includes(q) ||
       m.nombre_masa?.toLowerCase().includes(q) ||
-      m.codigo_masa?.toLowerCase().includes(q)
+      m.codigo_masa?.toLowerCase().includes(q) ||
+      displayLote(m).toLowerCase().includes(q)
     );
     return cumpleBusqueda && masaCumpleFiltro(m, filtroSeleccion);
   });

@@ -745,19 +745,244 @@ async function insertarProductoEnMasa(masaId, prod, unidadesProg, unidadesPedida
 }
 
 /**
+ * Calcula el BOM consolidado de una masa (ingredientes de peso + materiales de
+ * empaque) SIN escribir en la base de datos — extraído del bloque que antes
+ * vivía inline en completarFase('PLANIFICACION') (migración 068 / plan de
+ * lotes simulado). Reutilizado por:
+ *   - completarFase('PLANIFICACION'), que sí persiste el resultado en
+ *     ingredientes_masa/empaque_por_masa.
+ *   - simularPlanLotes(), que solo necesita totalKgIngredientes para decidir
+ *     si hace falta subdividir, sin tocar ingredientes_masa (esa tabla puede
+ *     no existir todavía para esta masa, p.ej. al aprobar).
+ *
+ * @returns {null} si no hay productos aptos con ItemCode SAP, o
+ *   { componentesPeso, componentesEmpaque, totalKgIngredientes, productos }
+ *   (productos = filas crudas de productos_por_masa usadas para el cálculo)
+ */
+async function calcularBOMMasa(masaId, queryable) {
+  const productosResult = await queryable.query(
+    `SELECT id, sap_item_code, producto_nombre, unidades_programadas, unidades_ajustadas,
+            producto_codigo, presentacion, gramaje_unitario,
+            unidades_pedidas, kilos_pedidos, kilos_programados
+     FROM productos_por_masa
+     WHERE masa_id = $1 AND sap_item_code IS NOT NULL AND sap_item_code <> ''
+       AND apto_produccion = true`,
+    [masaId]
+  );
+
+  if (productosResult.rows.length === 0) return null;
+
+  const acumuladoPeso    = {};
+  const acumuladoEmpaque = {};
+
+  for (const prod of productosResult.rows) {
+    const bomResult = await queryable.query(
+      `SELECT item_code_comp, item_name_comp, cantidad,
+              warehouse, issue_method, visual_order,
+              uom, grupo_sap, es_empaque
+       FROM sap_bom_componentes
+       WHERE item_code_padre = $1
+       ORDER BY visual_order`,
+      [prod.sap_item_code]
+    );
+
+    if (bomResult.rows.length === 0) {
+      logger.warn(`calcularBOMMasa: sin BOM local para ${prod.sap_item_code} (${prod.producto_nombre}). ¿Se ejecutó sincronizar-bom?`);
+      continue;
+    }
+
+    for (const comp of bomResult.rows) {
+      const paquetesReales = parseFloat(prod.unidades_ajustadas) || parseFloat(prod.unidades_programadas);
+      const cantTotal       = parseFloat(comp.cantidad) * paquetesReales;
+      const tipo             = clasificarComponente(comp.uom, comp.grupo_sap);
+
+      if (tipo === 'empaque') {
+        if (acumuladoEmpaque[comp.item_code_comp]) {
+          acumuladoEmpaque[comp.item_code_comp].cantidad += cantTotal;
+        } else {
+          acumuladoEmpaque[comp.item_code_comp] = {
+            nombre:      comp.item_name_comp,
+            cantidad:    cantTotal,
+            uom:         comp.uom,
+            visualOrder: comp.visual_order,
+          };
+        }
+      } else {
+        const kgEquivalente = cantTotal;
+        if (acumuladoPeso[comp.item_code_comp]) {
+          acumuladoPeso[comp.item_code_comp].cantidad += kgEquivalente;
+        } else {
+          acumuladoPeso[comp.item_code_comp] = {
+            nombre:      comp.item_name_comp,
+            cantidad:    kgEquivalente,
+            warehouse:   comp.warehouse,
+            issueMethod: comp.issue_method,
+            visualOrder: comp.visual_order,
+            uom:         comp.uom,
+            esLiquido:   tipo === 'liquido',
+          };
+        }
+      }
+    }
+  }
+
+  const componentesPeso    = Object.entries(acumuladoPeso);
+  const componentesEmpaque = Object.entries(acumuladoEmpaque);
+  const totalKgIngredientes = componentesPeso.reduce((sum, [, comp]) => sum + comp.cantidad, 0);
+
+  return { componentesPeso, componentesEmpaque, totalKgIngredientes, productos: productosResult.rows };
+}
+
+/**
+ * Simula el plan de lotes de una masa (BOM + posible subdivisión en tandas +
+ * lote por tanda) SIN persistir nada — solo calcula. guardarPlanLotes()
+ * escribe el resultado en masas_lotes_simulados. Migración 068.
+ *
+ * La fórmula de lote es la misma que usaba pesaje.controller.js antes de este
+ * cambio: `${codigoBase}${dd}${mm}${yy}${sufijo}`, codigoBase desde
+ * catalogo_tipos_masa.codigo_lote (o los primeros 4 chars de tipo_masa),
+ * dd/mm/yy de fecha_produccion en UTC, sufijo `-${letra}` solo si hay
+ * subdivisión.
+ *
+ * @returns {null} si la masa no existe o no tiene productos aptos, o
+ *   { necesitaSubdivision, limiteKg, totalKgIngredientes, loteBase,
+ *     tandas: [{ letra: 'A'|null, lote, kg, productos: [{ productoId, fraccion }] }] }
+ */
+async function simularPlanLotes(masaId, queryable) {
+  const masaResult = await queryable.query(
+    `SELECT mp.id, mp.tipo_masa, mp.fecha_produccion, ctm.codigo_lote
+     FROM masas_produccion mp
+     LEFT JOIN catalogo_tipos_masa ctm ON mp.tipo_masa = ctm.tipo_masa
+     WHERE mp.id = $1`,
+    [masaId]
+  );
+  if (masaResult.rows.length === 0) return null;
+  const masa = masaResult.rows[0];
+
+  const bom = await calcularBOMMasa(masaId, queryable);
+  if (!bom) return null;
+
+  const { totalKgIngredientes, productos } = bom;
+  const limiteKg = await getLimiteKg(queryable, masa.tipo_masa);
+  const necesitaSubdivision = totalKgIngredientes > limiteKg;
+
+  const codigoBase = masa.codigo_lote || masa.tipo_masa.substring(0, 4).toUpperCase();
+  const fecha       = new Date(masa.fecha_produccion);
+  const dd = String(fecha.getUTCDate()).padStart(2, '0');
+  const mm = String(fecha.getUTCMonth() + 1).padStart(2, '0');
+  const yy = String(fecha.getUTCFullYear()).slice(-2);
+  const loteBase = `${codigoBase}${dd}${mm}${yy}`;
+
+  if (!necesitaSubdivision) {
+    return {
+      necesitaSubdivision, limiteKg, totalKgIngredientes, loteBase,
+      tandas: [{
+        letra:     null,
+        lote:      loteBase,
+        kg:        totalKgIngredientes,
+        productos: productos.map(p => ({ productoId: p.id, fraccion: 1 })),
+      }],
+    };
+  }
+
+  // agruparProductosEnTandas necesita multiplo_divisor/tamanio/forma/etc,
+  // que no vienen en la query de calcularBOMMasa (esa es a nivel BOM) — se
+  // traen aparte, mismo filtro apto_produccion=true que el cálculo de kg.
+  const productosParaAgrupar = await queryable.query(
+    `SELECT * FROM productos_por_masa WHERE masa_id = $1 AND apto_produccion = true`,
+    [masaId]
+  );
+  const tandas = agruparProductosEnTandas(productosParaAgrupar.rows, limiteKg, masa.tipo_masa);
+  const letras = generarLetrasTanda(tandas.length);
+
+  return {
+    necesitaSubdivision, limiteKg, totalKgIngredientes, loteBase,
+    tandas: tandas.map((t, i) => ({
+      letra:     letras[i],
+      lote:      `${loteBase}-${letras[i]}`,
+      kg:        t.kg,
+      productos: t.items.map(it => ({ productoId: it.producto.id, fraccion: it.fraccion })),
+    })),
+  };
+}
+
+/**
+ * Persiste el plan calculado por simularPlanLotes(): reemplaza completo
+ * (DELETE+INSERT) masas_lotes_simulados de la masa, actualiza el
+ * tanda_simulada_letra informativo de cada producto (la tanda de MAYOR
+ * fracción cuando un producto quedó partido entre tandas — no representa un
+ * split), y fija masas_produccion.lote_produccion (base, sin sufijo) si aún
+ * no lo tenía — COALESCE para no pisar un lote que ya se haya usado en SAP/
+ * documentos si por algún motivo ya estaba asignado.
+ */
+async function guardarPlanLotes(masaId, plan, userId, queryable) {
+  await queryable.query(`DELETE FROM masas_lotes_simulados WHERE masa_id = $1`, [masaId]);
+
+  for (const tanda of plan.tandas) {
+    await queryable.query(
+      `INSERT INTO masas_lotes_simulados
+         (masa_id, tanda_letra, lote_produccion, n_tandas_total, kg_estimado, simulado_por)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [masaId, tanda.letra, tanda.lote, plan.tandas.length, tanda.kg, userId]
+    );
+  }
+
+  await queryable.query(`UPDATE productos_por_masa SET tanda_simulada_letra = NULL WHERE masa_id = $1`, [masaId]);
+
+  const mejorTandaPorProducto = new Map();
+  for (const t of plan.tandas) {
+    for (const p of t.productos) {
+      const prev = mejorTandaPorProducto.get(p.productoId);
+      if (!prev || p.fraccion > prev.fraccion) {
+        mejorTandaPorProducto.set(p.productoId, t.letra);
+      }
+    }
+  }
+  for (const [productoId, letra] of mejorTandaPorProducto) {
+    await queryable.query(`UPDATE productos_por_masa SET tanda_simulada_letra = $1 WHERE id = $2`, [letra, productoId]);
+  }
+
+  await queryable.query(
+    `UPDATE masas_produccion SET lote_produccion = COALESCE(lote_produccion, $1), updated_at = NOW() WHERE id = $2`,
+    [plan.loteBase, masaId]
+  );
+}
+
+/**
+ * Lee el plan de lotes ya simulado y guardado (masas_lotes_simulados) para
+ * una masa. Devuelve null si todavía no se simuló (masa aprobada antes del
+ * deploy de este cambio, o backfill pendiente) — quien llame debe manejar
+ * ese fallback explícitamente.
+ */
+async function cargarPlanLotes(masaId, queryable) {
+  const result = await queryable.query(
+    `SELECT tanda_letra, lote_produccion, n_tandas_total, kg_estimado
+     FROM masas_lotes_simulados WHERE masa_id = $1 ORDER BY tanda_letra NULLS FIRST`,
+    [masaId]
+  );
+  return result.rows.length === 0 ? null : result.rows;
+}
+
+/**
  * Ejecuta la subdivisión de una masa en N tandas.
  * Llamado desde pesaje.controller.js al confirmar el pesaje si la masa supera el límite.
  *
  * @param {number}  masaId    - ID de la masa original
  * @param {object}  userId    - ID del usuario autenticado
  * @param {boolean} conPesaje - Si true, las sub-masas heredan el pesaje completo
+ * @param {Array|null} planLotes - Filas de cargarPlanLotes(): letras/lotes ya
+ *   decididos al aprobar/editar delta. Si viene null, o su número de tandas
+ *   con subdivisión no coincide con lo que agruparProductosEnTandas calcula
+ *   AHORA (drift: el delta pudo cambiar después de la última simulación, o
+ *   nunca se simuló), se recalculan letras/lotes de cero — mismo
+ *   comportamiento que antes de este cambio (fallback).
  * @returns {object|null}     - Información de la subdivisión, o null si no aplica
  */
-async function ejecutarSubdivision(masaId, userId, conPesaje = false) {
+async function ejecutarSubdivision(masaId, userId, conPesaje = false, planLotes = null) {
   const client = await db.getClient();
   try {
     await client.query('BEGIN');
-    const resultado = await _ejecutarSubdivisionTx(client, masaId, userId, conPesaje);
+    const resultado = await _ejecutarSubdivisionTx(client, masaId, userId, conPesaje, planLotes);
     // Siempre cerrar la transacción — COMMIT si hubo subdivisión, ROLLBACK si no aplica
     if (resultado) {
       await client.query('COMMIT');
@@ -774,7 +999,7 @@ async function ejecutarSubdivision(masaId, userId, conPesaje = false) {
   }
 }
 
-async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false) {
+async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false, planLotes = null) {
   await recalcularTotalesMasa(masaId, client);
 
   const masaResult = await client.query(
@@ -820,7 +1045,57 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false)
 
   const tandas       = agruparProductosEnTandas(todosProductosParaAgrupar.rows, limiteKg, masa.tipo_masa);
   const nTandas       = tandas.length;
-  const LETRAS_TANDA  = generarLetrasTanda(nTandas);
+
+  // Letras/lotes: usar el plan ya simulado al aprobar/editar delta (migración
+  // 068) si coincide con la subdivisión real recién calculada.
+  //
+  // Si HABÍA un plan y no coincide en número de tandas (drift: el sync
+  // automático de BOM de las 6:00/21:00 cambió sap_bom_componentes después de
+  // simular, el ajuste de grupo por múltiplo divisor de más arriba movió
+  // productos entre tandas, o cualquier otra causa), NO se recalcula en
+  // silencio — eso es exactamente el escenario que masas_lotes_simulados
+  // existe para prevenir: que el lote que ya vio Empaque en el correo sea
+  // distinto del que termina en el producto real. Se bloquea con un error
+  // explícito (mismo patrón que aprobarMasaCore cuando 0 productos quedan
+  // aptos): nada se persiste, el usuario tiene que volver a Planificación,
+  // editar el delta (aunque sea +0) para disparar una re-simulación, y
+  // reintentar confirmar el pesaje.
+  //
+  // Si NUNCA existió un plan (planLotes null — ni el guardado en aprobar/
+  // editar delta, ni el fallback que confirmarPesaje ya intentó justo antes
+  // de esta llamada), no hay nada contra qué comparar: se genera de cero,
+  // mismo comportamiento que existía antes de la migración 068.
+  const planConSubdivision = planLotes ? planLotes.filter(p => p.tanda_letra !== null) : null;
+  let LETRAS_TANDA, lotesPorTanda;
+  if (planConSubdivision && planConSubdivision.length === nTandas) {
+    LETRAS_TANDA  = planConSubdivision.map(p => p.tanda_letra);
+    lotesPorTanda = planConSubdivision.map(p => p.lote_produccion);
+  } else if (planLotes) {
+    const err = new Error(
+      `El plan de lotes de la masa ${masaId} quedó desactualizado: se había simulado ` +
+      `${planConSubdivision.length} tanda(s), pero con los datos actuales hacen falta ` +
+      `${nTandas} tanda(s). Posible causa: la receta SAP cambió (sync automático de BOM ` +
+      `de las 6:00/21:00) o el ajuste de grupo por múltiplo divisor movió productos entre ` +
+      `tandas al confirmar el pesaje. Vuelva a Planificación y edite el delta (aunque sea ` +
+      `+0) para volver a simular el plan de lotes, y luego reintente confirmar el pesaje.`
+    );
+    err.statusCode = 409;
+    err.codigo = 'PLAN_LOTES_DESACTUALIZADO';
+    throw err;
+  } else {
+    logger.warn(`ejecutarSubdivision: masa ${masaId} sin plan de lotes disponible (nunca se simuló) — generando letras/lotes de cero.`);
+    LETRAS_TANDA = generarLetrasTanda(nTandas);
+    const codigoLoteResult = await client.query(
+      `SELECT codigo_lote FROM catalogo_tipos_masa WHERE tipo_masa = $1 AND activo = TRUE LIMIT 1`,
+      [masa.tipo_masa]
+    );
+    const codigoBase  = codigoLoteResult.rows[0]?.codigo_lote || masa.tipo_masa.substring(0, 4).toUpperCase();
+    const fechaLote    = masa.fecha_produccion instanceof Date ? masa.fecha_produccion : new Date(masa.fecha_produccion);
+    const ddLote = String(fechaLote.getUTCDate()).padStart(2, '0');
+    const mmLote = String(fechaLote.getUTCMonth() + 1).padStart(2, '0');
+    const yyLote = String(fechaLote.getUTCFullYear()).slice(-2);
+    lotesPorTanda = LETRAS_TANDA.map(letra => `${codigoBase}${ddLote}${mmLote}${yyLote}-${letra}`);
+  }
 
   const fraccionesTanda = [];
   let fraccionAcumulada = 0;
@@ -884,8 +1159,8 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false)
          total_kilos_base, total_kilos_con_merma, porcentaje_merma,
          factor_absorcion_usado, estado, fase_actual,
          masa_padre_id, es_subdivision, subdivision_letra, created_by,
-         aprobado_por, aprobado_en)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,TRUE,$12,$13,$14,$15)
+         aprobado_por, aprobado_en, lote_produccion)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,TRUE,$12,$13,$14,$15,$16)
       RETURNING *
     `, [
       `${masa.codigo_masa}-${letra}`,
@@ -903,6 +1178,7 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false)
       masa.created_by,
       masa.aprobado_por || null,
       masa.aprobado_en  || null,
+      lotesPorTanda[i],
     ]);
 
     const subMasa = result.rows[0];
@@ -1021,6 +1297,7 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false)
       id:     s.id,
       codigo: s.codigo_masa,
       letra:  LETRAS_TANDA[i],
+      lote:   lotesPorTanda[i],
     })),
   };
 }
@@ -1105,9 +1382,6 @@ const completarFase = async (req, res, next) => {
     const { masaId, fase } = req.params;
     const datos = req.body;
 
-    let acumuladoPeso    = {};
-    let acumuladoEmpaque = {};
-
     // ── Caso especial: PLANIFICACION ───────────────────────────────
     if (fase.toUpperCase() === 'PLANIFICACION') {
 
@@ -1148,25 +1422,19 @@ const completarFase = async (req, res, next) => {
         });
       }
 
-      // Obtener productos con sap_item_code
-      // FIX 2026-08-10: se agrega unidades_ajustadas — es la cantidad REAL de
+      // BOM consolidado — extraído a calcularBOMMasa() (migración 068) para
+      // reutilizarlo también en simularPlanLotes() sin duplicar la lógica.
+      // FIX 2026-08-10: usa unidades_ajustadas — es la cantidad REAL de
       // paquetes que va a salir de Division (redondeada al multiplo_divisor de
       // panes), la receta tiene que alcanzar para eso, no para unidades_programadas.
-      // FIX 2026-08-21 (migración 061): AND apto_produccion = true — los productos
-      // marcados por aprobarMasaCore (dato maestro incompleto en SAP) no deben
-      // sumar BOM a ingredientes_masa: no se van a pesar, no correspondía pedirle
-      // a Lisette que pese materia prima para algo que no se va a producir.
-      const productosResult = await db.query(
-        `SELECT sap_item_code, producto_nombre, unidades_programadas, unidades_ajustadas,
-                producto_codigo, presentacion, gramaje_unitario,
-                unidades_pedidas, kilos_pedidos, kilos_programados
-         FROM productos_por_masa
-         WHERE masa_id = $1 AND sap_item_code IS NOT NULL AND sap_item_code <> ''
-           AND apto_produccion = true`,
-        [masaId]
-      );
+      // FIX 2026-08-21 (migración 061): filtra apto_produccion = true — los
+      // productos marcados por aprobarMasaCore (dato maestro incompleto en SAP)
+      // no deben sumar BOM a ingredientes_masa: no se van a pesar, no
+      // correspondía pedirle a Lisette que pese materia prima para algo que no
+      // se va a producir.
+      const bom = await calcularBOMMasa(masaId, db);
 
-      if (productosResult.rows.length === 0) {
+      if (!bom) {
         // Defensa en profundidad (2026-08-21): aprobarMasaCore ya bloquea la
         // aprobación si 0 productos quedan apto_produccion=true, así que este
         // branch no debería alcanzarse por ese camino — pero si algo se cuela
@@ -1188,63 +1456,7 @@ const completarFase = async (req, res, next) => {
         });
       }
 
-      // Consolidar BOM clasificando por UoM
-      for (const prod of productosResult.rows) {
-        const bomResult = await db.query(
-          `SELECT item_code_comp, item_name_comp, cantidad,
-                  warehouse, issue_method, visual_order,
-                  uom, grupo_sap, es_empaque
-           FROM sap_bom_componentes
-           WHERE item_code_padre = $1
-           ORDER BY visual_order`,
-          [prod.sap_item_code]
-        );
-
-        if (bomResult.rows.length === 0) {
-          logger.warn(`Sin BOM local para ${prod.sap_item_code} (${prod.producto_nombre}). ¿Se ejecutó sincronizar-bom?`);
-          continue;
-        }
-
-        for (const comp of bomResult.rows) {
-          // FIX 2026-08-10: usar unidades_ajustadas (con fallback si viniera NULL
-          // en datos historicos) en vez de unidades_programadas.
-          const paquetesReales = parseFloat(prod.unidades_ajustadas) || parseFloat(prod.unidades_programadas);
-          const cantTotal = parseFloat(comp.cantidad) * paquetesReales;
-          const tipo      = clasificarComponente(comp.uom, comp.grupo_sap);
-
-          if (tipo === 'empaque') {
-            if (acumuladoEmpaque[comp.item_code_comp]) {
-              acumuladoEmpaque[comp.item_code_comp].cantidad += cantTotal;
-            } else {
-              acumuladoEmpaque[comp.item_code_comp] = {
-                nombre:      comp.item_name_comp,
-                cantidad:    cantTotal,
-                uom:         comp.uom,
-                visualOrder: comp.visual_order,
-              };
-            }
-          } else {
-            const kgEquivalente = cantTotal;
-            if (acumuladoPeso[comp.item_code_comp]) {
-              acumuladoPeso[comp.item_code_comp].cantidad += kgEquivalente;
-            } else {
-              acumuladoPeso[comp.item_code_comp] = {
-                nombre:      comp.item_name_comp,
-                cantidad:    kgEquivalente,
-                warehouse:   comp.warehouse,
-                issueMethod: comp.issue_method,
-                visualOrder: comp.visual_order,
-                uom:         comp.uom,
-                esLiquido:   tipo === 'liquido',
-              };
-            }
-          }
-        }
-      }
-
-      // Limpiar e insertar ingredientes consolidados
-      const componentesPeso    = Object.entries(acumuladoPeso);
-      const componentesEmpaque = Object.entries(acumuladoEmpaque);
+      const { componentesPeso, componentesEmpaque, totalKgIngredientes } = bom;
 
       await db.query(`DELETE FROM ingredientes_masa WHERE masa_id = $1`, [masaId]);
       await db.query(`DELETE FROM empaque_por_masa  WHERE masa_id = $1`, [masaId]);
@@ -1291,14 +1503,26 @@ const completarFase = async (req, res, next) => {
 
       await recalcularTotalesMasa(masaId, db);
 
-      const totalKgIngredientes = componentesPeso.reduce((sum, [, comp]) => sum + comp.cantidad, 0);
-      const limiteKg = await getLimiteKg(db, masa.tipo_masa);
-
-      logger.info(`Masa ${masaId} (${masa.tipo_masa}): ${totalKgIngredientes.toFixed(2)} kg de masa | Límite: ${limiteKg} kg`);
+      logger.info(`Masa ${masaId} (${masa.tipo_masa}): ${totalKgIngredientes.toFixed(2)} kg de masa`);
 
       // ── CAMBIO v4: Ya NO subdividimos aquí. Solo informamos que habrá subdivisión al confirmar pesaje.
-      const necesitaSubdivision = totalKgIngredientes > limiteKg;
-      const nTandas = necesitaSubdivision ? calcularNTandas(totalKgIngredientes, limiteKg) : 0;
+      // Migración 068: el número de tandas para el mensaje se lee del plan ya
+      // simulado al aprobar/editar delta (masas_lotes_simulados) en vez de
+      // recalcularlo — es la misma fuente que usará ejecutarSubdivision().
+      // Fallback (masa aprobada antes de este cambio, backfill pendiente):
+      // calcular aquí mismo como se hacía antes.
+      const planExistente = await cargarPlanLotes(masaId, db);
+      let necesitaSubdivision, nTandas, limiteKg;
+      if (planExistente) {
+        const tandasConSubdivision = planExistente.filter(p => p.tanda_letra !== null);
+        necesitaSubdivision = tandasConSubdivision.length > 0;
+        nTandas = necesitaSubdivision ? tandasConSubdivision.length : 0;
+        limiteKg = await getLimiteKg(db, masa.tipo_masa);
+      } else {
+        limiteKg = await getLimiteKg(db, masa.tipo_masa);
+        necesitaSubdivision = totalKgIngredientes > limiteKg;
+        nTandas = necesitaSubdivision ? calcularNTandas(totalKgIngredientes, limiteKg) : 0;
+      }
 
       // Completar fase PLANIFICACION y desbloquear PESAJE
       const faseActualizada = await fasesModel.updateEstadoFase(
@@ -1560,4 +1784,9 @@ module.exports = {
   getLimiteKg,
   simularAjusteDivisorPorGrupo,
   recalcularTotalesMasa,
+  // Migración 068 — plan de lotes simulado (aprobar/editar delta → confirmar pesaje)
+  calcularBOMMasa,
+  simularPlanLotes,
+  guardarPlanLotes,
+  cargarPlanLotes,
 };

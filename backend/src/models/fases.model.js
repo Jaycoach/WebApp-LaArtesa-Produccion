@@ -72,6 +72,13 @@ const getMasasByFecha = async (fecha, fase = null) => {
       ), 0) / 1000 AS total_kilos_pesado_real,
       (SELECT COUNT(DISTINCT ov.sap_doc_entry) FROM productos_por_masa_ov ov WHERE ov.masa_id = m.id) as total_ordenes,
       (SELECT array_agg(ov.sap_doc_num::text ORDER BY ov.sap_doc_num) FROM (SELECT DISTINCT sap_doc_num FROM productos_por_masa_ov WHERE masa_id = m.id) ov) as numeros_ov,
+      -- Migración 068: plan de lotes simulado (fallback de lote_produccion
+      -- mientras la masa sigue en PLANIFICACION, antes de subdivisión física).
+      (
+        SELECT json_agg(json_build_object('letra', mls.tanda_letra, 'lote', mls.lote_produccion) ORDER BY mls.tanda_letra NULLS FIRST)
+        FROM masas_lotes_simulados mls
+        WHERE mls.masa_id = m.id
+      ) AS lotes_simulados,
       COUNT(pm.id) as total_productos,
       SUM(pm.unidades_pedidas) as total_unidades_pedidas,
       SUM(COALESCE(pm.unidades_ajustadas, pm.unidades_programadas)) as total_unidades_programadas,
@@ -119,7 +126,15 @@ const getMasaById = async (masaId) => {
           AND im.es_empaque = false
           AND im.es_decoracion = false
           AND im.pesado = true
-      ), 0) / 1000 AS total_kilos_pesado_real
+      ), 0) / 1000 AS total_kilos_pesado_real,
+      -- Migración 068: plan de lotes simulado al aprobar/editar delta, antes
+      -- de que exista subdivisión física — el frontend lo usa como fallback
+      -- de lote_produccion mientras la masa sigue en PLANIFICACION.
+      (
+        SELECT json_agg(json_build_object('letra', mls.tanda_letra, 'lote', mls.lote_produccion) ORDER BY mls.tanda_letra NULLS FIRST)
+        FROM masas_lotes_simulados mls
+        WHERE mls.masa_id = mp.id
+      ) AS lotes_simulados
     FROM masas_produccion mp
     WHERE mp.id = $1
   `, [masaIdNum]);

@@ -6,6 +6,7 @@ import { useAmasadoras } from '../../hooks/useConfig';
 import { useCompletarFase, useFases } from '../../hooks/useFases';
 import { ModalMO } from '../../components/common/ModalMO';
 import { BarraNavegacionFases } from '../../components/common/BarraNavegacionFases';
+import { displayLote } from '../../types/api';
 
 export const AmasadoMasa: React.FC = () => {
   const { masaId } = useParams<{ masaId: string }>();
@@ -102,7 +103,7 @@ export const AmasadoMasa: React.FC = () => {
       <div className="max-w-5xl mx-auto space-y-6">
         <BarraNavegacionFases
           masaId={masaId!}
-          codigoMasa={masa.codigo_masa}
+          codigoMasa={displayLote(masa)}
           faseAnterior={{ label: 'Pesaje', ruta: `/pesaje/${masaId}` }}
           faseSiguiente={{
             label: 'División',
