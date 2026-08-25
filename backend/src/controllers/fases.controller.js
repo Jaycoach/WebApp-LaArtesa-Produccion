@@ -845,15 +845,74 @@ async function calcularBOMMasa(masaId, queryable) {
 }
 
 /**
+ * Construye el lote_produccion BASE (sin letra de tanda) de una masa RAÍZ
+ * (masa_padre_id IS NULL) — única fuente de verdad para la fórmula de lote,
+ * usada tanto por simularPlanLotes() (simulación pre-pesaje) como por el
+ * fallback de ejecutarSubdivision() (cuando no hay plan simulado disponible).
+ * Antes de este fix (Hallazgo 3, QA staging masas 2080/2086) cada lugar la
+ * reimplementaba por separado — quedaban desincronizadas y además ninguna
+ * de las dos consideraba es_adicional/es_repeticion, así que dos masas
+ * ADICIONAL del mismo tipo+día colisionaban en el mismo lote_produccion.
+ *
+ * Regla de negocio (Jonathan, Hallazgo 3):
+ *   - Masa normal (ni adicional ni repetición): sin sufijo de categoría —
+ *     mismo formato de siempre. Ej: TOSC210826
+ *   - es_adicional=true, es_repeticion=false: sufijo "-AD{n}"
+ *   - es_repeticion=true, es_adicional=false: sufijo "-PR{n}"
+ *   - Ambos true: sufijo combinado "-ADPR{n}" (una sola etiqueta, contador
+ *     propio, no dos sufijos separados)
+ *   n = ordinal (arranca en 1) de esta masa entre las masas RAÍZ
+ *   (masa_padre_id IS NULL — las tandas heredan el sufijo del padre, no
+ *   cuentan aparte) del mismo tipo_masa + DATE(fecha_produccion) + misma
+ *   combinación exacta de (es_adicional, es_repeticion), ordenadas por
+ *   created_at/id.
+ *
+ * @returns {string|null} lote base (ej. "TOSC210826" o "TOSC210826-AD2"),
+ *   o null si la masa no existe.
+ */
+async function construirLoteBase(masaId, queryable) {
+  const masaResult = await queryable.query(
+    `SELECT mp.id, mp.tipo_masa, mp.fecha_produccion, mp.es_adicional, mp.es_repeticion,
+            ctm.codigo_lote
+     FROM masas_produccion mp
+     LEFT JOIN catalogo_tipos_masa ctm ON mp.tipo_masa = ctm.tipo_masa
+     WHERE mp.id = $1`,
+    [masaId]
+  );
+  if (masaResult.rows.length === 0) return null;
+  const masa = masaResult.rows[0];
+
+  const codigoBase = masa.codigo_lote || masa.tipo_masa.substring(0, 4).toUpperCase();
+  const fecha = new Date(masa.fecha_produccion);
+  const dd = String(fecha.getUTCDate()).padStart(2, '0');
+  const mm = String(fecha.getUTCMonth() + 1).padStart(2, '0');
+  const yy = String(fecha.getUTCFullYear()).slice(-2);
+
+  let sufijoCategoria = '';
+  if (masa.es_adicional || masa.es_repeticion) {
+    const etiqueta = masa.es_adicional && masa.es_repeticion ? 'ADPR'
+                    : masa.es_adicional ? 'AD'
+                    : 'PR';
+    const hermanas = await queryable.query(
+      `SELECT id FROM masas_produccion
+       WHERE tipo_masa = $1 AND DATE(fecha_produccion) = DATE($2)
+         AND es_adicional = $3 AND es_repeticion = $4
+         AND masa_padre_id IS NULL
+       ORDER BY created_at ASC, id ASC`,
+      [masa.tipo_masa, masa.fecha_produccion, masa.es_adicional, masa.es_repeticion]
+    );
+    const ordinal = hermanas.rows.findIndex(r => r.id === masa.id) + 1;
+    sufijoCategoria = `-${etiqueta}${ordinal}`;
+  }
+
+  return `${codigoBase}${dd}${mm}${yy}${sufijoCategoria}`;
+}
+
+/**
  * Simula el plan de lotes de una masa (BOM + posible subdivisión en tandas +
  * lote por tanda) SIN persistir nada — solo calcula. guardarPlanLotes()
- * escribe el resultado en masas_lotes_simulados. Migración 068.
- *
- * La fórmula de lote es la misma que usaba pesaje.controller.js antes de este
- * cambio: `${codigoBase}${dd}${mm}${yy}${sufijo}`, codigoBase desde
- * catalogo_tipos_masa.codigo_lote (o los primeros 4 chars de tipo_masa),
- * dd/mm/yy de fecha_produccion en UTC, sufijo `-${letra}` solo si hay
- * subdivisión.
+ * escribe el resultado en masas_lotes_simulados. Migración 068. La fórmula
+ * de lote base viene de construirLoteBase() (Hallazgo 3).
  *
  * @returns {null} si la masa no existe o no tiene productos aptos, o
  *   { necesitaSubdivision, limiteKg, totalKgIngredientes, loteBase,
@@ -861,9 +920,8 @@ async function calcularBOMMasa(masaId, queryable) {
  */
 async function simularPlanLotes(masaId, queryable) {
   const masaResult = await queryable.query(
-    `SELECT mp.id, mp.tipo_masa, mp.fecha_produccion, ctm.codigo_lote
+    `SELECT mp.id, mp.tipo_masa, mp.fecha_produccion
      FROM masas_produccion mp
-     LEFT JOIN catalogo_tipos_masa ctm ON mp.tipo_masa = ctm.tipo_masa
      WHERE mp.id = $1`,
     [masaId]
   );
@@ -877,12 +935,7 @@ async function simularPlanLotes(masaId, queryable) {
   const limiteKg = await getLimiteKg(queryable, masa.tipo_masa);
   const necesitaSubdivision = totalKgIngredientes > limiteKg;
 
-  const codigoBase = masa.codigo_lote || masa.tipo_masa.substring(0, 4).toUpperCase();
-  const fecha       = new Date(masa.fecha_produccion);
-  const dd = String(fecha.getUTCDate()).padStart(2, '0');
-  const mm = String(fecha.getUTCMonth() + 1).padStart(2, '0');
-  const yy = String(fecha.getUTCFullYear()).slice(-2);
-  const loteBase = `${codigoBase}${dd}${mm}${yy}`;
+  const loteBase = await construirLoteBase(masaId, queryable);
 
   if (!necesitaSubdivision) {
     return {
@@ -1096,16 +1149,12 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false,
   } else {
     logger.warn(`ejecutarSubdivision: masa ${masaId} sin plan de lotes disponible (nunca se simuló) — generando letras/lotes de cero.`);
     LETRAS_TANDA = generarLetrasTanda(nTandas);
-    const codigoLoteResult = await client.query(
-      `SELECT codigo_lote FROM catalogo_tipos_masa WHERE tipo_masa = $1 AND activo = TRUE LIMIT 1`,
-      [masa.tipo_masa]
-    );
-    const codigoBase  = codigoLoteResult.rows[0]?.codigo_lote || masa.tipo_masa.substring(0, 4).toUpperCase();
-    const fechaLote    = masa.fecha_produccion instanceof Date ? masa.fecha_produccion : new Date(masa.fecha_produccion);
-    const ddLote = String(fechaLote.getUTCDate()).padStart(2, '0');
-    const mmLote = String(fechaLote.getUTCMonth() + 1).padStart(2, '0');
-    const yyLote = String(fechaLote.getUTCFullYear()).slice(-2);
-    lotesPorTanda = LETRAS_TANDA.map(letra => `${codigoBase}${ddLote}${mmLote}${yyLote}-${letra}`);
+    // Hallazgo 3: misma fórmula que simularPlanLotes (construirLoteBase),
+    // ya considera es_adicional/es_repeticion — antes este fallback tenía su
+    // propia copia de la fórmula, sin ese sufijo, y colisionaba con otra
+    // masa ADICIONAL/repetición del mismo tipo+día.
+    const loteBase = await construirLoteBase(masaId, client);
+    lotesPorTanda = LETRAS_TANDA.map(letra => `${loteBase}-${letra}`);
   }
 
   const fraccionesTanda = [];
