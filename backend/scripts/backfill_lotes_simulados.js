@@ -23,6 +23,15 @@
  *   node scripts/backfill_lotes_simulados.js --dry-run   (BEGIN + ROLLBACK, no persiste nada)
  *   node scripts/backfill_lotes_simulados.js             (BEGIN + COMMIT real)
  *
+ * Filtro de fecha opcional (sin ninguno de estos flags, el alcance es TODAS
+ * las masas candidatas — mismo comportamiento ya validado en staging, para
+ * no romper ese uso):
+ *   --fecha=YYYY-MM-DD              (mp.fecha_produccion = esa fecha exacta)
+ *   --desde=YYYY-MM-DD [--hasta=YYYY-MM-DD]   (rango, cualquiera de los dos
+ *                                               por separado también es válido)
+ * --fecha es mutuamente excluyente con --desde/--hasta (error explícito si
+ * se combinan, para no dejar ambigüedad sobre qué filtro aplicó).
+ *
  * Idempotente: la selección de candidatas ya filtra
  * "NOT EXISTS masas_lotes_simulados para esa masa", así que correr el script
  * dos veces no vuelve a tocar una masa ya backfilleada (equivalente en
@@ -37,6 +46,42 @@ const config = require('../src/config');
 const { simularPlanLotes, guardarPlanLotes } = require('../src/controllers/fases.controller');
 
 const DRY_RUN = process.argv.includes('--dry-run');
+
+const FECHA_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function leerArgFecha(nombre) {
+  const arg = process.argv.find(a => a.startsWith(`--${nombre}=`));
+  if (!arg) return null;
+  const valor = arg.slice(`--${nombre}=`.length);
+  if (!FECHA_RE.test(valor)) {
+    throw new Error(`--${nombre} debe tener formato YYYY-MM-DD (recibido: "${valor}")`);
+  }
+  return valor;
+}
+
+const FECHA = leerArgFecha('fecha');
+const DESDE = leerArgFecha('desde');
+const HASTA = leerArgFecha('hasta');
+
+if (FECHA && (DESDE || HASTA)) {
+  throw new Error('--fecha es mutuamente excluyente con --desde/--hasta — use uno u otro, no ambos.');
+}
+
+// Filtro de fecha opcional sobre mp.fecha_produccion — construido con
+// placeholders numerados a partir de $1 y aplicado tal cual al WHERE de la
+// query de candidatas. Sin --fecha/--desde/--hasta, filtroFechaSql queda
+// vacío y filtroFechaParams vacío: mismo alcance de siempre (todas).
+let filtroFechaSql = '';
+const filtroFechaParams = [];
+if (FECHA) {
+  filtroFechaParams.push(FECHA);
+  filtroFechaSql = `AND mp.fecha_produccion = $${filtroFechaParams.length}`;
+} else if (DESDE || HASTA) {
+  const partes = [];
+  if (DESDE) { filtroFechaParams.push(DESDE); partes.push(`mp.fecha_produccion >= $${filtroFechaParams.length}`); }
+  if (HASTA) { filtroFechaParams.push(HASTA); partes.push(`mp.fecha_produccion <= $${filtroFechaParams.length}`); }
+  filtroFechaSql = `AND ${partes.join(' AND ')}`;
+}
 
 const pool = new Pool({
   host:     config.database.host,
@@ -66,10 +111,18 @@ async function main() {
         AND NOT EXISTS (
           SELECT 1 FROM masas_lotes_simulados mls WHERE mls.masa_id = mp.id
         )
+        ${filtroFechaSql}
       ORDER BY mp.fecha_produccion
-    `);
+    `, filtroFechaParams);
 
-    console.log(`${DRY_RUN ? '[DRY-RUN] ' : ''}Candidatas para backfill: ${candidatas.rows.length}`);
+    const descFiltro = FECHA ? ` (fecha_produccion = ${FECHA})`
+      : (DESDE || HASTA) ? ` (fecha_produccion ${DESDE ? `>= ${DESDE}` : ''}${DESDE && HASTA ? ' AND ' : ''}${HASTA ? `<= ${HASTA}` : ''})`
+      : ' (todas las fechas)';
+    console.log(`${DRY_RUN ? '[DRY-RUN] ' : ''}Candidatas para backfill${descFiltro}: ${candidatas.rows.length}`);
+    if (candidatas.rows.length > 0) {
+      const fechasDistintas = [...new Set(candidatas.rows.map(r => r.fecha_produccion.toISOString().slice(0, 10)))].sort();
+      console.log(`  Fechas presentes en las candidatas: ${fechasDistintas.join(', ')}`);
+    }
 
     for (const m of candidatas.rows) {
       try {
