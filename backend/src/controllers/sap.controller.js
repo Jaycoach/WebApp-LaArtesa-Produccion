@@ -689,7 +689,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
 
     if (forzar) {
       const masasExistentes = await client.query(
-        `SELECT id, codigo_masa, tipo_masa, fase_actual, estado, masa_padre_id
+        `SELECT id, codigo_masa, tipo_masa, fase_actual, estado, masa_padre_id, fue_subdividida
          FROM masas_produccion
          WHERE DATE(fecha_produccion) = $1`,
         [fechaProduccion]
@@ -697,18 +697,38 @@ const sincronizarDesdeOV = async (req, res, next) => {
 
       for (const masa of masasExistentes.rows) {
         const estaEnPlanificacion = masa.fase_actual === 'PLANIFICACION';
-        const estadoEliminable = ['PLANIFICACION', 'CANCELADA', 'SUBDIVIDIDA'].includes(masa.estado);
+        // Fix B (masa 2067 / sap.controller.js, sesión masas_lotes_simulados):
+        // una masa padre recién subdividida (Fix B) queda con
+        // estado='SUBDIVIDIDA' (en la lista de abajo) pero fase_actual SIGUE
+        // en 'PLANIFICACION' a propósito (no se toca, es un dead-end — sus
+        // tandas avanzan solas). Sin este chequeo de fue_subdividida, esa
+        // fila calificaba como eliminable acá y el DELETE reventaba con
+        // violación de FK (masa_padre_id de sus tandas la referencia, sin
+        // ON DELETE CASCADE) en cuanto el día tuviera una masa ya
+        // subdividida y alguien corriera una resincronización forzada.
+        const estadoEliminable = ['PLANIFICACION', 'CANCELADA', 'SUBDIVIDIDA'].includes(masa.estado)
+          && !masa.fue_subdividida;
 
-        // Si es sub-masa, verificar que su padre no esté en producción
+        // Si es sub-masa, verificar que su padre no esté en producción.
+        // Mismo riesgo que estadoEliminable de arriba: un padre subdividido
+        // (fue_subdividida=true) tiene fase_actual='PLANIFICACION' a
+        // propósito (Fix B) y estado='SUBDIVIDIDA' (en la lista de abajo) —
+        // sin este chequeo, padreEnProduccion daría false (padre "no está en
+        // producción") para el padre de una tanda, dejando esa tanda
+        // desprotegida si por algún motivo histórico/edge-case llegara con
+        // fase_actual='PLANIFICACION' también. fue_subdividida=true implica
+        // "padre ya produjo sus tandas" sin importar qué diga la lista de
+        // estados — se chequea aparte, no se agrega a la lista.
         let padreEnProduccion = false;
         if (masa.masa_padre_id) {
           const padreResult = await client.query(
-            `SELECT estado, fase_actual FROM masas_produccion WHERE id = $1`,
+            `SELECT estado, fase_actual, fue_subdividida FROM masas_produccion WHERE id = $1`,
             [masa.masa_padre_id]
           );
           if (padreResult.rows.length > 0) {
             const padre = padreResult.rows[0];
-            padreEnProduccion = padre.fase_actual !== 'PLANIFICACION' ||
+            padreEnProduccion = padre.fue_subdividida ||
+                                padre.fase_actual !== 'PLANIFICACION' ||
                                 !['PLANIFICACION', 'CANCELADA', 'SUBDIVIDIDA'].includes(padre.estado);
           }
         }

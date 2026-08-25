@@ -319,7 +319,8 @@ export interface UpdateConfiguracionRequest {
 export interface SubMasaInfo {
   id: number;
   codigo: string;
-  letra: 'A' | 'B';
+  letra: string;
+  lote: string;
 }
 
 export interface SubdivisionInfo {

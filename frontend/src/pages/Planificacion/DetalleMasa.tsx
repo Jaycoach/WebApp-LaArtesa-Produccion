@@ -124,9 +124,24 @@ export const DetalleMasa: React.FC = () => {
 
   const iniciarPesajeMutation = useMutation({
     mutationFn: () => fasesService.completarFase(id!, 'planificacion'),
-    onSuccess: () => {
+    onSuccess: (resultado) => {
       queryClient.invalidateQueries({ queryKey: MASAS_QUERY_KEYS.detail(masaId) });
       queryClient.invalidateQueries({ queryKey: ['fases', id] });
+      // Fix B (subdivisión movida a este punto): si la masa se dividió, este
+      // masaId ya quedó SUBDIVIDIDA (dead-end) — no hay nada que pesar acá.
+      // Cada tanda es su propia fila y ya aparece lista para pesar en la
+      // lista de Planificación (filtrada por fase PESAJE); el usuario entra
+      // a cada una manualmente desde ahí, no hay navegación directa a una
+      // sola tanda (decisión B2 confirmada).
+      if (resultado.subdivision) {
+        alert(
+          `La masa se dividió en ${resultado.subdivision.n_tandas} tandas: ` +
+          `${resultado.subdivision.sub_masas.map(s => s.lote).join(', ')}.\n\n` +
+          `Cada tanda ya está lista para pesarse por separado — entra a cada una desde la lista.`
+        );
+        navigate('/planificacion/masas');
+        return;
+      }
       navigate(`/pesaje/${masaId}`);
     },
     onError: (error: any) => {

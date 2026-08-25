@@ -13,7 +13,9 @@ const fasesModel = require('../models/fases.model');
 const db        = require('../database/connection');
 const logger     = require('../utils/logger');
 const sapService    = require('../services/sap.service');
-const { ejecutarSubdivision, simularAjusteDivisorPorGrupo, simularPlanLotes, guardarPlanLotes, cargarPlanLotes } = require('./fases.controller');
+// Fix B: la subdivisión (y su lógica de ajuste de grupo "Fase 4") se movió a
+// completarFase('planificacion') en fases.controller.js — este archivo ya no
+// necesita importar nada de subdivisión/plan de lotes.
 const { sendPesajeCompletadoEmail } = require('../services/email.service');
 const { upqDesdeProducto } = require('../utils/unidadesPorPaquete');
 
@@ -861,157 +863,18 @@ const confirmarPesaje = async (req, res, next) => {
     // No se hacen cambios de fase aquí para evitar estados inconsistentes
     logger.info(`Fase PESAJE validada para masa ${masaId}, esperando confirmación SAP`);
 
-    // ── Migración 068: cargar el plan de lotes ya simulado al aprobar/editar
-    // delta (masas_lotes_simulados) — ya no se asigna lote_produccion aquí
-    // de forma ad-hoc, eso lo hizo guardarPlanLotes() en aprobarMasaCore/
-    // updateUnidadesProgramadas (masas.controller.js). Fallback defensivo:
-    // si por algún motivo no existe plan (masa aprobada antes de este
-    // cambio y el backfill de la migración 068 todavía no corrió), se
-    // simula ahora mismo antes de subdividir, para no dejar la masa sin
-    // lote_produccion ni a las sub-masas sin lote.
-    let planLotes = await cargarPlanLotes(masaId, db);
-    if (!planLotes) {
-      logger.warn(`confirmarPesaje: masa ${masaId} sin plan de lotes simulado (migración 068) — simulando ahora como fallback.`);
-      try {
-        const planFallback = await simularPlanLotes(masaId, db);
-        if (planFallback) {
-          await guardarPlanLotes(masaId, planFallback, req.user.id, db);
-          planLotes = await cargarPlanLotes(masaId, db);
-        }
-      } catch (planErr) {
-        logger.error(`Error simulando plan de lotes de fallback para masa ${masaId}:`, planErr);
-      }
-    }
-    // ── Fin carga de plan de lotes ────────────────────────────────
-
-    // Fase 4 (12-ago-2026): segunda pasada de la simulación de grupo, ya
-    // con los números confirmados por el pesador — antes de que
-    // ejecutarSubdivision reparta en tandas.
-    const productosParaSimulacion = await db.query(
-      `SELECT id, producto_nombre, tamanio, forma, multiplo_divisor,
-              unidades_por_paquete, unidades_programadas
-       FROM productos_por_masa
-       WHERE masa_id = $1`,
-      [masaId]
-    );
-    const masaTipoResult = await db.query(`SELECT tipo_masa FROM masas_produccion WHERE id = $1`, [masaId]);
-    const ajustesGrupoPesaje = simularAjusteDivisorPorGrupo(productosParaSimulacion.rows, masaTipoResult.rows[0].tipo_masa);
-    for (const ajuste of ajustesGrupoPesaje) {
-      await db.query(
-        `UPDATE productos_por_masa
-         SET unidades_programadas   = $1::integer,
-             kilos_programados      = gramaje_unitario * $1::integer / 1000.0,
-             cantidad_paquetes      = $1::integer,
-             origen_ajuste_divisor  = 'PESAJE',
-             unidades_ajuste_grupal = unidades_ajuste_grupal + $2::integer,
-             updated_at             = NOW()
-         WHERE id = $3`,
-        [ajuste.unidadesProgramadasNuevas, ajuste.deltaPaquetes, ajuste.productoId]
-      );
-    }
-    if (ajustesGrupoPesaje.length > 0) {
-      logger.info(`Masa ${masaId}: simulación de grupo (Fase 4) ajustó ${ajustesGrupoPesaje.length} producto(s) al confirmar pesaje.`);
-    }
-
-    // ── NUEVO v4: Intentar subdivisión con pesaje heredado ─────────
-    let subdivision = null;
-    try {
-      subdivision = await ejecutarSubdivision(masaId, req.user.id, true /* conPesaje */, planLotes);
-    } catch (subErr) {
-      // Migración 068: si el plan de lotes quedó desactualizado respecto a la
-      // subdivisión real (drift de BOM por el sync automático 6:00/21:00,
-      // ajuste de grupo por múltiplo divisor, etc.), ejecutarSubdivision ya
-      // hizo ROLLBACK de su propia transacción — pero SÍ hay que cortar el
-      // flujo de confirmarPesaje: no se marcó PESAJE completado ni se llamó
-      // a SAP todavía (ver nota más arriba), así que es seguro devolver el
-      // error al usuario en vez de seguir como si no hubiera pasado nada.
-      if (subErr.codigo === 'PLAN_LOTES_DESACTUALIZADO') {
-        logger.error(`Pesaje de masa ${masaId} bloqueado — plan de lotes desactualizado: ${subErr.message}`);
-        return res.status(subErr.statusCode || 409).json({
-          success: false,
-          message: subErr.message,
-          codigo: subErr.codigo,
-        });
-      }
-      // Cualquier otro error de subdivisión (no relacionado al plan de
-      // lotes): comportamiento previo — NO cortar el flujo, el pesaje ya se
-      // validó como completo. Se loguea para investigación.
-      logger.error(`Error durante subdivisión de masa ${masaId}:`, subErr);
-    }
-
-    if (subdivision) {
-      // La masa fue subdividida. Las sub-masas ya tienen PESAJE completado.
-      logger.info(`Masa ${masaId} subdividida en ${subdivision.n_tandas} tandas después del pesaje.`);
-
-      // Enviar a SAP — bloqueante
-      const sapResult = await enviarInventoryGenExits(masaId, req.user.id, fecha_local);
-      if (!sapResult.success) {
-        // Rollback: revertir PESAJE a EN_PROGRESO y AMASADO a BLOQUEADA
-        try {
-          await fasesModel.updateEstadoFase(masaId, 'PESAJE', 'EN_PROGRESO', 90, req.user.id, {});
-          await db.query(
-            `UPDATE progreso_fases SET estado = 'BLOQUEADA', porcentaje_completado = 0
-             WHERE masa_id = $1 AND fase = 'AMASADO'`,
-            [masaId]
-          );
-          await db.query(
-            `UPDATE masas_produccion SET fase_actual = 'PESAJE', estado = 'APROBADA' WHERE id = $1`,
-            [masaId]
-          );
-        } catch (rollbackErr) {
-          logger.error(`Error en rollback de masa ${masaId}:`, rollbackErr.message);
-        }
-        return res.status(502).json({
-          success: false,
-          message: `No se pudo registrar el consumo en SAP: ${sapResult.error}`,
-          data: {
-            reintentable: true,
-            lote_fallido:  sapResult.lote_fallido  || null,
-            alternativas:  sapResult.alternativas  || [],
-          },
-        });
-      }
-
-      // SAP OK → descontar inventario local
-      if (sapResult.rows.length > 0) {
-        try {
-          await descontarInventarioLocal(sapResult.rows, masaId);
-        } catch (descErr) {
-          logger.error(`Error descontando inventario local masa ${masaId}:`, descErr.message);
-        }
-      }
-
-      // Fija la línea base para detectar ajustes futuros — mismo motivo que el flujo estándar.
-      // Las filas de ingredientes_masa de la masa original siguen existiendo tras la subdivisión
-      // (distribuirIngredientes solo copia a las tandas, no borra ni mueve el original).
-      await db.query(
-        `UPDATE ingredientes_masa
-         SET peso_confirmado_sap = peso_real
-         WHERE masa_id = $1 AND pesado = true`,
-        [masaId]
-      );
-
-      // Marca PESAJE como completada también en la masa original — sin esto,
-      // pesaje_completado queda en false para siempre y el botón "Confirmar Pesaje
-      // Completo" de la sticky reaparece incorrectamente en una masa ya subdividida.
-      await fasesModel.updateEstadoFase(
-        masaId, 'PESAJE', 'COMPLETADA', 100, req.user.id, { confirmado_en: new Date() }
-      );
-
-      notificarPesajeCompletado(masaId); // fire-and-forget
-      return res.json({
-        success: true,
-        message: `Pesaje confirmado. La masa supera el límite de ${subdivision.limite_kg} kg y fue dividida en ${subdivision.n_tandas} tandas. Cada tanda ya tiene el pesaje registrado.`,
-        data: {
-          fase_completada:    'PESAJE',
-          fase_desbloqueada:  'AMASADO',
-          sap_docentry:       sapResult.docEntry,
-          subdivision,
-        },
-      });
-    }
-
-    // ── Flujo estándar sin subdivisión ─────────────────────────────
+    // Fix B (mover subdivisión a completarFase('planificacion')): la
+    // subdivisión real ya ocurrió, si correspondía, al completar
+    // Planificación ("Iniciar Pesaje") — mucho antes de este punto. Para
+    // cuando se llega acá, `masaId` es SIEMPRE una masa pesable por sí
+    // misma: la masa original si nunca necesitó subdividirse, o una tanda
+    // (sub-masa) individual si sí. Ya no hay nada que subdividir ni SAP que
+    // enviar "por lote completo" — cada tanda se pesa y confirma por
+    // separado, con su propio documento SAP (comportamiento esperado, no
+    // un caso especial). El bloque `if (subdivision) {...}` que existía acá
+    // (carga de plan, segunda pasada de ajuste de grupo "Fase 4", llamada a
+    // ejecutarSubdivision, envío a SAP del lote completo) se eliminó por
+    // completo — quedaba muerto tras el cambio.
     // NOTA: desbloquearSiguienteFase se ejecuta DESPUÉS de guardar sap_doc_entry_pesaje
     // para evitar que el rollback de SAP pise un desbloqueo ya exitoso.
 

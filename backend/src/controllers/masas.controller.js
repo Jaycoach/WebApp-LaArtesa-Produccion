@@ -831,25 +831,52 @@ const marcarPendiente = async (req, res, next) => {
       });
     }
 
-    await db.query(
-      `UPDATE masas_produccion SET estado = 'PENDIENTE', updated_at = NOW() WHERE id = $1`,
-      [id]
-    );
+    // Transacción: si la masa ya había avanzado a PESAJE (fase_actual='PESAJE',
+    // progreso_fases.PESAJE='EN_PROGRESO' porque "Iniciar Pesaje" ya se clickeó),
+    // revertir fase_actual a PLANIFICACION en la MISMA operación que bloquea
+    // progreso_fases.PESAJE — de lo contrario quedan inconsistentes entre sí
+    // (masas_produccion dice PESAJE, progreso_fases dice BLOQUEADA) y nada en
+    // la re-aprobación las repara (bug encontrado en masa 2067, staging).
+    const client = await db.getClient();
+    try {
+      await client.query('BEGIN');
 
-    await db.query(
-      `UPDATE progreso_fases
-       SET estado = 'BLOQUEADA'
-       WHERE masa_id = $1 AND fase = 'PESAJE' AND estado = 'EN_PROGRESO'`,
-      [id]
-    );
-
-    if (motivo) {
-      await db.query(
-        `UPDATE progreso_fases
-         SET observaciones = $1
-         WHERE masa_id = $2 AND fase = 'PLANIFICACION'`,
-        [motivo, id]
+      await client.query(
+        `UPDATE masas_produccion SET estado = 'PENDIENTE', updated_at = NOW() WHERE id = $1`,
+        [id]
       );
+
+      const pesajeBloqueado = await client.query(
+        `UPDATE progreso_fases
+         SET estado = 'BLOQUEADA'
+         WHERE masa_id = $1 AND fase = 'PESAJE' AND estado = 'EN_PROGRESO'
+         RETURNING masa_id`,
+        [id]
+      );
+
+      if (pesajeBloqueado.rowCount > 0) {
+        await client.query(
+          `UPDATE masas_produccion SET fase_actual = 'PLANIFICACION', updated_at = NOW()
+           WHERE id = $1 AND fase_actual = 'PESAJE'`,
+          [id]
+        );
+      }
+
+      if (motivo) {
+        await client.query(
+          `UPDATE progreso_fases
+           SET observaciones = $1
+           WHERE masa_id = $2 AND fase = 'PLANIFICACION'`,
+          [motivo, id]
+        );
+      }
+
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
     }
 
     logger.info(`Masa ${id} marcada PENDIENTE por usuario ${req.user.id}`);

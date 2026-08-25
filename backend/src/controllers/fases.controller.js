@@ -1143,9 +1143,15 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false,
 
   // El estado de la sub-masa depende de si ya viene con pesaje.
   // Cuando conPesaje=true: PESAJE ya está completado, la sub-masa arranca en AMASADO.
+  // Cuando conPesaje=false (Fix B: subdivisión antes de pesar): la sub-masa
+  // debe quedar lista para pesarse de inmediato — inicializarFasesMasa()
+  // (más abajo) ya pone progreso_fases.PESAJE='EN_PROGRESO'; estado/fase_actual
+  // tienen que ser consistentes con eso (estado=APROBADA para que el frontend
+  // habilite "Iniciar Pesaje"/muestre la tanda como pesable, fase_actual=PESAJE
+  // para que no aparezca como si todavía le faltara planificación).
   // Valores válidos según constraint check_estado_masa de la BD.
-  const estadoSubMasa     = conPesaje ? 'AMASADO'      : 'PLANIFICACION';
-  const faseActualSubMasa = conPesaje ? 'AMASADO'      : 'PLANIFICACION';
+  const estadoSubMasa     = conPesaje ? 'AMASADO' : 'APROBADA';
+  const faseActualSubMasa = conPesaje ? 'AMASADO' : 'PESAJE';
 
   // Crear sub-masas
   const subMasas   = [];
@@ -1388,7 +1394,7 @@ const completarFase = async (req, res, next) => {
       const masaResult = await db.query(
         `SELECT id, codigo_masa, tipo_masa, nombre_masa, fecha_produccion,
                 total_kilos_base, total_kilos_con_merma, porcentaje_merma,
-                factor_absorcion_usado, created_by,
+                factor_absorcion_usado, created_by, estado,
                 fue_subdividida, es_subdivision
          FROM masas_produccion WHERE id = $1`,
         [masaId]
@@ -1398,6 +1404,19 @@ const completarFase = async (req, res, next) => {
         return res.status(404).json({ success: false, message: 'Masa no encontrada' });
       }
       const masa = masaResult.rows[0];
+
+      // Guarda (Fix A, investigación "Masa 2067"): no se puede completar
+      // PLANIFICACION si la masa no está APROBADA — antes no existía este
+      // chequeo, y una masa marcada PENDIENTE (o nunca aprobada) podía llegar
+      // hasta acá. Mismo patrón (409 + campo `codigo`) que el guard de
+      // MASA_YA_SUBDIVIDIDA de abajo.
+      if (masa.estado !== 'APROBADA') {
+        return res.status(409).json({
+          success: false,
+          message: `No se puede completar Planificación: la masa ${masa.codigo_masa} está en estado ${masa.estado} (debe estar APROBADA).`,
+          codigo: 'MASA_NO_APROBADA',
+        });
+      }
 
       // Guarda: no re-subdividir
       if (masa.fue_subdividida) {
@@ -1505,40 +1524,71 @@ const completarFase = async (req, res, next) => {
 
       logger.info(`Masa ${masaId} (${masa.tipo_masa}): ${totalKgIngredientes.toFixed(2)} kg de masa`);
 
-      // ── CAMBIO v4: Ya NO subdividimos aquí. Solo informamos que habrá subdivisión al confirmar pesaje.
-      // Migración 068: el número de tandas para el mensaje se lee del plan ya
-      // simulado al aprobar/editar delta (masas_lotes_simulados) en vez de
-      // recalcularlo — es la misma fuente que usará ejecutarSubdivision().
-      // Fallback (masa aprobada antes de este cambio, backfill pendiente):
-      // calcular aquí mismo como se hacía antes.
+      // Fix B (corrección de diseño, sesión de masas_lotes_simulados): la
+      // subdivisión REAL ocurre ACÁ, al completar Planificación ("Iniciar
+      // Pesaje"), usando el plan ya simulado al aprobar/editar delta —
+      // ANTES de que nadie pese nada, para que el pesador sepa la partición
+      // por tanda antes de mezclar (límite físico de la amasadora: 90kg /
+      // 130kg Toscano). conPesaje=false: cada tanda nace lista para pesarse
+      // de forma independiente (no hereda pesaje, porque todavía no existe).
+      //
+      // Si el plan cargado no coincide con lo que agruparProductosEnTandas
+      // calcula ahora mismo (drift), ejecutarSubdivision lanza
+      // PLAN_LOTES_DESACTUALIZADO — se bloquea con 409 explícito, NO se
+      // completa Planificación ni se desbloquea nada (mismo patrón que
+      // MASA_YA_SUBDIVIDIDA más arriba).
       const planExistente = await cargarPlanLotes(masaId, db);
-      let necesitaSubdivision, nTandas, limiteKg;
-      if (planExistente) {
-        const tandasConSubdivision = planExistente.filter(p => p.tanda_letra !== null);
-        necesitaSubdivision = tandasConSubdivision.length > 0;
-        nTandas = necesitaSubdivision ? tandasConSubdivision.length : 0;
-        limiteKg = await getLimiteKg(db, masa.tipo_masa);
-      } else {
-        limiteKg = await getLimiteKg(db, masa.tipo_masa);
-        necesitaSubdivision = totalKgIngredientes > limiteKg;
-        nTandas = necesitaSubdivision ? calcularNTandas(totalKgIngredientes, limiteKg) : 0;
+      let subdivision = null;
+      try {
+        subdivision = await ejecutarSubdivision(masaId, req.user.id, false, planExistente);
+      } catch (subErr) {
+        if (subErr.codigo === 'PLAN_LOTES_DESACTUALIZADO') {
+          logger.error(`Completar Planificación de masa ${masaId} bloqueado — plan de lotes desactualizado: ${subErr.message}`);
+          return res.status(subErr.statusCode || 409).json({
+            success: false,
+            message: subErr.message,
+            codigo: subErr.codigo,
+          });
+        }
+        throw subErr;
       }
 
-      // Completar fase PLANIFICACION y desbloquear PESAJE
+      // Completar fase PLANIFICACION — registro histórico, siempre (haya
+      // habido subdivisión o no).
       const faseActualizada = await fasesModel.updateEstadoFase(
         masaId, 'PLANIFICACION', 'COMPLETADA', 100, req.user.id, datos
       );
+
+      if (subdivision) {
+        // La masa se subdividió: queda estado='SUBDIVIDIDA' (fue_subdividida=true,
+        // puesto dentro de ejecutarSubdivision), es un dead-end — NO se
+        // desbloquea su propio PESAJE. Cada tanda (sub-masa) ya nació con
+        // estado=APROBADA / fase_actual=PESAJE (ver ejecutarSubdivision) y
+        // avanza de forma independiente; aparecen como filas propias en la
+        // lista de Planificación filtrada por fase PESAJE.
+        logger.info(`Masa ${masaId} dividida en ${subdivision.n_tandas} tandas al completar Planificación.`);
+        return res.json({
+          success: true,
+          data: faseActualizada,
+          message: `Planificación completada. La masa superó ${subdivision.limite_kg} kg (${subdivision.total_kg.toFixed(2)} kg) y se dividió en ${subdivision.n_tandas} tandas: ${subdivision.sub_masas.map(s => s.lote).join(', ')}.`,
+          subdivision,
+          necesita_subdivision: true,
+          n_tandas_previstas: subdivision.n_tandas,
+          ingredientes_generados: componentesPeso.length,
+          empaque_separado:       componentesEmpaque.length,
+        });
+      }
+
+      // Sin subdivisión: flujo normal — desbloquear PESAJE en la misma masa.
       await fasesModel.desbloquearSiguienteFase(masaId, 'PLANIFICACION');
 
       return res.json({
         success: true,
         data: faseActualizada,
-        message: necesitaSubdivision
-          ? `Planificación completada. La masa supera ${limiteKg} kg (${totalKgIngredientes.toFixed(2)} kg). Se dividirá en ${nTandas} tandas al confirmar el pesaje.`
-          : 'Planificación completada exitosamente.',
+        message: 'Planificación completada exitosamente.',
         subdivision: null,
-        necesita_subdivision: necesitaSubdivision,
-        n_tandas_previstas: nTandas,
+        necesita_subdivision: false,
+        n_tandas_previstas: 0,
         ingredientes_generados: componentesPeso.length,
         empaque_separado:       componentesEmpaque.length,
       });
