@@ -85,6 +85,9 @@ export const DetalleMasa: React.FC = () => {
   const esSupervisor = user?.rol === 'admin' || user?.rol === 'supervisor';
   const [iniciandoPesaje, setIniciandoPesaje] = useState(false);
   const [mostrarCancelar, setMostrarCancelar] = useState(false);
+  // Hallazgo 1 (QA post-deploy ef5b28d): modal propio en vez de alert()
+  // nativo — mismo patrón que el modal "Pesaje confirmado" de PesajeMasa.tsx.
+  const [resultadoSubdivision, setResultadoSubdivision] = useState<{ nTandas: number; lotes: string[] } | null>(null);
 
   // Estado para ajuste de unidades por producto
   const [ajustes, setAjustes] = useState<Record<number, { delta: string; motivo: string; guardando: boolean; error: string | null }>>({});
@@ -132,14 +135,14 @@ export const DetalleMasa: React.FC = () => {
       // Cada tanda es su propia fila y ya aparece lista para pesar en la
       // lista de Planificación (filtrada por fase PESAJE); el usuario entra
       // a cada una manualmente desde ahí, no hay navegación directa a una
-      // sola tanda (decisión B2 confirmada).
+      // sola tanda (decisión B2 confirmada). Hallazgo 1 (QA post-deploy
+      // ef5b28d): modal propio en vez de alert() nativo — la navegación se
+      // dispara al cerrar el modal, no de forma inmediata.
       if (resultado.subdivision) {
-        alert(
-          `La masa se dividió en ${resultado.subdivision.n_tandas} tandas: ` +
-          `${resultado.subdivision.sub_masas.map(s => s.lote).join(', ')}.\n\n` +
-          `Cada tanda ya está lista para pesarse por separado — entra a cada una desde la lista.`
-        );
-        navigate('/planificacion/masas');
+        setResultadoSubdivision({
+          nTandas: resultado.subdivision.n_tandas,
+          lotes: resultado.subdivision.sub_masas.map(s => s.lote),
+        });
         return;
       }
       navigate(`/pesaje/${masaId}`);
@@ -293,6 +296,38 @@ export const DetalleMasa: React.FC = () => {
           onClose={() => setMostrarCancelar(false)}
           onCancelada={() => navigate('/planificacion')}
         />
+
+        {resultadoSubdivision && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-2xl">✅</span>
+                <h3 className="font-bold text-lg text-green-700">Masa dividida en tandas</h3>
+              </div>
+              <div className="bg-green-50 border border-green-200 rounded p-3 mb-4 text-sm">
+                <p className="text-gray-600 mb-2">
+                  La masa superó el límite de la amasadora y se dividió en {resultadoSubdivision.nTandas} tandas:
+                </p>
+                <ul className="space-y-1">
+                  {resultadoSubdivision.lotes.map(lote => (
+                    <li key={lote} className="font-mono font-semibold text-gray-800">{lote}</li>
+                  ))}
+                </ul>
+              </div>
+              <p className="text-sm text-gray-600 mb-4">
+                Cada tanda ya está lista para pesarse por separado — entra a cada una desde la lista.
+              </p>
+              <div className="flex justify-end">
+                <button
+                  onClick={() => { setResultadoSubdivision(null); navigate('/planificacion/masas'); }}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium"
+                >
+                  Ir a la lista
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Información General */}
         <Card title="Información General">
