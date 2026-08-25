@@ -920,7 +920,7 @@ async function construirLoteBase(masaId, queryable) {
  */
 async function simularPlanLotes(masaId, queryable) {
   const masaResult = await queryable.query(
-    `SELECT mp.id, mp.tipo_masa, mp.fecha_produccion
+    `SELECT mp.id, mp.tipo_masa, mp.fecha_produccion, mp.porcentaje_merma
      FROM masas_produccion mp
      WHERE mp.id = $1`,
     [masaId]
@@ -956,7 +956,19 @@ async function simularPlanLotes(masaId, queryable) {
     `SELECT * FROM productos_por_masa WHERE masa_id = $1 AND apto_produccion = true`,
     [masaId]
   );
-  const tandas = agruparProductosEnTandas(productosParaAgrupar.rows, limiteKg, masa.tipo_masa);
+  // Hallazgo 2 REABIERTO (QA staging, masa 2091): agruparProductosEnTandas
+  // agrupa por kg de PRODUCTO (gramaje_unitario terminado), pero limiteKg es
+  // un límite físico de la amasadora sobre kg de MASA/dough — la masa cruda
+  // pesa más que el producto horneado final (porcentaje_merma). Sin
+  // convertir, cualquier tanda que se acerque al límite en kg de producto
+  // termina por encima del límite real en kg de masa (ratio constante
+  // confirmado empíricamente: 1.0368 en las 4 tandas de la masa 2091,
+  // exactamente total_kilos_con_merma/total_kilos_base). Se pasa el límite
+  // ya convertido a kg de producto — el límite real (limiteKg) no cambia
+  // para nada más (mensajes, necesitaSubdivision siguen en kg de masa).
+  const factorMerma = 1 + (parseFloat(masa.porcentaje_merma) || 0) / 100;
+  const limiteKgProducto = limiteKg / factorMerma;
+  const tandas = agruparProductosEnTandas(productosParaAgrupar.rows, limiteKgProducto, masa.tipo_masa);
   const letras = generarLetrasTanda(tandas.length);
 
   return {
@@ -1107,7 +1119,13 @@ async function _ejecutarSubdivisionTx(client, masaId, userId, conPesaje = false,
     (acc, p) => acc + parseFloat(p.kilos_programados || 0), 0
   );
 
-  const tandas       = agruparProductosEnTandas(todosProductosParaAgrupar.rows, limiteKg, masa.tipo_masa);
+  // Hallazgo 2 REABIERTO: mismo fix que simularPlanLotes — agruparProductosEnTandas
+  // agrupa por kg de producto, limiteKg es un límite de kg de masa/dough. Se
+  // convierte con el mismo factor (porcentaje_merma) para que la subdivisión
+  // real, acá, respete el límite físico de la amasadora igual que la simulación.
+  const factorMermaReal = 1 + (parseFloat(masa.porcentaje_merma) || 0) / 100;
+  const limiteKgProductoReal = limiteKg / factorMermaReal;
+  const tandas       = agruparProductosEnTandas(todosProductosParaAgrupar.rows, limiteKgProductoReal, masa.tipo_masa);
   const nTandas       = tandas.length;
 
   // Letras/lotes: usar el plan ya simulado al aprobar/editar delta (migración
