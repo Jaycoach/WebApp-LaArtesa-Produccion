@@ -703,10 +703,21 @@ async function insertarProductoEnMasa(masaId, prod, unidadesProg, unidadesPedida
   // deben copiarse del producto original, no quedarse en NULL/0.
   const multiploDivisor = parseInt(prod.multiplo_divisor || 0);
 
-  // unidades_ajustadas/unidades_excedente sí dependen de la cantidad de ESTA tanda —
-  // recalcular con la misma fórmula usada en el sync original (sap.controller.js).
-  const unidadesAjustadas = (multiploDivisor > 0 && unidadesProg % multiploDivisor !== 0)
-    ? (Math.floor(unidadesProg / multiploDivisor) + 1) * multiploDivisor
+  // unidades_ajustadas/unidades_excedente sí dependen de la cantidad de ESTA tanda.
+  // Hallazgo 2 (QA post-deploy ef5b28d, masa 2080): multiplo_divisor es un divisor
+  // de PANES, no de paquetes (mismo criterio que el FIX 2026-08-10 en
+  // masas.controller.js) — redondear unidadesProg (paquetes) directamente contra
+  // multiploDivisor mezclaba unidades y podía inflar la cantidad muy por encima de
+  // lo necesario, empujando tandas individuales por encima del límite físico de la
+  // amasadora que la subdivisión existe para respetar. Se convierte a panes, se
+  // redondea al múltiplo, y se vuelve a paquetes — misma fórmula ya establecida.
+  // (upq ya está declarado arriba, línea 699.)
+  const panes = unidadesProg * upq;
+  const panesAjustados = (multiploDivisor > 0 && panes % multiploDivisor !== 0)
+    ? (Math.floor(panes / multiploDivisor) + 1) * multiploDivisor
+    : panes;
+  const unidadesAjustadas = multiploDivisor > 0
+    ? Math.round(panesAjustados / upq)
     : unidadesProg;
   const unidadesExcedente = unidadesAjustadas - unidadesProg;
 
