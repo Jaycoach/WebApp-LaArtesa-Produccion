@@ -78,12 +78,32 @@ exports.getFermentacionInfo = async (req, res) => {
         pm.producto_codigo,
         pm.producto_nombre,
         pm.sap_item_code,
+        pm.cantidad_divisiones,
         COALESCE(pm.cantidad_divisiones, pm.unidades_ajustadas, pm.unidades_pedidas, 0) AS cantidad_panes
       FROM productos_por_masa pm
       WHERE pm.masa_id = $1
       ORDER BY pm.producto_nombre
     `;
     const productosResult = await db.query(productosQuery, [masaId]);
+
+    // Hallazgo 2 lateral (QA 2026-08-25): cantidad_divisiones debería estar
+    // siempre seteado a esta altura del flujo (completarFase('DIVISION') lo
+    // fija para todos los productos de la masa antes de dejarla avanzar a
+    // FORMADO/FERMENTACION) — pero si por cualquier motivo faltara (dato
+    // legado, producto agregado después de completar División por un resync),
+    // el COALESCE de arriba cae en silencio a unidades_ajustadas/unidades_pedidas,
+    // que son PAQUETES, y el frontend los rotula igual como "panes". Se deja
+    // el mismo fallback (no bloquea fermentación por esto) pero con warning
+    // explícito para que el drift quede visible en logs en vez de pasar
+    // desapercibido como un número de panes incorrecto.
+    for (const p of productosResult.rows) {
+      if (p.cantidad_divisiones === null) {
+        logger.warn(
+          `Fermentación masa ${masaId}: producto ${p.producto_nombre} (id=${p.id}) sin ` +
+          `cantidad_divisiones — cantidad_panes mostrada es un fallback a paquetes, no panes reales.`
+        );
+      }
+    }
 
     // Detalle por línea (Fase 6) — solo si ya hay un registro de sesión
     const detallesResult = registroResult.rows[0]

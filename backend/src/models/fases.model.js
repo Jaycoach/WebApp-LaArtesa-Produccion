@@ -82,10 +82,11 @@ const getMasasByFecha = async (fecha, fase = null) => {
       COUNT(pm.id) as total_productos,
       SUM(pm.unidades_pedidas) as total_unidades_pedidas,
       SUM(COALESCE(pm.unidades_ajustadas, pm.unidades_programadas)) as total_unidades_programadas,
-      -- FIX 2026-08-10: pese al nombre, esto sumaba cantidad_paquetes (no panes
-      -- reales) sobre la base sin ajustar. Se deja el mismo criterio de paquetes
-      -- pero ahora contra unidades_ajustadas, coherente con el resto del fix.
-      SUM(COALESCE(pm.unidades_ajustadas, pm.cantidad_paquetes)) as total_panes,
+      -- Hallazgo 2 (QA 2026-08-25): pese al nombre, esto sumaba paquetes
+      -- (cantidad_paquetes / unidades_ajustadas), no panes reales. El campo
+      -- no tiene consumidores en el frontend hoy, pero se corrige el cálculo
+      -- para que quede consistente con el nombre antes de que alguien lo use.
+      SUM(COALESCE(pm.unidades_ajustadas, pm.unidades_programadas) * pm.unidades_por_paquete) as total_panes,
       BOOL_AND(COALESCE(pm.division_completada, false)) as division_completada_total,
       SUM(CASE WHEN pm.division_completada THEN pm.unidades_producidas ELSE NULL END) as total_panes_cortados,
       json_agg(
