@@ -33,11 +33,12 @@ const ROLES_DISPONIBLES: { label: string; value: string }[] = [
 
 export const GestionUsuarios: React.FC = () => {
   const usuario = useAuthStore((state) => state.user);
+  const actualizarUsuarioStore = useAuthStore((state) => state.updateUser);
   const esAdmin = ['admin', 'supervisor', 'ADMIN', 'SUPERVISOR'].includes(usuario?.rol || '');
 
   const [pendientes, setPendientes] = useState<Usuario[]>([]);
   const [todos, setTodos] = useState<Usuario[]>([]);
-  const [tab, setTab] = useState<'pendientes' | 'todos' | 'crear' | 'password'>('pendientes');
+  const [tab, setTab] = useState<'pendientes' | 'todos' | 'crear' | 'password' | 'perfil'>('pendientes');
   const [isLoading, setIsLoading] = useState(false);
   const [accionando, setAccionando] = useState<number | null>(null);
   const [success, setSuccess] = useState('');
@@ -50,7 +51,9 @@ export const GestionUsuarios: React.FC = () => {
 
   const [editando, setEditando] = useState<Usuario | null>(null);
   const [rolEditando, setRolEditando] = useState('');
-  const [guardandoRol, setGuardandoRol] = useState(false);
+  const [nombreEditando, setNombreEditando] = useState('');
+  const [emailEditando, setEmailEditando] = useState('');
+  const [guardandoEdicion, setGuardandoEdicion] = useState(false);
 
   // Cambio de contraseña
   const [pwActual, setPwActual] = useState('');
@@ -58,36 +61,47 @@ export const GestionUsuarios: React.FC = () => {
   const [pwConfirm, setPwConfirm] = useState('');
   const [cambiandoPw, setCambiandoPw] = useState(false);
 
+  // Mi perfil (nombre/email propios)
+  const [nombreCompleto, setNombreCompleto] = useState(usuario?.nombre || '');
+  const [emailPerfil, setEmailPerfil] = useState(usuario?.email || '');
+  const [guardandoPerfil, setGuardandoPerfil] = useState(false);
+
   const abrirEdicion = (u: Usuario) => {
     setEditando(u);
     setRolEditando(u.rol.toLowerCase());
+    setNombreEditando(u.nombre_completo);
+    setEmailEditando(u.email);
   };
 
   const cerrarEdicion = () => {
     setEditando(null);
     setRolEditando('');
+    setNombreEditando('');
+    setEmailEditando('');
     setError('');
   };
 
-  const guardarRol = async () => {
+  const guardarEdicion = async () => {
     if (!editando) return;
-    setGuardandoRol(true);
+    setGuardandoEdicion(true);
     setError('');
     try {
       const res = await apiService.put(API_CONFIG.ENDPOINTS.USERS.UPDATE(editando.id), {
+        nombre_completo: nombreEditando.trim(),
+        email: emailEditando.trim(),
         rol: rolEditando.toLowerCase(),
       });
       if (res.success) {
-        setSuccess(`Rol de "${editando.nombre_completo}" actualizado a ${rolEditando}.`);
+        setSuccess(`Usuario "${nombreEditando.trim()}" actualizado.`);
         cerrarEdicion();
         await cargarTodos();
       } else {
-        setError(res.message || 'Error al actualizar rol');
+        setError(res.message || 'Error al actualizar usuario');
       }
     } catch (e: any) {
-      setError(e.message || 'Error al actualizar rol');
+      setError(e.message || 'Error al actualizar usuario');
     } finally {
-      setGuardandoRol(false);
+      setGuardandoEdicion(false);
       limpiarMensajes();
     }
   };
@@ -116,6 +130,28 @@ export const GestionUsuarios: React.FC = () => {
       setError(e.message || 'Error al cambiar la contraseña.');
     } finally {
       setCambiandoPw(false);
+    }
+  };
+
+  const guardarPerfil = async () => {
+    setError('');
+    if (!nombreCompleto.trim()) {
+      setError('El nombre completo es requerido.');
+      return;
+    }
+    setGuardandoPerfil(true);
+    try {
+      const actualizado = await authService.updateProfile({
+        nombre_completo: nombreCompleto.trim(),
+        email: emailPerfil.trim(),
+      });
+      actualizarUsuarioStore(actualizado);
+      setSuccess('Perfil actualizado correctamente.');
+      limpiarMensajes();
+    } catch (e: any) {
+      setError(e.message || 'Error al actualizar el perfil.');
+    } finally {
+      setGuardandoPerfil(false);
     }
   };
 
@@ -268,6 +304,16 @@ export const GestionUsuarios: React.FC = () => {
             }`}
           >
             Todos los usuarios
+          </button>
+          <button
+            onClick={() => setTab('perfil')}
+            className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+              tab === 'perfil'
+                ? 'border-primary-600 text-primary-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Mi perfil
           </button>
           <button
             onClick={() => setTab('password')}
@@ -451,6 +497,45 @@ export const GestionUsuarios: React.FC = () => {
           </form>
         </Card>
       )}
+      {/* Tab: Mi perfil */}
+      {tab === 'perfil' && (
+        <Card>
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">Mi perfil</h3>
+          <p className="text-sm text-gray-500 mb-6">
+            Actualiza tu nombre completo y correo electrónico.
+          </p>
+          <div className="space-y-4 max-w-sm">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Nombre completo</label>
+              <input
+                type="text"
+                value={nombreCompleto}
+                onChange={e => setNombreCompleto(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                placeholder="Tu nombre completo"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Correo electrónico</label>
+              <input
+                type="email"
+                value={emailPerfil}
+                onChange={e => setEmailPerfil(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                placeholder="tu@correo.com"
+              />
+            </div>
+            <Button
+              variant="primary"
+              isLoading={guardandoPerfil}
+              onClick={guardarPerfil}
+            >
+              Guardar perfil
+            </Button>
+          </div>
+        </Card>
+      )}
+
       {/* Tab: Mi contraseña */}
       {tab === 'password' && (
         <Card>
@@ -500,17 +585,32 @@ export const GestionUsuarios: React.FC = () => {
         </Card>
       )}
 
-      {/* Modal edición de rol */}
+      {/* Modal edición de usuario */}
       {editando && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-xl shadow-lg w-full max-w-sm mx-4 p-6">
-            <h3 className="text-base font-semibold text-gray-900 mb-1">Editar rol</h3>
+            <h3 className="text-base font-semibold text-gray-900 mb-1">Editar usuario</h3>
             <p className="text-sm text-gray-500 mb-5">
-              {editando.nombre_completo}
-              <span className="ml-2 text-xs text-gray-400">@{editando.username}</span>
+              @{editando.username}
             </p>
 
-            <label className="block text-sm font-medium text-gray-700 mb-1">Nuevo rol</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Nombre completo</label>
+            <input
+              type="text"
+              value={nombreEditando}
+              onChange={(e) => setNombreEditando(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 mb-3"
+            />
+
+            <label className="block text-sm font-medium text-gray-700 mb-1">Correo electrónico</label>
+            <input
+              type="email"
+              value={emailEditando}
+              onChange={(e) => setEmailEditando(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 mb-3"
+            />
+
+            <label className="block text-sm font-medium text-gray-700 mb-1">Rol</label>
             <select
               value={rolEditando}
               onChange={(e) => setRolEditando(e.target.value)}
@@ -523,22 +623,27 @@ export const GestionUsuarios: React.FC = () => {
 
             {rolEditando !== editando.rol.toLowerCase() && (
               <p className="text-xs text-amber-600 mb-4">
-                Cambiará de <strong>{editando.rol}</strong> → <strong>{rolEditando}</strong>
+                Rol cambiará de <strong>{editando.rol}</strong> → <strong>{rolEditando}</strong>
               </p>
             )}
 
             {error && <p className="text-xs text-red-600 mb-3">{error}</p>}
 
             <div className="flex gap-2 justify-end mt-4">
-              <Button variant="outline" size="sm" onClick={cerrarEdicion} disabled={guardandoRol}>
+              <Button variant="outline" size="sm" onClick={cerrarEdicion} disabled={guardandoEdicion}>
                 Cancelar
               </Button>
               <Button
                 variant="primary"
                 size="sm"
-                isLoading={guardandoRol}
-                onClick={guardarRol}
-                disabled={rolEditando === editando.rol.toLowerCase()}
+                isLoading={guardandoEdicion}
+                onClick={guardarEdicion}
+                disabled={
+                  !nombreEditando.trim() ||
+                  (rolEditando === editando.rol.toLowerCase() &&
+                    nombreEditando.trim() === editando.nombre_completo &&
+                    emailEditando.trim() === editando.email)
+                }
               >
                 Guardar
               </Button>

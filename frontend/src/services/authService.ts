@@ -285,6 +285,41 @@ class AuthService {
   }
 
   /**
+   * Actualizar nombre completo y/o email del usuario autenticado (autoservicio)
+   */
+  async updateProfile(updates: { nombre_completo?: string; email?: string }): Promise<Usuario> {
+    try {
+      const response = await apiService.put<{
+        id: number;
+        username: string;
+        email: string;
+        nombre_completo: string;
+        rol: string;
+      }>(
+        API_CONFIG.ENDPOINTS.AUTH.PROFILE,
+        updates
+      );
+      if (!response.success || !response.data) {
+        throw new Error(response.message || 'Error al actualizar el perfil');
+      }
+      const backendUser = response.data;
+      return {
+        id: String(backendUser.id),
+        username: backendUser.username,
+        nombre: backendUser.nombre_completo,
+        rol: this.mapRol(backendUser.rol),
+        email: backendUser.email,
+        activo: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+    } catch (err: any) {
+      const detalle = err?.errors?.map((e: any) => e.message).join(' ');
+      throw new Error(detalle || err?.message || 'Error al actualizar el perfil');
+    }
+  }
+
+  /**
    * Mapear rol del backend al formato del frontend
    */
   private mapRol(rol: string): 'admin' | 'operador' | 'supervisor' {

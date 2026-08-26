@@ -17,6 +17,7 @@ export const API_CONFIG = {
       LOGOUT: '/auth/logout',
       REFRESH: '/auth/refresh',
       ME: '/auth/me',
+      PROFILE: '/auth/profile',
       FORGOT_PASSWORD: '/auth/forgot-password',
       RESET_PASSWORD: '/auth/reset-password',
       VERIFY_EMAIL: '/auth/verify-email',
