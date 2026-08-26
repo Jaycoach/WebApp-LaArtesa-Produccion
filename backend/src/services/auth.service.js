@@ -99,7 +99,9 @@ class AuthService {
       // Buscar usuario
       const result = await client.query(
         `SELECT id, username, email, password_hash, nombre_completo, rol, activo,
-                email_verificado, intentos_fallidos, bloqueado_hasta
+                email_verificado, intentos_fallidos, bloqueado_hasta,
+                debe_cambiar_password,
+                (ultimo_cambio_password < NOW() - INTERVAL '3 months') AS password_expirada
          FROM usuarios
          WHERE username = $1 OR email = $1`,
         [username],
@@ -157,6 +159,19 @@ class AuthService {
         [user.id],
       );
 
+      // Vencimiento de contraseña (3 meses): reutiliza el flujo de
+      // "establecer contraseña" que ya usan los usuarios nuevos (sin pedir
+      // la contraseña anterior, porque el login ya la validó)
+      let debeCambiarPassword = user.debe_cambiar_password;
+      if (user.password_expirada && !user.debe_cambiar_password) {
+        await client.query(
+          'UPDATE usuarios SET debe_cambiar_password = true WHERE id = $1',
+          [user.id],
+        );
+        debeCambiarPassword = true;
+        logger.info(`Contraseña vencida (>3 meses) para usuario ${username}, forzando cambio`);
+      }
+
       // Generar tokens
       const tokens = generateTokens(user);
 
@@ -176,6 +191,7 @@ class AuthService {
           email: user.email,
           nombre_completo: user.nombre_completo,
           rol: user.rol,
+          debe_cambiar_password: debeCambiarPassword,
         },
         ...tokens,
       };
@@ -476,6 +492,7 @@ class AuthService {
         `UPDATE usuarios
          SET password_hash = $1,
              debe_cambiar_password = false,
+             ultimo_cambio_password = NOW(),
              fecha_actualizacion = NOW()
          WHERE id = $2`,
         [hashedPassword, userId],

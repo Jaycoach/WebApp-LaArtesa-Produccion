@@ -24,8 +24,13 @@ export const Login: React.FC = () => {
     setIsLoading(true);
     try {
       const result = await authService.login({ username, password });
-      login(result.user, result.token);
-      navigate('/');
+      if (result.debeCambiarPassword) {
+        localStorage.setItem('auth_token', result.token);
+        navigate(`/set-password?nombre=${encodeURIComponent(result.user.nombre)}&username=${encodeURIComponent(result.user.username)}`);
+      } else {
+        login(result.user, result.token);
+        navigate('/');
+      }
     } catch (err: any) {
       if (err.code === 'EMAIL_NOT_VERIFIED' || err.message?.includes('verificar tu correo')) {
         setPaso('solicitar-email');
