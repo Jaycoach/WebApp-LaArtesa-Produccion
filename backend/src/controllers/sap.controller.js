@@ -944,18 +944,34 @@ const sincronizarDesdeOV = async (req, res, next) => {
       );
 
       const masaExistente = masaExistenteResult.rows[0] || null;
-      // Editable solo si estado Y fase son ambos PLANIFICACION (no aprobada aún)
+      // Estados terminales/muertos: la masa nunca va a llegar a Pesaje por sí
+      // misma (ya se subdividió, ya se completó, o se canceló) — sin importar
+      // que fase_actual siga en PLANIFICACION (las masas SUBDIVIDIDA nunca
+      // avanzan de fase ellas mismas, sus sub-masas sí). Nunca son fusionables.
+      const esEstadoTerminal = masaExistente &&
+        ['COMPLETADA', 'SUBDIVIDIDA', 'CANCELADA'].includes(masaExistente.estado);
+      // Hallazgo 5 (QA 2026-08-26): el criterio de negocio es "Pesaje no ha
+      // iniciado" (fase_actual sigue en PLANIFICACION), NO "todavía no se
+      // aprobó". Antes de este fix, estado==='APROBADA' por sí solo bastaba
+      // para excluir la fusión directa (ver cc9d208, 2026-03-06) aunque Pesaje
+      // nunca se hubiera tocado — creando una ADICIONAL separada en vez de
+      // sumar el producto a la masa existente y reabrir su aprobación para
+      // que se revise con el dato completo.
       const estaEnPlanificacion = masaExistente &&
         masaExistente.fase_actual === 'PLANIFICACION' &&
-        masaExistente.estado === 'PLANIFICACION';
+        !esEstadoTerminal;
+      // Si se va a fusionar en una masa que ya estaba aprobada, hay que
+      // reabrir su aprobación — alguien tiene que revisarla de nuevo con el
+      // producto nuevo ya sumado, no dejarla aprobada "a medias" en silencio.
+      const requiereReaperturaAprobacion = estaEnPlanificacion &&
+        masaExistente.estado === 'APROBADA';
       // Completada: ya terminó todo el ciclo — se trata como en producción (masa ADICIONAL si llega OV nueva)
       const estaCompletada = masaExistente &&
         masaExistente.estado === 'COMPLETADA';
-      // En producción: aprobada, pendiente, o ya avanzó de fase (pero NO completada)
-      const estaEnProduccion = masaExistente && !estaCompletada && (
-        masaExistente.estado !== 'PLANIFICACION' ||
-        masaExistente.fase_actual !== 'PLANIFICACION'
-      );
+      // En producción: no fusionable directo y no completada — o bien Pesaje
+      // ya inició (fase_actual avanzó), o bien quedó en un estado terminal
+      // que impide seguir sumándole aunque fase_actual no haya avanzado.
+      const estaEnProduccion = masaExistente && !estaCompletada && !estaEnPlanificacion;
 
       // FIX 2026-08-04: antes de crear OTRA masa ADICIONAL, buscar si ya existe una
       // ADICIONAL de este mismo tipo que siga sin aprobar (PLANIFICACION) — en ese caso
@@ -965,6 +981,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
       // ninguna hubiera iniciado pesaje. Respeta es_repeticion=true (esas SIEMPRE
       // deben quedar separadas, nunca entran a este bloque).
       let masaParaMerge = estaEnPlanificacion ? masaExistente : null;
+      let mergeRequiereReapertura = requiereReaperturaAprobacion;
       if (!masaParaMerge && (estaEnProduccion || estaCompletada) && !forzar) {
         const adicionalExistenteResult = await client.query(
           `SELECT id, uuid, codigo_masa, estado, fase_actual
@@ -974,14 +991,15 @@ const sincronizarDesdeOV = async (req, res, next) => {
              AND es_repeticion = $3
              AND es_subdivision = false
              AND es_adicional = true
-             AND estado = 'PLANIFICACION'
              AND fase_actual = 'PLANIFICACION'
+             AND estado NOT IN ('COMPLETADA', 'SUBDIVIDIDA', 'CANCELADA')
            ORDER BY id DESC
            LIMIT 1`,
           [fechaProduccion, tipoMasa, esRepeticionGrupo]
         );
         if (adicionalExistenteResult.rows.length > 0) {
           masaParaMerge = adicionalExistenteResult.rows[0];
+          mergeRequiereReapertura = masaParaMerge.estado === 'APROBADA';
           logger.info(`Tipo ${tipoMasa} — sumando a ADICIONAL existente sin aprobar (masa ${masaParaMerge.id}) en vez de crear otra ADICIONAL`);
         }
       }
@@ -1150,13 +1168,39 @@ const sincronizarDesdeOV = async (req, res, next) => {
 
         await recalcularTotalesMasa(masaIdExistente, client);
 
+        // Hallazgo 5: si la masa que recibió la fusión ya estaba APROBADA,
+        // reabrir la aprobación — alguien tiene que revisarla de nuevo con el
+        // producto nuevo ya sumado. Revierte exactamente lo que aprobarMasaCore
+        // fija al aprobar (masas.controller.js: estado/aprobado_por/aprobado_en
+        // y progreso_fases PLANIFICACION/EMPAQUE), dejándola en el mismo estado
+        // que una masa recién creada sin aprobar.
+        if (mergeRequiereReapertura) {
+          await client.query(
+            `UPDATE masas_produccion
+             SET estado = 'PLANIFICACION', aprobado_por = NULL, aprobado_en = NULL, updated_at = NOW()
+             WHERE id = $1`,
+            [masaIdExistente]
+          );
+          await client.query(
+            `UPDATE progreso_fases SET estado = 'EN_PROGRESO', updated_at = NOW()
+             WHERE masa_id = $1 AND fase = 'PLANIFICACION'`,
+            [masaIdExistente]
+          );
+          await client.query(
+            `UPDATE progreso_fases SET estado = 'BLOQUEADA', updated_at = NOW()
+             WHERE masa_id = $1 AND fase = 'EMPAQUE'`,
+            [masaIdExistente]
+          );
+          logger.info(`Tipo ${tipoMasa} — masa ${masaIdExistente} reabierta a PLANIFICACION tras fusionar OV nueva (estaba APROBADA)`);
+        }
+
         logger.info(`Tipo ${tipoMasa} en PLANIFICACION — ${ovsNuevas} OVs nuevas registradas en masa ${masaIdExistente}`);
         masasCreadas.push({
           id: masaIdExistente,
           uuid: masaParaMerge.uuid,
           codigo: masaParaMerge.codigo_masa,
           tipo_masa: tipoMasa,
-          accion: 'ACTUALIZADA',
+          accion: mergeRequiereReapertura ? 'ACTUALIZADA_REABIERTA' : 'ACTUALIZADA',
           ovs_nuevas: ovsNuevas
         });
 
