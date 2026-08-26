@@ -1111,6 +1111,16 @@ const sincronizarDesdeOV = async (req, res, next) => {
             : totalUnidades;
           const unidadesExcedente = unidadesAjustadas - totalUnidades;
 
+          // Hallazgo 5 (QA 2026-08-26): si el producto ya tenia delta_ajuste
+          // fijado (paso por al menos una aprobacion previa -- solo posible
+          // ahora que la fusion tambien opera sobre masas ya APROBADAS), hay
+          // que resetearlo a NULL junto con el recalculo. Si no, la
+          // re-aprobacion (que solo aplica el delta por defecto +2 a
+          // productos con delta_ajuste IS NULL, masas.controller.js:531-563)
+          // nunca vuelve a tocar este producto, y se pierde el ajuste sobre
+          // el total nuevo en silencio -- reproducido en vivo en la prueba
+          // de staging (masa 2062/PASPAQ05: programadas paso de 8 a 10,
+          // debia terminar en 12 tras re-aprobar, delta_ajuste=1 lo bloquea).
           await client.query(
             `UPDATE productos_por_masa
              SET unidades_pedidas     = $1::integer,
@@ -1120,6 +1130,7 @@ const sincronizarDesdeOV = async (req, res, next) => {
                  kilos_programados    = $3,
                  unidades_ajustadas   = $4,
                  unidades_excedente   = $5,
+                 delta_ajuste         = NULL,
                  updated_at           = NOW()
              WHERE masa_id = $6 AND sap_item_code = $7`,
             [totalUnidades, cantidadPaquetes, kgPorPaquete * totalUnidades,

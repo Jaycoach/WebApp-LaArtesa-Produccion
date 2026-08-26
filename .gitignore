@@ -123,6 +123,7 @@ temp/
 *.sql.gz
 *.dump
 backups/
+backend/backups_locales/
 # === PRODUCCIÓN — secretos (nunca a Git) ===
 *.pem
 deployment/aws-prod/prod-recursos.txt
