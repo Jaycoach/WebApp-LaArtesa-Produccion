@@ -207,7 +207,8 @@ class AuthService {
       { resetToken: token, newPassword }
     );
     if (!response.success) {
-      throw new Error(response.message || 'Token inválido o expirado');
+      const detalle = (response as any).errors?.map((e: any) => e.message).join(' ');
+      throw new Error(detalle || response.message || 'Token inválido o expirado');
     }
   }
 
@@ -270,7 +271,8 @@ class AuthService {
       { currentPassword, newPassword }
     );
     if (!response.success) {
-      throw new Error(response.message || 'Error al cambiar la contraseña');
+      const detalle = (response as any).errors?.map((e: any) => e.message).join(' ');
+      throw new Error(detalle || response.message || 'Error al cambiar la contraseña');
     }
   }
 

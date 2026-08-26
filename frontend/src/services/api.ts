@@ -101,6 +101,7 @@ class ApiService {
         return Promise.reject({
           success: false,
           message: data?.message || 'Error en la solicitud',
+          errors: (data as any)?.errors,
           error: data?.error,
         });
 

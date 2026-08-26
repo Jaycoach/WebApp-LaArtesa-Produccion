@@ -132,13 +132,7 @@ const changePasswordValidation = [
     .isLength({ min: 8 })
     .withMessage('La nueva contraseña debe tener al menos 8 caracteres')
     .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]/)
-    .withMessage('La nueva contraseña debe contener al menos: una mayúscula, una minúscula, un número y un carácter especial (@$!%*?&#)')
-    .custom((value, { req }) => {
-      if (value === req.body.currentPassword) {
-        throw new Error('La nueva contraseña debe ser diferente a la actual');
-      }
-      return true;
-    }),
+    .withMessage('La nueva contraseña debe contener al menos: una mayúscula, una minúscula, un número y un carácter especial (@$!%*?&#)'),
 
   handleValidationErrors,
 ];
