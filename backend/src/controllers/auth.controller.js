@@ -281,6 +281,7 @@ class AuthController {
         'Este usuario ya tiene el correo verificado',
         'Ese correo ya está registrado en otro usuario',
         'El email ya está en uso',
+        'No puedes reutilizar una de tus últimas 3 contraseñas',
       ];
       if (businessErrors.some(msg => error.message?.startsWith(msg))) {
         return res.status(400).json({ success: false, message: error.message });
@@ -328,6 +329,7 @@ class AuthController {
         'Este usuario ya tiene el correo verificado',
         'Ese correo ya está registrado en otro usuario',
         'El email ya está en uso',
+        'No puedes reutilizar una de tus últimas 3 contraseñas',
       ];
       if (businessErrors.some(msg => error.message?.startsWith(msg))) {
         return res.status(400).json({ success: false, message: error.message });
@@ -374,6 +376,7 @@ class AuthController {
         'Este usuario ya tiene el correo verificado',
         'Ese correo ya está registrado en otro usuario',
         'El email ya está en uso',
+        'No puedes reutilizar una de tus últimas 3 contraseñas',
       ];
       if (businessErrors.some(msg => error.message?.startsWith(msg))) {
         return res.status(400).json({ success: false, message: error.message });

@@ -10,6 +10,48 @@ const logger = require('../utils/logger');
 const { generateTokens, verifyRefreshToken } = require('../utils/jwt');
 const emailService = require('./email.service');
 
+/**
+ * Verifica si newPassword coincide con la contraseña actual o con alguna
+ * de las últimas 2 guardadas en el historial (ventana de "últimas 3").
+ */
+async function passwordFueUsadaAntes(client, userId, newPassword, currentHash) {
+  if (await bcrypt.compare(newPassword, currentHash)) return true;
+  const { rows } = await client.query(
+    `SELECT password_hash FROM usuarios_historial_passwords
+     WHERE usuario_id = $1
+     ORDER BY fecha_creacion DESC
+     LIMIT 2`,
+    [userId],
+  );
+  for (const row of rows) {
+    if (await bcrypt.compare(newPassword, row.password_hash)) return true;
+  }
+  return false;
+}
+
+/**
+ * Guarda el hash que se está reemplazando en el historial y poda a las
+ * 2 filas más recientes por usuario.
+ */
+async function guardarPasswordEnHistorial(client, userId, oldHash) {
+  await client.query(
+    `INSERT INTO usuarios_historial_passwords (usuario_id, password_hash)
+     VALUES ($1, $2)`,
+    [userId, oldHash],
+  );
+  await client.query(
+    `DELETE FROM usuarios_historial_passwords
+     WHERE usuario_id = $1
+     AND id NOT IN (
+       SELECT id FROM usuarios_historial_passwords
+       WHERE usuario_id = $1
+       ORDER BY fecha_creacion DESC
+       LIMIT 2
+     )`,
+    [userId],
+  );
+}
+
 class AuthService {
   /**
    * Registrar nuevo usuario
@@ -365,7 +407,7 @@ class AuthService {
 
       // Buscar usuario con el token válido
       const result = await client.query(
-        `SELECT id, email
+        `SELECT id, email, password_hash
          FROM usuarios
          WHERE token_recuperacion = $1
          AND token_recuperacion_expira > NOW()
@@ -379,8 +421,16 @@ class AuthService {
 
       const user = result.rows[0];
 
+      // No permitir reutilizar una de las últimas 3 contraseñas
+      if (await passwordFueUsadaAntes(client, user.id, newPassword, user.password_hash)) {
+        throw new Error('No puedes reutilizar una de tus últimas 3 contraseñas');
+      }
+
       // Hash de la nueva contraseña
       const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+      // Guardar la contraseña que se reemplaza en el historial
+      await guardarPasswordEnHistorial(client, user.id, user.password_hash);
 
       // Actualizar contraseña y limpiar token
       await client.query(
@@ -442,8 +492,16 @@ class AuthService {
         throw new Error('Contraseña actual incorrecta');
       }
 
+      // No permitir reutilizar una de las últimas 3 contraseñas
+      if (await passwordFueUsadaAntes(client, userId, newPassword, user.password_hash)) {
+        throw new Error('No puedes reutilizar una de tus últimas 3 contraseñas');
+      }
+
       // Hash de la nueva contraseña
       const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+      // Guardar la contraseña que se reemplaza en el historial
+      await guardarPasswordEnHistorial(client, userId, user.password_hash);
 
       // Actualizar contraseña
       await client.query(
@@ -474,7 +532,7 @@ class AuthService {
       await client.query('BEGIN');
 
       const result = await client.query(
-        'SELECT id, debe_cambiar_password FROM usuarios WHERE id = $1',
+        'SELECT id, debe_cambiar_password, password_hash FROM usuarios WHERE id = $1',
         [userId],
       );
 
@@ -486,7 +544,17 @@ class AuthService {
         throw new Error('Esta acción no está permitida para este usuario');
       }
 
+      const currentHash = result.rows[0].password_hash;
+
+      // No permitir reutilizar una de las últimas 3 contraseñas
+      if (await passwordFueUsadaAntes(client, userId, newPassword, currentHash)) {
+        throw new Error('No puedes reutilizar una de tus últimas 3 contraseñas');
+      }
+
       const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+      // Guardar la contraseña que se reemplaza en el historial
+      await guardarPasswordEnHistorial(client, userId, currentHash);
 
       await client.query(
         `UPDATE usuarios
