@@ -132,6 +132,15 @@ class ApiService {
           error: data?.error,
         });
 
+      case 429:
+        console.error('Rate Limited (429):', data?.error);
+        return Promise.reject({
+          success: false,
+          status: 429,
+          message: (data as any)?.error?.message || 'Estás haciendo demasiadas solicitudes seguidas. Espera unos segundos e intenta de nuevo.',
+          error: data?.error,
+        });
+
       case 502:
         console.error('SAP Error (502):', data?.message);
         return Promise.reject({
