@@ -1,6 +1,16 @@
 > 📌 **Documento histórico** — refleja el estado del proyecto al 23 de enero de 2026.
 > No representa el estado actual del sistema. Para el estado vigente ver
 > README.md / MANUAL_FUNCIONAL.md.
+>
+> ✅ **RESUELTO (2026-08-25)**: los pendientes de este documento sobre selectores
+> de Amasadora (`GET /api/amasado/amasadoras`) y Máquina de Corte
+> (`GET /api/division/maquinas`) ya no aplican — implementados como
+> `GET /config/amasadoras` y `GET /config/maquinas-corte` (`f3fe978 feat(B8):
+> amasadoras dinámicas desde BD, agrega Batidora 1/2`), consumidos por
+> `AmasadoMasa.tsx`/`DivisionMasa.tsx` vía `useAmasadoras()`/`useMaquinasCorte()`.
+> Validado en staging (QA hallazgo 4): catálogos con datos reales, sin
+> selects hardcodeados, sin desalineación de IDs históricos en
+> `registros_amasado`/`registros_division`.
 
 # Análisis: Reunión del 15 de Enero de 2026 - Amasado y División
 
