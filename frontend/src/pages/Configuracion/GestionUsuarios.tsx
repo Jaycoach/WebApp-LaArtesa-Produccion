@@ -409,7 +409,7 @@ export const GestionUsuarios: React.FC = () => {
                   <div className="flex gap-2">
                     <Button variant="outline" size="sm"
                       onClick={() => abrirEdicion(u)}>
-                      Editar rol
+                      Editar usuario
                     </Button>
                     {!u.activo ? (
                       <Button variant="success" size="sm" isLoading={accionando === u.id}
