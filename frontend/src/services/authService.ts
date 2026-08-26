@@ -202,13 +202,17 @@ class AuthService {
    * Resetear contraseña con token
    */
   async resetPassword(token: string, newPassword: string): Promise<void> {
-    const response = await apiService.post<{ message: string }>(
-      API_CONFIG.ENDPOINTS.AUTH.RESET_PASSWORD,
-      { resetToken: token, newPassword }
-    );
-    if (!response.success) {
-      const detalle = (response as any).errors?.map((e: any) => e.message).join(' ');
-      throw new Error(detalle || response.message || 'Token inválido o expirado');
+    try {
+      const response = await apiService.post<{ message: string }>(
+        API_CONFIG.ENDPOINTS.AUTH.RESET_PASSWORD,
+        { resetToken: token, newPassword }
+      );
+      if (!response.success) {
+        throw new Error(response.message || 'Token inválido o expirado');
+      }
+    } catch (err: any) {
+      const detalle = err?.errors?.map((e: any) => e.message).join(' ');
+      throw new Error(detalle || err?.message || 'Token inválido o expirado');
     }
   }
 
@@ -266,13 +270,17 @@ class AuthService {
    * Cambiar contraseña (usuario autenticado, requiere contraseña actual)
    */
   async changePassword(currentPassword: string, newPassword: string): Promise<void> {
-    const response = await apiService.post<{ message: string }>(
-      '/auth/change-password',
-      { currentPassword, newPassword }
-    );
-    if (!response.success) {
-      const detalle = (response as any).errors?.map((e: any) => e.message).join(' ');
-      throw new Error(detalle || response.message || 'Error al cambiar la contraseña');
+    try {
+      const response = await apiService.post<{ message: string }>(
+        '/auth/change-password',
+        { currentPassword, newPassword }
+      );
+      if (!response.success) {
+        throw new Error(response.message || 'Error al cambiar la contraseña');
+      }
+    } catch (err: any) {
+      const detalle = err?.errors?.map((e: any) => e.message).join(' ');
+      throw new Error(detalle || err?.message || 'Error al cambiar la contraseña');
     }
   }
 
