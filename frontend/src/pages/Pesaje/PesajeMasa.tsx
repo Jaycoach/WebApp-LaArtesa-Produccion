@@ -922,7 +922,8 @@ export const PesajeMasa: React.FC = () => {
                       <button
                         onClick={() => handleGuardar(ing.id)}
                         disabled={
-                          ing.lotes?.length > 0 && formData.lotes_consumo.filter(l => parseFloat(l.cantidad_kg) > 0).length === 0
+                          updateMutation.isPending ||
+                          (ing.lotes?.length > 0 && formData.lotes_consumo.filter(l => parseFloat(l.cantidad_kg) > 0).length === 0)
                         }
                         className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
                         title={
@@ -931,11 +932,12 @@ export const PesajeMasa: React.FC = () => {
                             : 'Guardar pesaje'
                         }
                       >
-                        Guardar
+                        {updateMutation.isPending ? 'Guardando...' : 'Guardar'}
                       </button>
                       <button
                         onClick={() => { setEditando(null); setStockError(null); }}
-                        className="px-4 py-2 bg-gray-300 text-gray-800 rounded hover:bg-gray-400"
+                        disabled={updateMutation.isPending}
+                        className="px-4 py-2 bg-gray-300 text-gray-800 rounded hover:bg-gray-400 disabled:opacity-50"
                       >
                         Cancelar
                       </button>

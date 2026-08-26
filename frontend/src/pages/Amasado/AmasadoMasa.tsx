@@ -306,9 +306,10 @@ export const AmasadoMasa: React.FC = () => {
                 </button>
                 <button
                   onClick={ejecutarCompletar}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium"
+                  disabled={completarMutation.isPending}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium disabled:opacity-50"
                 >
-                  Completar Amasado
+                  {completarMutation.isPending ? 'Completando...' : 'Completar Amasado'}
                 </button>
               </div>
             </div>

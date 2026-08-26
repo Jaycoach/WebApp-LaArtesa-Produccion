@@ -785,9 +785,10 @@ export const DivisionMasa: React.FC = () => {
                 </button>
                 <button
                   onClick={ejecutarCompletarDivision}
-                  className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 text-sm font-medium"
+                  disabled={completarMutation.isPending}
+                  className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 text-sm font-medium disabled:opacity-50"
                 >
-                  Completar División
+                  {completarMutation.isPending ? 'Completando...' : 'Completar División'}
                 </button>
               </div>
             </div>
@@ -811,9 +812,10 @@ export const DivisionMasa: React.FC = () => {
                 </button>
                 <button
                   onClick={ejecutarCompletarDivision}
-                  className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium"
+                  disabled={completarMutation.isPending}
+                  className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium disabled:opacity-50"
                 >
-                  Confirmar división parcial
+                  {completarMutation.isPending ? 'Completando...' : 'Confirmar división parcial'}
                 </button>
               </div>
             </div>

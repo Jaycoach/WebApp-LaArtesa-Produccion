@@ -30,6 +30,8 @@ const SeccionMO: React.FC = () => {
   const [nuevo, setNuevo] = useState({ nombre: '', descripcion: '', costo_hora: '' });
   const [editando, setEditando] = useState<any>(null);
   const [msg, setMsg] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [eliminandoId, setEliminandoId] = useState<number | null>(null);
 
   const { data } = useQuery({ queryKey: ['tipos-mo'], queryFn: () => api('/config/mano-obra') });
   const tipos = data?.data || [];
@@ -38,30 +40,45 @@ const SeccionMO: React.FC = () => {
 
   const crear = async () => {
     if (!nuevo.nombre || !nuevo.costo_hora) return;
-    await api('/config/mano-obra', {
-      method: 'POST',
-      body: JSON.stringify({ ...nuevo, costo_hora: parseFloat(nuevo.costo_hora) }),
-    });
-    qc.invalidateQueries({ queryKey: ['tipos-mo'] });
-    setNuevo({ nombre: '', descripcion: '', costo_hora: '' });
-    ok('Tipo de MO creado');
+    setSaving(true);
+    try {
+      await api('/config/mano-obra', {
+        method: 'POST',
+        body: JSON.stringify({ ...nuevo, costo_hora: parseFloat(nuevo.costo_hora) }),
+      });
+      qc.invalidateQueries({ queryKey: ['tipos-mo'] });
+      setNuevo({ nombre: '', descripcion: '', costo_hora: '' });
+      ok('Tipo de MO creado');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const actualizar = async () => {
     if (!editando) return;
-    await api(`/config/mano-obra/${editando.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ nombre: editando.nombre, costo_hora: parseFloat(editando.costo_hora), descripcion: editando.descripcion }),
-    });
-    qc.invalidateQueries({ queryKey: ['tipos-mo'] });
-    setEditando(null);
-    ok('Actualizado');
+    setSaving(true);
+    try {
+      await api(`/config/mano-obra/${editando.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ nombre: editando.nombre, costo_hora: parseFloat(editando.costo_hora), descripcion: editando.descripcion }),
+      });
+      qc.invalidateQueries({ queryKey: ['tipos-mo'] });
+      setEditando(null);
+      ok('Actualizado');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const eliminar = async (id: number) => {
-    await api(`/config/mano-obra/${id}`, { method: 'DELETE' });
-    qc.invalidateQueries({ queryKey: ['tipos-mo'] });
-    ok('Desactivado');
+    setEliminandoId(id);
+    try {
+      await api(`/config/mano-obra/${id}`, { method: 'DELETE' });
+      qc.invalidateQueries({ queryKey: ['tipos-mo'] });
+      ok('Desactivado');
+    } finally {
+      setEliminandoId(null);
+    }
   };
 
   return (
@@ -97,8 +114,10 @@ const SeccionMO: React.FC = () => {
                       className="border rounded px-2 py-1 w-28 text-right text-sm" />
                   </td>
                   <td className="p-2 text-right">
-                    <button onClick={actualizar} className="text-xs text-green-700 font-medium mr-2">Guardar</button>
-                    <button onClick={() => setEditando(null)} className="text-xs text-gray-500">Cancelar</button>
+                    <button onClick={actualizar} disabled={saving} className="text-xs text-green-700 font-medium mr-2 disabled:opacity-50">
+                      {saving ? 'Guardando...' : 'Guardar'}
+                    </button>
+                    <button onClick={() => setEditando(null)} disabled={saving} className="text-xs text-gray-500 disabled:opacity-50">Cancelar</button>
                   </td>
                 </>
               ) : (
@@ -108,7 +127,9 @@ const SeccionMO: React.FC = () => {
                   <td className="p-2 text-right font-mono">${COP(parseFloat(t.costo_hora))}</td>
                   <td className="p-2 text-right">
                     <button onClick={() => setEditando({ ...t })} className="text-xs text-blue-600 mr-2">Editar</button>
-                    <button onClick={() => eliminar(t.id)} className="text-xs text-red-500">Desactivar</button>
+                    <button onClick={() => eliminar(t.id)} disabled={eliminandoId === t.id} className="text-xs text-red-500 disabled:opacity-50">
+                      {eliminandoId === t.id ? 'Desactivando...' : 'Desactivar'}
+                    </button>
                   </td>
                 </>
               )}
@@ -127,8 +148,8 @@ const SeccionMO: React.FC = () => {
           <div className="flex gap-2">
             <input type="number" placeholder="$/hora" value={nuevo.costo_hora} onChange={e => setNuevo({ ...nuevo, costo_hora: e.target.value })}
               className="border rounded px-3 py-2 text-sm flex-1" />
-            <button onClick={crear} className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 text-sm font-medium">
-              + Agregar
+            <button onClick={crear} disabled={saving} className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 text-sm font-medium disabled:opacity-50">
+              {saving ? 'Agregando...' : '+ Agregar'}
             </button>
           </div>
         </div>
@@ -142,6 +163,7 @@ const SeccionIndirectos: React.FC = () => {
   const qc = useQueryClient();
   const [vals, setVals] = useState({ costo_indirecto_por_kg: '0', costo_depreciacion_por_kg: '0' });
   const [msg, setMsg] = useState('');
+  const [saving, setSaving] = useState(false);
   const ok = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000); };
 
   const { data } = useQuery({
@@ -158,15 +180,20 @@ const SeccionIndirectos: React.FC = () => {
   }, [data]);
 
   const guardar = async () => {
-    await api('/config/costos-indirectos', {
-      method: 'PUT',
-      body: JSON.stringify({
-        costo_indirecto_por_kg:    parseFloat(vals.costo_indirecto_por_kg),
-        costo_depreciacion_por_kg: parseFloat(vals.costo_depreciacion_por_kg),
-      }),
-    });
-    qc.invalidateQueries({ queryKey: ['costos-indirectos'] });
-    ok('Costos indirectos actualizados');
+    setSaving(true);
+    try {
+      await api('/config/costos-indirectos', {
+        method: 'PUT',
+        body: JSON.stringify({
+          costo_indirecto_por_kg:    parseFloat(vals.costo_indirecto_por_kg),
+          costo_depreciacion_por_kg: parseFloat(vals.costo_depreciacion_por_kg),
+        }),
+      });
+      qc.invalidateQueries({ queryKey: ['costos-indirectos'] });
+      ok('Costos indirectos actualizados');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -193,8 +220,8 @@ const SeccionIndirectos: React.FC = () => {
             className="w-full border rounded px-3 py-2 text-sm" />
         </div>
       </div>
-      <button onClick={guardar} className="bg-blue-600 text-white px-5 py-2 rounded hover:bg-blue-700 text-sm font-medium">
-        Guardar costos indirectos
+      <button onClick={guardar} disabled={saving} className="bg-blue-600 text-white px-5 py-2 rounded hover:bg-blue-700 text-sm font-medium disabled:opacity-50">
+        {saving ? 'Guardando...' : 'Guardar costos indirectos'}
       </button>
     </Card>
   );
@@ -210,6 +237,7 @@ const SeccionEtiquetas: React.FC = () => {
   });
   const [msg, setMsg] = useState('');
   const [editId, setEditId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const ok = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000); };
 
   const { data } = useQuery({ queryKey: ['etiquetas'], queryFn: () => api('/config/etiquetas') });
@@ -221,15 +249,20 @@ const SeccionEtiquetas: React.FC = () => {
   };
 
   const guardar = async () => {
-    await api('/config/etiquetas', { method: 'POST', body: JSON.stringify(form) });
-    qc.invalidateQueries({ queryKey: ['etiquetas'] });
-    setEditId(null);
-    setForm({
-      sap_item_code: '', nombre_producto: '', ingredientes_txt: '', alergenos_txt: '',
-      condiciones_txt: 'Mantener en lugar fresco y seco', registro_invima: '', peso_neto_txt: '',
-      fabricante_txt: 'La Artesa SAS – Bogota, Colombia',
-    });
-    ok('Etiqueta guardada');
+    setSaving(true);
+    try {
+      await api('/config/etiquetas', { method: 'POST', body: JSON.stringify(form) });
+      qc.invalidateQueries({ queryKey: ['etiquetas'] });
+      setEditId(null);
+      setForm({
+        sap_item_code: '', nombre_producto: '', ingredientes_txt: '', alergenos_txt: '',
+        condiciones_txt: 'Mantener en lugar fresco y seco', registro_invima: '', peso_neto_txt: '',
+        fabricante_txt: 'La Artesa SAS – Bogota, Colombia',
+      });
+      ok('Etiqueta guardada');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -297,9 +330,9 @@ const SeccionEtiquetas: React.FC = () => {
             className="w-full border rounded px-3 py-2 text-sm" />
         </div>
       </div>
-      <button onClick={guardar}
-        className="mt-4 bg-blue-600 text-white px-5 py-2 rounded hover:bg-blue-700 text-sm font-medium">
-        {editId ? 'Actualizar etiqueta' : '+ Guardar etiqueta'}
+      <button onClick={guardar} disabled={saving}
+        className="mt-4 bg-blue-600 text-white px-5 py-2 rounded hover:bg-blue-700 text-sm font-medium disabled:opacity-50">
+        {saving ? 'Guardando...' : editId ? 'Actualizar etiqueta' : '+ Guardar etiqueta'}
       </button>
     </Card>
   );
