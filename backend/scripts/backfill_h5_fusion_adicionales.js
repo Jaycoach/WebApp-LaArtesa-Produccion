@@ -303,9 +303,9 @@ async function fusionar(client, caso) {
   for (const ajuste of ajustesGrupo) {
     await client.query(
       `UPDATE productos_por_masa
-       SET unidades_programadas = $1, kilos_programados = gramaje_unitario * $1 / 1000.0,
-           cantidad_paquetes = $1, origen_ajuste_divisor = 'MERGE_OV_BACKFILL_H5',
-           unidades_ajuste_grupal = unidades_ajuste_grupal + $2, updated_at = NOW()
+       SET unidades_programadas = $1::integer, kilos_programados = gramaje_unitario * $1::integer / 1000.0,
+           cantidad_paquetes = $1::integer, origen_ajuste_divisor = 'MERGE_OV_BACKFILL_H5',
+           unidades_ajuste_grupal = unidades_ajuste_grupal + $2::integer, updated_at = NOW()
        WHERE id = $3`,
       [ajuste.unidadesProgramadasNuevas, ajuste.deltaPaquetes, ajuste.productoId]
     );
