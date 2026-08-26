@@ -213,7 +213,7 @@ async function fusionar(client, caso) {
          RETURNING id`,
         [
           referenciaId, o.producto_codigo, o.producto_nombre, o.gramaje_unitario,
-          ov.sap_item_code, o.unidades_por_paquete, ov.sap_doc_entry, ov.sap_doc_num,
+          ov.sap_item_code, o.unidades_por_paquete, 0, ov.sap_doc_entry, ov.sap_doc_num,
           o.multiplo_divisor, o.tamanio, o.forma, o.peso_masa_dividida, o.dias_vencimiento, o.requiere_formado,
         ]
       );
