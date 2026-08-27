@@ -1431,7 +1431,7 @@ const getPendientesSAP = async (req, res, next) => {
       `SELECT ssl.id, ssl.masa_id, ssl.request_payload, ssl.error_message,
               ssl.fecha_operacion, ssl.intentos, ssl.usuario_id,
               mp.codigo_masa, mp.tipo_masa, mp.lote_produccion, mp.fase_actual,
-              mp.fecha_produccion
+              to_char(mp.fecha_produccion, 'YYYY-MM-DD') AS fecha_produccion
        FROM sap_sync_log ssl
        LEFT JOIN masas_produccion mp ON mp.id = ssl.masa_id
        WHERE ssl.estado = 'PENDING' AND ssl.tipo_operacion = 'GOODS_ISSUE_PESAJE'
@@ -1440,11 +1440,13 @@ const getPendientesSAP = async (req, res, next) => {
 
     // Agrupar en JS (no en SQL) — más simple de leer y de mantener que un
     // array_agg/json_agg, y el volumen esperado (pendientes reales) es bajo.
+    //
+    // to_char(...) en el SELECT (arriba) es necesario: sin él, node-postgres
+    // parsea DATE a un objeto JS Date, que Express serializa vía JSON.stringify
+    // como '2026-08-21T00:00:00.000Z' (con hora) en vez de 'YYYY-MM-DD' —
+    // confirmado con evidencia real (script de aceptación), no supuesto.
     const grupos = new Map();
     for (const row of result.rows) {
-      // fecha_produccion es DATE — Postgres ya la devuelve como string 'YYYY-MM-DD'
-      // vía el driver de node-postgres, no como objeto Date, así que no hace
-      // falta convertir timezone.
       const clave = row.fecha_produccion || 'sin_fecha';
       if (!grupos.has(clave)) grupos.set(clave, []);
       grupos.get(clave).push(row);

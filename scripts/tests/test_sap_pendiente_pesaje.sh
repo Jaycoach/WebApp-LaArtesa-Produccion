@@ -75,11 +75,53 @@ run_node() {
   fi
 }
 
+# PID actual del proceso pm2 (vacío si no se puede leer) — se usa para
+# confirmar que un restart REALMENTE relanzó el proceso, en vez de confiar
+# en un `sleep` fijo. Un `sleep 3` + healthcheck no es suficiente: el
+# healthcheck puede responder desde el proceso VIEJO todavía vivo en su
+# ventana de gracia antes de morir (confirmado con evidencia real — ver
+# reporte de la tarea: un intento de simular AUTENTICACION dio un error de
+# NEGOCIO real, señal de que el proceso seguía con la sesión SAP vieja).
+pm2_pid() {
+  run_node -e "
+    const fs = require('fs');
+    const os = require('os');
+    const { execSync } = require('child_process');
+    const out = execSync('pm2 jlist', { encoding: 'utf8' });
+    const list = JSON.parse(out);
+    const p = list.find(x => x.name === process.argv[1]);
+    console.log(p ? p.pid : '');
+  " "$PM2_NAME" 2>/dev/null
+}
+
+# Reinicia pm2 y espera hasta que el PID cambie de verdad (o timeout),
+# además del healthcheck HTTP — evita la condición de carrera de arriba.
+reiniciar_pm2_y_esperar() {
+  local pid_anterior; pid_anterior=$(pm2_pid)
+  (cd "$REPO_ROOT" && bash -c "source ~/.nvm/nvm.sh 2>/dev/null; NODE_ENV=staging pm2 restart $PM2_NAME --update-env" > /dev/null 2>&1)
+  local intentos=0 pid_nuevo=""
+  while [ $intentos -lt 20 ]; do
+    sleep 1
+    pid_nuevo=$(pm2_pid)
+    if [ -n "$pid_nuevo" ] && [ "$pid_nuevo" != "$pid_anterior" ]; then
+      break
+    fi
+    intentos=$((intentos + 1))
+  done
+  # Margen extra para que el proceso nuevo termine de bootear (conexión a
+  # BD, etc.) antes de que el healthcheck del caller lo dé por bueno.
+  sleep 2
+  if [ -z "$pid_nuevo" ] || [ "$pid_nuevo" = "$pid_anterior" ]; then
+    echo "  (advertencia: no se pudo confirmar que el PID cambió tras el restart — pid_anterior=$pid_anterior, pid_actual=$pid_nuevo)"
+  else
+    echo "  pm2 confirmado: pid $pid_anterior -> $pid_nuevo"
+  fi
+}
+
 restaurar_sap_password() {
   if [ "$SAP_PASSWORD_CORROMPIDA" = "1" ]; then
     sed -i "s|^SAP_PASSWORD=.*|SAP_PASSWORD=${SAP_PASSWORD_ORIGINAL}|" "$ENV_FILE"
-    (cd "$REPO_ROOT" && bash -c "source ~/.nvm/nvm.sh 2>/dev/null; NODE_ENV=staging pm2 restart $PM2_NAME --update-env" > /dev/null 2>&1)
-    sleep 3
+    reiniciar_pm2_y_esperar
     SAP_PASSWORD_CORROMPIDA=0
     echo "[cleanup] SAP_PASSWORD restaurada y $PM2_NAME reiniciado."
   fi
@@ -334,8 +376,7 @@ if [ "$COMPLETADO_AUTH" = "true" ]; then ok "checklist de masa $MASA_ID_AUTENTIC
 echo "-- corrompiendo SAP_PASSWORD y reiniciando $PM2_NAME (simula credenciales de integración inválidas) --"
 sed -i "s|^SAP_PASSWORD=.*|SAP_PASSWORD=credencial-invalida-de-prueba-$$|" "$ENV_FILE"
 SAP_PASSWORD_CORROMPIDA=1
-(cd "$REPO_ROOT" && bash -c "source ~/.nvm/nvm.sh 2>/dev/null; NODE_ENV=staging pm2 restart $PM2_NAME --update-env" > /dev/null 2>&1)
-sleep 3
+reiniciar_pm2_y_esperar
 HEALTH=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/health)
 if [ "$HEALTH" != "200" ]; then
   fallo "el backend no respondió sano tras el reinicio con SAP_PASSWORD corrompida (health=$HEALTH)"
