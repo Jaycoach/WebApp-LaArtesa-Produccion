@@ -383,8 +383,20 @@ const clasificarErrorSAP = (mensaje, err) => {
   // descartamos que sea de red arriba — es un fallo de autenticación real
   // (credenciales/usuario/CompanyDB), no un rechazo de negocio de ningún
   // documento (SAP nunca llegó a ver el InventoryGenExit).
+  //
+  // OJO: `mensaje` (sapMsg) NO es err.message — el controller lo arma
+  // priorizando err.response.data.error.message.value (el cuerpo crudo que
+  // devuelve SAP), así que el prefijo "Error de autenticación SAP:" que
+  // agrega sap.service.js login() casi nunca aparece en `mensaje` cuando SAP
+  // sí respondió algo (el caso real, confirmado en staging). Por eso se
+  // revisa err?.message por separado (señal estructural de nuestro propio
+  // wrapper) además del texto crudo real que SAP devuelve para credenciales
+  // inválidas (confirmado en vivo: HTTP 500 con
+  // "Get access token error,...invalid_grant...Invalid user credentials" —
+  // SAP no usa 401/403 para esto en este entorno).
   const statusLogin = err?.response?.status || err?.cause?.response?.status;
-  const esFalloDeLogin = /^Error de autenticación SAP:/i.test(mensaje || '');
+  const esFalloDeLogin = /^Error de autenticación SAP:/i.test(err?.message || '')
+    || /invalid_grant|Invalid user credentials|Get access token error/i.test(mensaje || '');
   if (esFalloDeLogin || statusLogin === 401 || statusLogin === 403) {
     return 'AUTENTICACION';
   }
