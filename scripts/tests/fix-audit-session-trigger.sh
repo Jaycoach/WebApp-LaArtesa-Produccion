@@ -67,6 +67,14 @@ trap cleanup EXIT
 
 login() {
   # $1 = password. Imprime el JSON completo de la respuesta.
+  #
+  # sleep 1: el refreshToken se firma solo con {id, iat, exp} (sin jti/nonce,
+  # ver generateTokens en utils/jwt.js) — dos logins del mismo usuario en el
+  # mismo segundo producen un JWT IDÉNTICO y el INSERT en usuarios_sesiones
+  # (refresh_token UNIQUE) choca con "El recurso ya existe". Es un bug latente
+  # preexistente, no relacionado con el trigger de esta tarea — se evita aquí
+  # para no confundir el resultado del test; queda anotado como pendiente.
+  sleep 1
   curl -s -X POST "$API_URL/auth/login" -H 'Content-Type: application/json' \
     -d "{\"username\":\"$TEST_USERNAME\",\"password\":\"$1\"}"
 }
@@ -90,10 +98,10 @@ if echo "$FUNC_SRC" | grep -q "detalles"; then
 else
   ok "audit_session_changes() ya no referencia 'detalles'"
 fi
-if echo "$FUNC_SRC" | grep -q "REVOKE_SESSION'.*'usuarios_sesiones'\|'REVOKE_SESSION',"; then
-  fallo "audit_session_changes() todavía usa accion='REVOKE_SESSION' (viola check_accion)"
+if echo "$FUNC_SRC" | grep -qE "usuario_id,\s*'REVOKE_SESSION'"; then
+  fallo "audit_session_changes() todavía usa accion='REVOKE_SESSION' (viola check_accion) — 'REVOKE_SESSION' dentro de cambios (jsonb) SÍ es correcto, el problema sería solo como valor de accion"
 else
-  ok "audit_session_changes() ya no usa accion='REVOKE_SESSION' (usa un valor permitido por check_accion)"
+  ok "audit_session_changes() ya no usa accion='REVOKE_SESSION' (usa un valor permitido por check_accion; 'REVOKE_SESSION' solo aparece como dato dentro de cambios)"
 fi
 
 echo ""
@@ -234,16 +242,34 @@ fi
 
 echo ""
 echo "===================================================="
-echo "ESCENARIO E (extra): rama DELETE del trigger — borrar de verdad al usuario de prueba"
+echo "ESCENARIO E (extra): rama DELETE del trigger"
 echo "(antes de la migración 071 esto fallaba con 'column detalles does not exist'"
-echo " al hacer cascade DELETE sobre usuarios_sesiones)"
+echo " en cualquier DELETE sobre usuarios_sesiones — ej. cleanup_expired_sessions())"
 echo "===================================================="
-DELETE_OUT=$(psql_q "DELETE FROM usuarios WHERE id=$USER_ID RETURNING id;" 2>&1)
-if echo "$DELETE_OUT" | grep -qi "does not exist\|ERROR"; then
-  fallo "DELETE del usuario de prueba falló: $DELETE_OUT"
+# NOTA: NO se borra el usuario de prueba aquí — auditoria.usuario_id
+# referencia a usuarios SIN ON DELETE, así que un usuario con historial de
+# auditoría (como este, ya tiene 3 filas de las fases A/B/C) queda
+# correctamente protegido contra DELETE por esa FK. Eso es comportamiento
+# esperado del esquema, no un bug de este trigger — probarlo aparte, sobre
+# una fila de usuarios_sesiones suelta.
+LOGIN_E=$(login "$NEW_PASSWORD")
+REFRESH_E=$(echo "$LOGIN_E" | jq -r '.data.refreshToken // empty')
+if [ -z "$REFRESH_E" ]; then
+  fallo "no se pudo loguear antes de la prueba de DELETE: $LOGIN_E"
 else
-  ok "DELETE en cascada del usuario de prueba (y sus sesiones) funcionó sin error — rama DELETE del trigger corregida"
-  USER_CREADO=0  # ya no existe, el cleanup no debe intentar tocarlo
+  SESSION_ID_E=$(session_id_for_token "$REFRESH_E")
+  DELETE_OUT=$(psql_q "DELETE FROM usuarios_sesiones WHERE id=$SESSION_ID_E;" 2>&1)
+  if echo "$DELETE_OUT" | grep -qi "does not exist\|ERROR"; then
+    fallo "DELETE directo sobre usuarios_sesiones (id=$SESSION_ID_E) falló: $DELETE_OUT"
+  else
+    ok "DELETE directo sobre usuarios_sesiones (id=$SESSION_ID_E) funcionó sin error"
+    COUNT_E=$(psql_q "SELECT COUNT(*) FROM auditoria WHERE tabla='usuarios_sesiones' AND registro_id=$SESSION_ID_E AND accion='DELETE';")
+    if [ "$COUNT_E" -ge 1 ] 2>/dev/null; then
+      ok "fila de auditoria insertada para el DELETE (registro_id=$SESSION_ID_E, accion='DELETE') — rama DELETE del trigger corregida"
+    else
+      fallo "NO se encontró fila de auditoria para el DELETE directo (registro_id=$SESSION_ID_E)"
+    fi
+  fi
 fi
 
 echo ""
