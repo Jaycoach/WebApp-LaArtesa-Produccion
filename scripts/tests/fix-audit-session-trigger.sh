@@ -214,6 +214,11 @@ if [ -z "$REFRESH_C" ]; then
   fallo "no se pudo loguear antes del refresh: $LOGIN_C"
 else
   SESSION_ID_C=$(session_id_for_token "$REFRESH_C")
+  # Igual razón que el sleep en login(): /api/auth/refresh genera su propio
+  # refreshToken nuevo con {id, iat} — si esto corre en el mismo segundo que
+  # el login que obtuvo REFRESH_C, el token nuevo choca (UNIQUE) con el que
+  # ya existe en la tabla para esa sesión.
+  sleep 1
   HTTP_C=$(curl -s -o /tmp/escC_resp_$$.json -w '%{http_code}' -X POST "$API_URL/auth/refresh" \
     -H 'Content-Type: application/json' -d "{\"refreshToken\":\"$REFRESH_C\"}")
   RESP_C=$(cat /tmp/escC_resp_$$.json); rm -f /tmp/escC_resp_$$.json
