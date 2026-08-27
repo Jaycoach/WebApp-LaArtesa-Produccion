@@ -5,6 +5,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from '@/store';
 import { useVersionCheck } from '@/hooks/useVersionCheck';
+import { useSessionReplacedGuard } from '@/hooks/useSessionReplacedGuard';
 
 // Layouts
 import MainLayout from '@/components/layout/MainLayout';
@@ -43,6 +44,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
 function App() {
   const { hayNuevaVersion } = useVersionCheck();
+  useSessionReplacedGuard();
   return (
     <BrowserRouter>
       <ScrollToTop />

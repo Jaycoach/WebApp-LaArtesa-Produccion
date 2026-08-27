@@ -15,6 +15,11 @@ export const Login: React.FC = () => {
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
+  const [sessionReplacedNotice] = useState(
+    searchParams.get('session_replaced') === '1'
+      ? 'Tu sesión se cerró porque se inició sesión con otro usuario en este navegador. Vuelve a iniciar sesión.'
+      : ''
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [paso, setPaso] = useState<Paso>('login');
 
@@ -72,6 +77,9 @@ export const Login: React.FC = () => {
         {/* PASO 1: Login normal */}
         {paso === 'login' && (
           <form className="mt-8 space-y-6" onSubmit={handleLogin}>
+            {sessionReplacedNotice && !error && (
+              <Alert variant="warning">{sessionReplacedNotice}</Alert>
+            )}
             {error && <Alert variant="error">{error}</Alert>}
             <div className="rounded-md shadow-sm -space-y-px">
               <div>
