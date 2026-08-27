@@ -96,9 +96,21 @@ pm2_pid() {
 
 # Reinicia pm2 y espera hasta que el PID cambie de verdad (o timeout),
 # además del healthcheck HTTP — evita la condición de carrera de arriba.
+#
+# $1 (opcional): asignación extra de env var para el comando de restart,
+# ej. "SAP_PASSWORD='valor-malo'". Es OBLIGATORIA para cualquier variable
+# que este script necesite cambiar de verdad: pm2 guarda su PROPIO
+# snapshot de variables de entorno (dump.pm2) y lo reinyecta en cada
+# restart ANTES de que la app lea backend/.env vía dotenv.config()
+# (que por defecto NO sobreescribe una variable que ya existe en
+# process.env). Editar el archivo .env solo, sin pasar la variable en el
+# propio comando de restart, NO tiene efecto — confirmado con evidencia
+# real: `pm2 env 0` y dump.pm2 seguían mostrando el SAP_PASSWORD viejo
+# pese a haber editado .env y confirmado que el PID sí cambió.
 reiniciar_pm2_y_esperar() {
+  local env_extra="${1:-}"
   local pid_anterior; pid_anterior=$(pm2_pid)
-  (cd "$REPO_ROOT" && bash -c "source ~/.nvm/nvm.sh 2>/dev/null; NODE_ENV=staging pm2 restart $PM2_NAME --update-env" > /dev/null 2>&1)
+  (cd "$REPO_ROOT" && bash -c "source ~/.nvm/nvm.sh 2>/dev/null; $env_extra NODE_ENV=staging pm2 restart $PM2_NAME --update-env" > /dev/null 2>&1)
   local intentos=0 pid_nuevo=""
   while [ $intentos -lt 20 ]; do
     sleep 1
@@ -121,7 +133,7 @@ reiniciar_pm2_y_esperar() {
 restaurar_sap_password() {
   if [ "$SAP_PASSWORD_CORROMPIDA" = "1" ]; then
     sed -i "s|^SAP_PASSWORD=.*|SAP_PASSWORD=${SAP_PASSWORD_ORIGINAL}|" "$ENV_FILE"
-    reiniciar_pm2_y_esperar
+    reiniciar_pm2_y_esperar "SAP_PASSWORD='${SAP_PASSWORD_ORIGINAL}'"
     SAP_PASSWORD_CORROMPIDA=0
     echo "[cleanup] SAP_PASSWORD restaurada y $PM2_NAME reiniciado."
   fi
@@ -374,9 +386,10 @@ COMPLETADO_AUTH=$(curl -s -H "$AUTH_HEADER" "$API_URL/pesaje/$MASA_ID_AUTENTICAC
 if [ "$COMPLETADO_AUTH" = "true" ]; then ok "checklist de masa $MASA_ID_AUTENTICACION completo"; else fallo "checklist de masa $MASA_ID_AUTENTICACION incompleto"; fi
 
 echo "-- corrompiendo SAP_PASSWORD y reiniciando $PM2_NAME (simula credenciales de integración inválidas) --"
-sed -i "s|^SAP_PASSWORD=.*|SAP_PASSWORD=credencial-invalida-de-prueba-$$|" "$ENV_FILE"
+SAP_PASSWORD_MALA="credencial-invalida-de-prueba-$$"
+sed -i "s|^SAP_PASSWORD=.*|SAP_PASSWORD=${SAP_PASSWORD_MALA}|" "$ENV_FILE"
 SAP_PASSWORD_CORROMPIDA=1
-reiniciar_pm2_y_esperar
+reiniciar_pm2_y_esperar "SAP_PASSWORD='${SAP_PASSWORD_MALA}'"
 HEALTH=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/health)
 if [ "$HEALTH" != "200" ]; then
   fallo "el backend no respondió sano tras el reinicio con SAP_PASSWORD corrompida (health=$HEALTH)"
