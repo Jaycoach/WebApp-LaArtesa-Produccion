@@ -112,11 +112,12 @@ completar_checklist() {
   items=$(echo "$checklist" | jq -c --arg oid "$override_id" --arg olote "$override_lote" '
     .data.ingredientes[]
     | select(.es_decoracion == false)
+    | (.cantidad_kilos | tonumber) as $kg
     | {
         id: .id,
-        peso_real: (.cantidad_kilos * 1000),
+        peso_real: ($kg * 1000),
         lote: (if (.id|tostring) == $oid then $olote else (.lote_sugerido // "") end),
-        lotes_consumo: (if (.id|tostring) == $oid then [{batch:$olote, cantidad_kg:.cantidad_kilos}] else (.lotes_consumo_sugerido // []) end)
+        lotes_consumo: (if (.id|tostring) == $oid then [{batch:$olote, cantidad_kg:$kg}] else (.lotes_consumo_sugerido // []) end)
       }
   ')
   if [ -z "$items" ]; then

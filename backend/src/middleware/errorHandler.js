@@ -20,8 +20,15 @@ class AppError extends Error {
 
 /**
  * Middleware principal de manejo de errores
+ *
+ * Express solo reconoce middleware de errores por aridad exacta de 4
+ * parámetros (err, req, res, next) — con 3 lo trata como middleware normal
+ * y NUNCA lo invoca cuando algo llama next(error), cayendo en su página
+ * HTML por defecto (con stack trace en dev/staging, o solo "Forbidden"/
+ * "Internal Server Error" en producción). El parámetro `next` es
+ * obligatorio aquí aunque no se use.
  */
-const errorHandler = (err, req, res) => {
+const errorHandler = (err, req, res, next) => {
   const statusCode = err.statusCode || 500;
   const isDevelopment = config.server.env === 'development';
 

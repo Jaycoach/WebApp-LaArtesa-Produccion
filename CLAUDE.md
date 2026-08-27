@@ -27,3 +27,4 @@ Para cualquier tarea nueva (feature, fix, refactor), antes de tocar código: esc
 - Usar palabras como "implementado" y "completo" como sinónimos en el mismo reporte — son estados distintos y deben aparecer por separado.
 
 - Mezclar cambios de negocio (NEGOCIO, ej. errores de stock) con cambios de infraestructura (CONEXION, ej. desconexión) sin clasificarlos explícitamente si la tarea lo requiere.
+
