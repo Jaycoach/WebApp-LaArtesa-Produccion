@@ -127,6 +127,7 @@ cleanup() {
     psql_q "UPDATE usuarios SET activo=false, intentos_fallidos=0, bloqueado_hasta=NULL, username=username || '_DEACTIVATED' WHERE id=$id AND username NOT LIKE '%_DEACTIVATED';" > /dev/null 2>&1
   done
   echo "[cleanup] usuarios de prueba desactivados: ${TEST_USER_IDS[*]:-ninguno}"
+  rm -f "$CALL_RESP_FILE"
 }
 trap cleanup EXIT
 
@@ -151,19 +152,25 @@ login_token() {
     -d "{\"username\":\"$1\",\"password\":\"$2\"}" | jq -r '.data.accessToken // empty'
 }
 
+CALL_RESP_FILE="/tmp/hierarchy_test_resp_$$.json"
+
 call() {
-  # $1=METHOD $2=PATH $3=TOKEN $4=JSON_BODY(o "") -> imprime "HTTP_CODE"; deja body en $LAST_BODY
+  # $1=METHOD $2=PATH $3=TOKEN $4=JSON_BODY(o "") -> imprime "HTTP_CODE"
+  #
+  # NOTA: esta función casi siempre se invoca como HTTP=$(call ...), es
+  # decir, corre en una SUBSHELL — cualquier variable asignada aquí adentro
+  # (ej. un LAST_BODY local) se pierde al volver al shell padre. Por eso el
+  # body se escribe a un archivo de ruta fija ($CALL_RESP_FILE), no a una
+  # variable — leerlo después con `cat "$CALL_RESP_FILE"` sí funciona.
   local method="$1" path="$2" token="$3" body="${4:-}"
-  local tmp; tmp=$(mktemp)
   local http
   if [ -n "$body" ]; then
-    http=$(curl -s -o "$tmp" -w '%{http_code}' -X "$method" "$API_URL$path" \
+    http=$(curl -s -o "$CALL_RESP_FILE" -w '%{http_code}' -X "$method" "$API_URL$path" \
       -H "Authorization: Bearer $token" -H 'Content-Type: application/json' -d "$body")
   else
-    http=$(curl -s -o "$tmp" -w '%{http_code}' -X "$method" "$API_URL$path" \
+    http=$(curl -s -o "$CALL_RESP_FILE" -w '%{http_code}' -X "$method" "$API_URL$path" \
       -H "Authorization: Bearer $token")
   fi
-  LAST_BODY=$(cat "$tmp"); rm -f "$tmp"
   echo "$http"
 }
 
@@ -172,7 +179,7 @@ expect() {
   if [ "$2" = "$3" ]; then
     ok "$1 (HTTP $3)"
   else
-    fallo "$1 — esperaba HTTP $2, obtuvo HTTP $3 :: $(print_safe "$LAST_BODY")"
+    fallo "$1 — esperaba HTTP $2, obtuvo HTTP $3 :: $(print_safe "$(cat "$CALL_RESP_FILE" 2>/dev/null)")"
   fi
 }
 
@@ -305,7 +312,7 @@ echo ""
 echo "=== Visibilidad: bloqueado_hasta / intentos_fallidos expuestos por la API ==="
 psql_q "UPDATE usuarios SET intentos_fallidos=4, bloqueado_hasta=NOW() + INTERVAL '30 minutes' WHERE id=$ID_OPERARIO;" > /dev/null
 HTTP=$(call GET "/users/$ID_OPERARIO" "$TOKEN_ADMIN_ACTOR" "")
-BLOQUEADO_HASTA=$(echo "$LAST_BODY" | jq -r '.data.bloqueado_hasta // empty')
+BLOQUEADO_HASTA=$(cat "$CALL_RESP_FILE" | jq -r '.data.bloqueado_hasta // empty')
 if [ "$HTTP" = "200" ] && [ -n "$BLOQUEADO_HASTA" ]; then
   ok "GET /users/:id expone bloqueado_hasta (usuario bloqueado detectable)"
 else
@@ -313,7 +320,7 @@ else
 fi
 
 HTTP=$(call GET "/users?search=$USERNAME_OPERARIO" "$TOKEN_ADMIN_ACTOR" "")
-BLOQUEADO_EN_LISTA=$(echo "$LAST_BODY" | jq -r --arg id "$ID_OPERARIO" '.data.users[] | select((.id|tostring)==$id) | .bloqueado_hasta // empty')
+BLOQUEADO_EN_LISTA=$(cat "$CALL_RESP_FILE" | jq -r --arg id "$ID_OPERARIO" '.data.users[] | select((.id|tostring)==$id) | .bloqueado_hasta // empty')
 if [ "$HTTP" = "200" ] && [ -n "$BLOQUEADO_EN_LISTA" ]; then
   ok "GET /users (listado) expone bloqueado_hasta para el usuario bloqueado"
 else
