@@ -52,7 +52,7 @@ DB_USER=$(grep -E '^DB_USER='     "$ENV_FILE" | cut -d= -f2-)
 DB_PASSWORD=$(grep -E '^DB_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)
 
 psql_q() {
-  PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -A -F'|' -c "$1"
+  PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -q -t -A -F'|' -c "$1"
 }
 
 cleanup() {
@@ -93,7 +93,7 @@ INSERT INTO usuarios (username, email, password_hash, nombre_completo, rol, acti
 VALUES ('$TEST_USERNAME', '$TEST_EMAIL', '$HASH', 'Usuario Prueba Diagnostico Error Desconocido', 'OPERARIO', true, true, 0, NULL, false)
 RETURNING id;
 EOF
-USER_ID=$(PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -A -f "$TMP_SQL")
+USER_ID=$(PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -q -t -A -f "$TMP_SQL")
 rm -f "$TMP_SQL"
 if [ -z "$USER_ID" ]; then
   fallo "no se pudo crear el usuario de prueba"
