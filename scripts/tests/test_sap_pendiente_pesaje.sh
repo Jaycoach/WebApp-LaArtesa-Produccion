@@ -411,10 +411,15 @@ PENDING_LOG_ID_AUTH=$(psql_q "SELECT id FROM sap_sync_log WHERE masa_id=$MASA_ID
 if [ -n "$PENDING_LOG_ID_AUTH" ]; then
   ok "sap_sync_log PENDING creado con masa_id=$MASA_ID_AUTENTICACION (id=$PENDING_LOG_ID_AUTH)"
   ERROR_MSG_AUTH=$(psql_q "SELECT error_message FROM sap_sync_log WHERE id=$PENDING_LOG_ID_AUTH;")
-  if echo "$ERROR_MSG_AUTH" | grep -qi "Error de autenticación SAP"; then
+  # error_message guarda sapMsg (texto crudo que devuelve SAP), NO err.message
+  # (donde sap.service.js login() antepone "Error de autenticación SAP:") — el
+  # controller usa la misma señal real para clasificar, así que el assert
+  # verifica el texto real confirmado en vivo, no un prefijo que nunca llega
+  # a esta columna.
+  if echo "$ERROR_MSG_AUTH" | grep -qiE "invalid_grant|Invalid user credentials|Get access token error"; then
     ok "el error_message confirma que fue un fallo de LOGIN (autenticación), no de red: '$ERROR_MSG_AUTH'"
   else
-    fallo "el error_message no tiene el prefijo esperado de autenticación: '$ERROR_MSG_AUTH'"
+    fallo "el error_message no tiene el texto esperado de fallo de autenticación real de SAP: '$ERROR_MSG_AUTH'"
   fi
 else
   fallo "no se encontró fila PENDING en sap_sync_log con masa_id=$MASA_ID_AUTENTICACION"
