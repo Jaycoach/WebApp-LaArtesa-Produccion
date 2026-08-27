@@ -6,6 +6,7 @@ const express = require('express');
 const router = express.Router();
 const pesajeController = require('../controllers/pesaje.controller');
 const { verifyToken } = require('../middleware/auth');
+const { checkRole } = require('../middleware/roleCheck');
 
 /**
  * Todas las rutas requieren autenticación
@@ -53,5 +54,20 @@ router.get('/:masaId/ajustes-pendientes', pesajeController.getAjustesPendientes)
  * @access  Private
  */
 router.post('/:masaId/ajustes-pendientes/confirmar', pesajeController.confirmarAjustesPendientes);
+
+/**
+ * @route   GET /api/pesaje/sap-pendientes
+ * @desc    Lista transmisiones de pesaje a SAP pendientes de sincronizar
+ *          (Service Layer estaba inalcanzable al confirmar el pesaje)
+ * @access  Private (admin, supervisor)
+ */
+router.get('/sap-pendientes', checkRole(['admin', 'supervisor']), pesajeController.getPendientesSAP);
+
+/**
+ * @route   POST /api/pesaje/sap-pendientes/reenviar
+ * @desc    Reintenta transmitir a SAP uno o más registros pendientes
+ * @access  Private (admin, supervisor)
+ */
+router.post('/sap-pendientes/reenviar', checkRole(['admin', 'supervisor']), pesajeController.reenviarPendientesSAP);
 
 module.exports = router;

@@ -9,6 +9,7 @@ import { BarraNavegacionFases } from '../../components/common/BarraNavegacionFas
 import { useAuthStore } from '../../store/useAuthStore';
 import { formatDate } from '@/utils/formatters';
 import { displayLote } from '../../types/api';
+import { PendientesSAPPanel } from '../../components/pesaje/PendientesSAPPanel';
 
 export const PesajeMasa: React.FC = () => {
   const { masaId } = useParams<{ masaId: string }>();
@@ -25,6 +26,7 @@ export const PesajeMasa: React.FC = () => {
   const masaAvanzada = !!checklist?.fase_actual && !fasesEditablesPesaje.includes(checklist.fase_actual);
   const puedeEditar = esRolEditor && !masaAvanzada;
   const [mostrarCancelar, setMostrarCancelar] = useState(false);
+  const [tabActiva, setTabActiva] = useState<'checklist' | 'pendientes-sap'>('checklist');
   const hayAlgoPesado = checklist?.ingredientes?.some((ing: any) => ing.pesado) ?? false;
   const [showMO, setShowMO] = useState(false);
   const [editando, setEditando] = useState<number | null>(null);
@@ -297,7 +299,7 @@ export const PesajeMasa: React.FC = () => {
 
   const [confirmando, setConfirmando] = useState(false);
   const [mostrarConfirmarModal, setMostrarConfirmarModal] = useState(false);
-  const [resultadoConfirmacion, setResultadoConfirmacion] = useState<{ docNum: string | number } | null>(null);
+  const [resultadoConfirmacion, setResultadoConfirmacion] = useState<{ docNum: string | number; pendienteSap?: boolean } | null>(null);
   const [inventarioDesactualizado, setInventarioDesactualizado] = useState<{
     mensaje: string;
     lotes: { ingrediente: string; item_code: string; lote: string; horas_desde_sync: number | null }[];
@@ -320,7 +322,7 @@ export const PesajeMasa: React.FC = () => {
     try {
       const resultado = await confirmarMutation.mutateAsync(masaIdNum);
       const docNum = resultado?.sap_doc_num ?? resultado?.sap_doc_entry ?? '—';
-      setResultadoConfirmacion({ docNum });
+      setResultadoConfirmacion({ docNum, pendienteSap: !!resultado?.pendiente_sap });
     } catch (err: any) {
         const data = err?.data || {};
         const mensaje = err?.message || 'Error al confirmar pesaje';
@@ -486,6 +488,40 @@ export const PesajeMasa: React.FC = () => {
             habilitada: !!checklist.pesaje_completado,
           }}
         />
+
+        {esRolEditor && (
+          <div className="flex gap-2 border-b border-gray-200">
+            <button
+              onClick={() => setTabActiva('checklist')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+                tabActiva === 'checklist'
+                  ? 'border-blue-600 text-blue-700'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Checklist de pesaje
+            </button>
+            <button
+              onClick={() => setTabActiva('pendientes-sap')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+                tabActiva === 'pendientes-sap'
+                  ? 'border-blue-600 text-blue-700'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Pendientes SAP
+            </button>
+          </div>
+        )}
+
+        {tabActiva === 'pendientes-sap' && esRolEditor && (
+          <Card>
+            <PendientesSAPPanel />
+          </Card>
+        )}
+
+        {tabActiva === 'checklist' && (
+        <>
         {/* Header */}
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex justify-between items-start">
@@ -991,9 +1027,12 @@ export const PesajeMasa: React.FC = () => {
             ))}
           </div>
         </Card>
+        </>
+        )}
 
         {/* Botones de acción — sticky (la acción principal "Confirmar Pesaje" ya
             vive en BarraNavegacionFases arriba; esta barra cubre las secundarias) */}
+        {tabActiva === 'checklist' && (
         <div className="sticky bottom-0 z-10 bg-gray-50 border-t border-gray-200 px-4 py-3 -mx-6 flex justify-end">
           <div className="flex gap-3">
             {puedeEditar && (
@@ -1034,6 +1073,7 @@ export const PesajeMasa: React.FC = () => {
             )}
           </div>
         </div>
+        )}
         {showMO && <ModalMO masaId={Number(masaId)} fase="PESAJE" onClose={() => setShowMO(false)} />}
         {mostrarAjustes && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -1143,12 +1183,20 @@ export const PesajeMasa: React.FC = () => {
                 <span className="text-2xl">✅</span>
                 <h3 className="font-bold text-lg text-green-700">Pesaje confirmado</h3>
               </div>
-              <div className="bg-green-50 border border-green-200 rounded p-3 mb-4 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Salida SAP</span>
-                  <span className="font-mono font-semibold text-gray-800">Nº {resultadoConfirmacion.docNum}</span>
+              {resultadoConfirmacion.pendienteSap ? (
+                <div className="bg-amber-50 border border-amber-300 rounded p-3 mb-4 text-sm text-amber-800">
+                  ⚠ SAP no disponible — el consumo se sincronizará automáticamente cuando se
+                  restablezca la conexión. Puedes seguir la transmisión pendiente en la pestaña
+                  "Pendientes SAP".
                 </div>
-              </div>
+              ) : (
+                <div className="bg-green-50 border border-green-200 rounded p-3 mb-4 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Salida SAP</span>
+                    <span className="font-mono font-semibold text-gray-800">Nº {resultadoConfirmacion.docNum}</span>
+                  </div>
+                </div>
+              )}
               <p className="text-sm text-gray-600 mb-4">
                 Puedes continuar a Amasado con el botón de arriba cuando estés listo.
               </p>

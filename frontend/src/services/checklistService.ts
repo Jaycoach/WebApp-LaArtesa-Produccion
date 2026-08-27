@@ -8,6 +8,8 @@ import {
   UpdateIngredienteRequest,
   ConfirmarPesajeResponse,
   EnvioCorreoResponse,
+  PendienteSAP,
+  ReenvioSAPResultado,
 } from '../types/api';
 
 /**
@@ -130,6 +132,30 @@ export const checklistService = {
       API_CONFIG.ENDPOINTS.PESAJE.CONFIRMAR_AJUSTES(masaId)
     );
     return { message: response.message || '', data: response.data };
+  },
+
+  /**
+   * Lista transmisiones de pesaje a SAP pendientes de sincronizar (SAP estaba
+   * inalcanzable por conexión al confirmar el pesaje). Solo admin/supervisor.
+   */
+  getPendientesSAP: async (): Promise<PendienteSAP[]> => {
+    const response = await apiService.get<PendienteSAP[]>(
+      API_CONFIG.ENDPOINTS.PESAJE.SAP_PENDIENTES
+    );
+    return response.data || [];
+  },
+
+  /**
+   * Reintenta transmitir a SAP uno o más registros pendientes por id de sap_sync_log.
+   */
+  reenviarPendientesSAP: async (
+    ids: number[]
+  ): Promise<{ message: string; data: ReenvioSAPResultado[] }> => {
+    const response = await apiService.post<ReenvioSAPResultado[]>(
+      API_CONFIG.ENDPOINTS.PESAJE.SAP_PENDIENTES_REENVIAR,
+      { ids }
+    );
+    return { message: response.message || '', data: response.data || [] };
   },
 };
 
