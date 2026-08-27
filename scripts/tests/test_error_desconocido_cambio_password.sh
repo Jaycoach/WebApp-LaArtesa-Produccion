@@ -150,6 +150,9 @@ psql_q "UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE 
 LOGIN_RESP2=$(curl -s -X POST "$API_URL/auth/login" -H 'Content-Type: application/json' \
   -d "{\"username\":\"$TEST_USERNAME\",\"password\":\"$TEST_PASSWORD\"}")
 TOKEN2=$(echo "$LOGIN_RESP2" | jq -r '.data.accessToken // empty')
+if [ -z "$TOKEN2" ]; then
+  fallo "no se pudo loguear para escenario 2: $LOGIN_RESP2"
+fi
 HTTP2=$(curl -s -o /tmp/esc2_resp_$$.json -w '%{http_code}' -X POST "$API_URL/auth/change-password" \
   -H "Authorization: Bearer $TOKEN2" -H 'Content-Type: application/json' \
   -d '{"currentPassword":"ClaveIncorrecta999!","newPassword":"NuevaClave456#"}')
@@ -184,6 +187,9 @@ echo "===================================================="
 LOGIN_RESP4=$(curl -s -X POST "$API_URL/auth/login" -H 'Content-Type: application/json' \
   -d "{\"username\":\"$TEST_USERNAME\",\"password\":\"Empaque123*\"}")
 TOKEN4=$(echo "$LOGIN_RESP4" | jq -r '.data.accessToken // empty')
+if [ -z "$TOKEN4" ]; then
+  fallo "no se pudo loguear para escenario 4: $LOGIN_RESP4"
+fi
 HTTP4=$(curl -s -o /tmp/esc4_resp_$$.json -w '%{http_code}' -X POST "$API_URL/auth/change-password" \
   -H "Authorization: Bearer $TOKEN4" -H 'Content-Type: application/json' \
   -d '{"currentPassword":"Empaque123*","newPassword":"Empaque123"}')
