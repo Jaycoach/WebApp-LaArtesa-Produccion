@@ -240,36 +240,3 @@ export const useConfirmarAjustesPendientes = () => {
     },
   });
 };
-
-/**
- * Hook para listar transmisiones de pesaje a SAP pendientes de sincronizar
- * (solo admin/supervisor — la ruta backend ya lo exige, `enabled` evita el
- * fetch innecesario para el resto de roles).
- */
-export const usePendientesSAP = (enabled: boolean) => {
-  return useQuery({
-    queryKey: ['pesaje', 'sap-pendientes'],
-    queryFn: () => checklistService.getPendientesSAP(),
-    enabled,
-    refetchInterval: 15000,
-  });
-};
-
-/**
- * Hook para reintentar en lote (o individualmente, o por grupo de fecha)
- * transmisiones pendientes. Las que sincronizan se limpian solas del
- * listado (invalidateQueries vuelve a pedir sap-pendientes, que ya no las
- * incluye una vez que su sap_doc_entry_pesaje quedó poblado).
- */
-export const useReenviarPendientesSAP = () => {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (seleccion: { ids: number[] } | { fechaProduccion: string }) =>
-      checklistService.reenviarPendientesSAP(seleccion),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['pesaje', 'sap-pendientes'] });
-      queryClient.invalidateQueries({ queryKey: CHECKLIST_QUERY_KEYS.all });
-    },
-  });
-};

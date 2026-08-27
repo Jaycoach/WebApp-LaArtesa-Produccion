@@ -8,9 +8,6 @@ import {
   UpdateIngredienteRequest,
   ConfirmarPesajeResponse,
   EnvioCorreoResponse,
-  GrupoPendientesSAP,
-  ReenvioSAPResultado,
-  ResumenReenvioSAP,
 } from '../types/api';
 
 /**
@@ -133,40 +130,6 @@ export const checklistService = {
       API_CONFIG.ENDPOINTS.PESAJE.CONFIRMAR_AJUSTES(masaId)
     );
     return { message: response.message || '', data: response.data };
-  },
-
-  /**
-   * Lista transmisiones de pesaje a SAP pendientes de sincronizar (SAP estaba
-   * inalcanzable por conexión, o falló la autenticación, al confirmar el
-   * pesaje), agrupadas por fecha de producción. Solo admin/supervisor. Vive
-   * en Sincronizar SAP, no dentro de Pesaje.
-   */
-  getPendientesSAP: async (): Promise<GrupoPendientesSAP[]> => {
-    const response = await apiService.get<GrupoPendientesSAP[]>(
-      API_CONFIG.ENDPOINTS.PESAJE.SAP_PENDIENTES
-    );
-    return response.data || [];
-  },
-
-  /**
-   * Reintenta transmitir a SAP registros pendientes — por ids explícitos de
-   * sap_sync_log, o por grupo (`fechaProduccion`: 'YYYY-MM-DD', o 'todas').
-   */
-  reenviarPendientesSAP: async (
-    seleccion: { ids: number[] } | { fechaProduccion: string }
-  ): Promise<{ message: string; data: ReenvioSAPResultado[]; resumen?: ResumenReenvioSAP }> => {
-    const body = 'ids' in seleccion
-      ? { ids: seleccion.ids }
-      : { fecha_produccion: seleccion.fechaProduccion };
-    const response = await apiService.post<ReenvioSAPResultado[]>(
-      API_CONFIG.ENDPOINTS.PESAJE.SAP_PENDIENTES_REENVIAR,
-      body
-    );
-    return {
-      message: response.message || '',
-      data: response.data || [],
-      resumen: (response as any).resumen,
-    };
   },
 };
 

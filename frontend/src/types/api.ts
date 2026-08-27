@@ -246,50 +246,6 @@ export interface ConfirmarPesajeResponse {
   message: string;
   sap_doc_num?: number | null;
   sap_doc_entry?: number | null;
-  pendiente_sap?: boolean;
-}
-
-// Registro de sap_sync_log con estado PENDING (SAP inalcanzable por conexión
-// o falla de autenticación al confirmar el pesaje) — GET /api/pesaje/sap-pendientes
-export interface PendienteSAP {
-  id: number;
-  masa_id: number | null;
-  request_payload: any;
-  error_message: string | null;
-  fecha_operacion: string;
-  intentos: number;
-  usuario_id: number | null;
-  codigo_masa: string | null;
-  tipo_masa: string | null;
-  lote_produccion: string | null;
-  fase_actual: string | null;
-  fecha_produccion: string | null;
-}
-
-// GET /api/pesaje/sap-pendientes — agrupado por fecha de producción de la masa
-export interface GrupoPendientesSAP {
-  fecha_produccion: string; // 'YYYY-MM-DD', o 'sin_fecha'
-  total: number;
-  masas: PendienteSAP[];
-}
-
-// Resultado por registro tras POST /api/pesaje/sap-pendientes/reenviar
-export interface ReenvioSAPResultado {
-  id: number;
-  masa_id: number | null;
-  success: boolean;
-  sap_doc_entry?: number | null;
-  sap_doc_num?: string | null;
-  pendiente_sap?: boolean;
-  requiere_revision?: boolean;
-  error?: string;
-}
-
-// Resumen de un reintento en lote
-export interface ResumenReenvioSAP {
-  total: number;
-  exitosos: number;
-  fallidos: number;
 }
 
 // Response de sincronización SAP

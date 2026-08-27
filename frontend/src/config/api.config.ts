@@ -58,8 +58,6 @@ export const API_CONFIG = {
       ENVIAR_CORREO: (masaId: number) => `/pesaje/${masaId}/enviar-correo`,
       AJUSTES_PENDIENTES: (masaId: number) => `/pesaje/${masaId}/ajustes-pendientes`,
       CONFIRMAR_AJUSTES: (masaId: number) => `/pesaje/${masaId}/ajustes-pendientes/confirmar`,
-      SAP_PENDIENTES: '/pesaje/sap-pendientes',
-      SAP_PENDIENTES_REENVIAR: '/pesaje/sap-pendientes/reenviar',
     },
 
     // Configuración

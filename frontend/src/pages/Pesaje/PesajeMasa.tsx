@@ -297,7 +297,7 @@ export const PesajeMasa: React.FC = () => {
 
   const [confirmando, setConfirmando] = useState(false);
   const [mostrarConfirmarModal, setMostrarConfirmarModal] = useState(false);
-  const [resultadoConfirmacion, setResultadoConfirmacion] = useState<{ docNum: string | number; pendienteSap?: boolean } | null>(null);
+  const [resultadoConfirmacion, setResultadoConfirmacion] = useState<{ docNum: string | number } | null>(null);
   const [inventarioDesactualizado, setInventarioDesactualizado] = useState<{
     mensaje: string;
     lotes: { ingrediente: string; item_code: string; lote: string; horas_desde_sync: number | null }[];
@@ -320,7 +320,7 @@ export const PesajeMasa: React.FC = () => {
     try {
       const resultado = await confirmarMutation.mutateAsync(masaIdNum);
       const docNum = resultado?.sap_doc_num ?? resultado?.sap_doc_entry ?? '—';
-      setResultadoConfirmacion({ docNum, pendienteSap: !!resultado?.pendiente_sap });
+      setResultadoConfirmacion({ docNum });
     } catch (err: any) {
         const data = err?.data || {};
         const mensaje = err?.message || 'Error al confirmar pesaje';
@@ -486,8 +486,6 @@ export const PesajeMasa: React.FC = () => {
             habilitada: !!checklist.pesaje_completado,
           }}
         />
-
-        <>
         {/* Header */}
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex justify-between items-start">
@@ -993,7 +991,6 @@ export const PesajeMasa: React.FC = () => {
             ))}
           </div>
         </Card>
-        </>
 
         {/* Botones de acción — sticky (la acción principal "Confirmar Pesaje" ya
             vive en BarraNavegacionFases arriba; esta barra cubre las secundarias) */}
@@ -1146,20 +1143,12 @@ export const PesajeMasa: React.FC = () => {
                 <span className="text-2xl">✅</span>
                 <h3 className="font-bold text-lg text-green-700">Pesaje confirmado</h3>
               </div>
-              {resultadoConfirmacion.pendienteSap ? (
-                <div className="bg-amber-50 border border-amber-300 rounded p-3 mb-4 text-sm text-amber-800">
-                  ⚠ SAP no disponible — el consumo se sincronizará automáticamente cuando se
-                  restablezca la conexión. Puedes seguir la transmisión pendiente en la pestaña
-                  "Pendientes SAP".
+              <div className="bg-green-50 border border-green-200 rounded p-3 mb-4 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Salida SAP</span>
+                  <span className="font-mono font-semibold text-gray-800">Nº {resultadoConfirmacion.docNum}</span>
                 </div>
-              ) : (
-                <div className="bg-green-50 border border-green-200 rounded p-3 mb-4 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Salida SAP</span>
-                    <span className="font-mono font-semibold text-gray-800">Nº {resultadoConfirmacion.docNum}</span>
-                  </div>
-                </div>
-              )}
+              </div>
               <p className="text-sm text-gray-600 mb-4">
                 Puedes continuar a Amasado con el botón de arriba cuando estés listo.
               </p>
