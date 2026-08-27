@@ -208,6 +208,18 @@ echo "############################################################"
 echo "# BLOQUE 3/3 — NUEVO: jerarquía de roles + visibilidad/desbloqueo"
 echo "############################################################"
 
+echo "--- PRECHECK: el frontend sigue trayendo la UI de bloqueo/desbloqueo ---"
+# Chequeo liviano sobre el CÓDIGO FUENTE (no el bundle — el hash del build
+# cambia en cada deploy). No reemplaza la verificación visual real (ver
+# reporte de la tarea con capturas admin/supervisor) — solo evita que un
+# refactor futuro borre esta UI sin que ningún test lo note.
+FRONTEND_FILE="$REPO_ROOT/frontend/src/pages/Configuracion/GestionUsuarios.tsx"
+if [ -f "$FRONTEND_FILE" ] && grep -q "estaBloqueado" "$FRONTEND_FILE" && grep -q "Desbloquear" "$FRONTEND_FILE" && grep -q "rolesParaSelect" "$FRONTEND_FILE"; then
+  ok "GestionUsuarios.tsx conserva el indicador de bloqueo, el botón Desbloquear y el filtro de roles del selector"
+else
+  fallo "GestionUsuarios.tsx ya NO tiene la UI de bloqueo/desbloqueo o el filtro de rol — verificar si se perdió en un refactor"
+fi
+
 echo "--- PREP: crear usuarios de prueba (admin/supervisor/operario) ---"
 PASS_ADMIN_TARGET=$(gen_valid_password)
 PASS_SUP=$(gen_valid_password)
