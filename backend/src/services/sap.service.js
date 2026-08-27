@@ -184,7 +184,17 @@ class SAPService {
       return this.sessionId;
     } catch (error) {
       logger.error('Error al iniciar sesión en SAP:', error.message);
-      throw new Error(`Error de autenticación SAP: ${error.message}`);
+      // Se re-envuelve con un mensaje más claro, pero SIN perder las señales
+      // estructuradas del error original (`code` de una falla de red — ej.
+      // ECONNREFUSED — y `response` si SAP sí respondió, ej. 401 por
+      // credenciales inválidas). Quien llama a login()/ensureSession() las
+      // necesita para clasificar CONEXION vs AUTENTICACION vs NEGOCIO sin
+      // depender solo de parsear el texto del mensaje.
+      const wrapped = new Error(`Error de autenticación SAP: ${error.message}`);
+      wrapped.code = error.code;
+      wrapped.response = error.response;
+      wrapped.cause = error;
+      throw wrapped;
     }
   }
 

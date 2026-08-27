@@ -8,8 +8,9 @@ import {
   UpdateIngredienteRequest,
   ConfirmarPesajeResponse,
   EnvioCorreoResponse,
-  PendienteSAP,
+  GrupoPendientesSAP,
   ReenvioSAPResultado,
+  ResumenReenvioSAP,
 } from '../types/api';
 
 /**
@@ -136,26 +137,36 @@ export const checklistService = {
 
   /**
    * Lista transmisiones de pesaje a SAP pendientes de sincronizar (SAP estaba
-   * inalcanzable por conexión al confirmar el pesaje). Solo admin/supervisor.
+   * inalcanzable por conexión, o falló la autenticación, al confirmar el
+   * pesaje), agrupadas por fecha de producción. Solo admin/supervisor. Vive
+   * en Sincronizar SAP, no dentro de Pesaje.
    */
-  getPendientesSAP: async (): Promise<PendienteSAP[]> => {
-    const response = await apiService.get<PendienteSAP[]>(
+  getPendientesSAP: async (): Promise<GrupoPendientesSAP[]> => {
+    const response = await apiService.get<GrupoPendientesSAP[]>(
       API_CONFIG.ENDPOINTS.PESAJE.SAP_PENDIENTES
     );
     return response.data || [];
   },
 
   /**
-   * Reintenta transmitir a SAP uno o más registros pendientes por id de sap_sync_log.
+   * Reintenta transmitir a SAP registros pendientes — por ids explícitos de
+   * sap_sync_log, o por grupo (`fechaProduccion`: 'YYYY-MM-DD', o 'todas').
    */
   reenviarPendientesSAP: async (
-    ids: number[]
-  ): Promise<{ message: string; data: ReenvioSAPResultado[] }> => {
+    seleccion: { ids: number[] } | { fechaProduccion: string }
+  ): Promise<{ message: string; data: ReenvioSAPResultado[]; resumen?: ResumenReenvioSAP }> => {
+    const body = 'ids' in seleccion
+      ? { ids: seleccion.ids }
+      : { fecha_produccion: seleccion.fechaProduccion };
     const response = await apiService.post<ReenvioSAPResultado[]>(
       API_CONFIG.ENDPOINTS.PESAJE.SAP_PENDIENTES_REENVIAR,
-      { ids }
+      body
     );
-    return { message: response.message || '', data: response.data || [] };
+    return {
+      message: response.message || '',
+      data: response.data || [],
+      resumen: (response as any).resumen,
+    };
   },
 };
 

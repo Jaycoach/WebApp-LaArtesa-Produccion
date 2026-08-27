@@ -9,7 +9,6 @@ import { BarraNavegacionFases } from '../../components/common/BarraNavegacionFas
 import { useAuthStore } from '../../store/useAuthStore';
 import { formatDate } from '@/utils/formatters';
 import { displayLote } from '../../types/api';
-import { PendientesSAPPanel } from '../../components/pesaje/PendientesSAPPanel';
 
 export const PesajeMasa: React.FC = () => {
   const { masaId } = useParams<{ masaId: string }>();
@@ -26,7 +25,6 @@ export const PesajeMasa: React.FC = () => {
   const masaAvanzada = !!checklist?.fase_actual && !fasesEditablesPesaje.includes(checklist.fase_actual);
   const puedeEditar = esRolEditor && !masaAvanzada;
   const [mostrarCancelar, setMostrarCancelar] = useState(false);
-  const [tabActiva, setTabActiva] = useState<'checklist' | 'pendientes-sap'>('checklist');
   const hayAlgoPesado = checklist?.ingredientes?.some((ing: any) => ing.pesado) ?? false;
   const [showMO, setShowMO] = useState(false);
   const [editando, setEditando] = useState<number | null>(null);
@@ -489,38 +487,6 @@ export const PesajeMasa: React.FC = () => {
           }}
         />
 
-        {esRolEditor && (
-          <div className="flex gap-2 border-b border-gray-200">
-            <button
-              onClick={() => setTabActiva('checklist')}
-              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
-                tabActiva === 'checklist'
-                  ? 'border-blue-600 text-blue-700'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              Checklist de pesaje
-            </button>
-            <button
-              onClick={() => setTabActiva('pendientes-sap')}
-              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
-                tabActiva === 'pendientes-sap'
-                  ? 'border-blue-600 text-blue-700'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              Pendientes SAP
-            </button>
-          </div>
-        )}
-
-        {tabActiva === 'pendientes-sap' && esRolEditor && (
-          <Card>
-            <PendientesSAPPanel />
-          </Card>
-        )}
-
-        {tabActiva === 'checklist' && (
         <>
         {/* Header */}
         <div className="bg-white rounded-lg shadow-sm p-6">
@@ -1028,11 +994,9 @@ export const PesajeMasa: React.FC = () => {
           </div>
         </Card>
         </>
-        )}
 
         {/* Botones de acción — sticky (la acción principal "Confirmar Pesaje" ya
             vive en BarraNavegacionFases arriba; esta barra cubre las secundarias) */}
-        {tabActiva === 'checklist' && (
         <div className="sticky bottom-0 z-10 bg-gray-50 border-t border-gray-200 px-4 py-3 -mx-6 flex justify-end">
           <div className="flex gap-3">
             {puedeEditar && (
@@ -1073,7 +1037,6 @@ export const PesajeMasa: React.FC = () => {
             )}
           </div>
         </div>
-        )}
         {showMO && <ModalMO masaId={Number(masaId)} fase="PESAJE" onClose={() => setShowMO(false)} />}
         {mostrarAjustes && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">

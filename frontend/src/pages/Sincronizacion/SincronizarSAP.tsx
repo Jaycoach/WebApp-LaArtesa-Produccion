@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { Card, Button } from '@/components/common';
+import { useAuthStore } from '@/store';
+import { PendientesSAPPanel } from '@/components/sap/PendientesSAPPanel';
 import {
   useSincronizarBOM,
   useSincronizarSAP,
@@ -8,6 +10,10 @@ import {
 } from '@/hooks/useMasas';
 
 export const SincronizarSAP: React.FC = () => {
+  const usuario = useAuthStore((state) => state.user);
+  const esAdminOSupervisor = ['admin', 'supervisor', 'ADMIN', 'SUPERVISOR'].includes(usuario?.rol || '');
+  const [tab, setTab] = useState<'sincronizacion' | 'pendientes-sap'>('sincronizacion');
+
   const [fecha, setFecha] = useState<string>(
     new Date().toISOString().split('T')[0]
   );
@@ -137,6 +143,41 @@ export const SincronizarSAP: React.FC = () => {
         </p>
       </div>
 
+      {esAdminOSupervisor && (
+        <div className="border-b border-gray-200">
+          <nav className="-mb-px flex space-x-6">
+            <button
+              onClick={() => setTab('sincronizacion')}
+              className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+                tab === 'sincronizacion'
+                  ? 'border-primary-600 text-primary-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Sincronización
+            </button>
+            <button
+              onClick={() => setTab('pendientes-sap')}
+              className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+                tab === 'pendientes-sap'
+                  ? 'border-primary-600 text-primary-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Pendientes SAP
+            </button>
+          </nav>
+        </div>
+      )}
+
+      {tab === 'pendientes-sap' && esAdminOSupervisor && (
+        <Card>
+          <PendientesSAPPanel />
+        </Card>
+      )}
+
+      {tab === 'sincronizacion' && (
+      <>
       {/* 1. BOM completo */}
       <Card title="1. Recetas y Atributos — todos los productos">
         <div className="space-y-4">
@@ -318,6 +359,8 @@ export const SincronizarSAP: React.FC = () => {
           )}
         </div>
       </Card>
+      </>
+      )}
     </div>
   );
 };

@@ -351,13 +351,45 @@ const updateIngrediente = async (req, res, next) => {
 };
 
 /**
- * Clasifica un mensaje de error de SAP como 'CONEXION' (Service Layer
- * inalcanzable — no es un rechazo de negocio, no debe bloquear el pesaje)
- * o 'NEGOCIO' (stock insuficiente, lote inexistente, etc. — sigue bloqueando).
+ * Clasifica un error de SAP en una de tres categorías:
+ *  - 'CONEXION': Service Layer inalcanzable (red caída, timeout, DNS). No es
+ *    un rechazo de negocio — no debe bloquear el pesaje.
+ *  - 'AUTENTICACION': la sesión SAP nunca se estableció por una razón que NO
+ *    es de red (credenciales de integración inválidas/vencidas, usuario
+ *    bloqueado en SAP, CompanyDB mal configurada). SAP nunca llegó a
+ *    procesar el documento — es una caída de infraestructura tan real como
+ *    CONEXION, no un rechazo de negocio del documento en sí, así que se
+ *    trata IGUAL que CONEXION (pendiente_sap = true).
+ *  - 'NEGOCIO': SAP sí procesó el documento y lo rechazó (stock
+ *    insuficiente, lote inexistente, etc.) — sigue bloqueando.
+ *
+ * Usa `err.code` (señal estructurada de axios/Node, ej. 'ECONNREFUSED')
+ * cuando está disponible, además del regex sobre el mensaje — el regex solo
+ * es necesario porque sap.service.js re-envuelve algunos errores en un
+ * `new Error(...)` de texto libre antes de que lleguen hasta acá.
  */
-const clasificarErrorSAP = (mensaje) => {
+const CODIGOS_RED_SAP = new Set([
+  'ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET', 'ENOTFOUND', 'ECONNABORTED', 'EAI_AGAIN',
+]);
+
+const clasificarErrorSAP = (mensaje, err) => {
+  const codigoRed = err?.code || err?.cause?.code;
+  if (codigoRed && CODIGOS_RED_SAP.has(codigoRed)) return 'CONEXION';
+
   const patronesConexion = /ECONNREFUSED|ETIMEDOUT|ECONNRESET|ENOTFOUND|Couldn't connect to server|timeout/i;
-  return patronesConexion.test(mensaje || '') ? 'CONEXION' : 'NEGOCIO';
+  if (patronesConexion.test(mensaje || '')) return 'CONEXION';
+
+  // La sesión SAP falló en login() (ver sap.service.js) por una razón que ya
+  // descartamos que sea de red arriba — es un fallo de autenticación real
+  // (credenciales/usuario/CompanyDB), no un rechazo de negocio de ningún
+  // documento (SAP nunca llegó a ver el InventoryGenExit).
+  const statusLogin = err?.response?.status || err?.cause?.response?.status;
+  const esFalloDeLogin = /^Error de autenticación SAP:/i.test(mensaje || '');
+  if (esFalloDeLogin || statusLogin === 401 || statusLogin === 403) {
+    return 'AUTENTICACION';
+  }
+
+  return 'NEGOCIO';
 };
 
 /**
@@ -552,11 +584,13 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
     logger.error(`SAP error detalle masa ${masaId}:`, JSON.stringify(err?.response?.data || {}));
     logger.error(`Error enviando InventoryGenExits para masa ${masaId}: ${sapMsg}`);
 
-    const tipoError = clasificarErrorSAP(sapMsg);
+    const tipoError = clasificarErrorSAP(sapMsg, err);
 
-    if (tipoError === 'CONEXION') {
-      // Service Layer inalcanzable — no es un rechazo de negocio. No bloqueamos
-      // el pesaje: se deja el consumo como PENDING para reenvío posterior desde
+    if (tipoError === 'CONEXION' || tipoError === 'AUTENTICACION') {
+      // Service Layer inalcanzable, o la sesión SAP no se pudo establecer por
+      // credenciales/CompanyDB (AUTENTICACION) — en ninguno de los dos casos
+      // es un rechazo de negocio del documento. No bloqueamos el pesaje: se
+      // deja el consumo como PENDING para reenvío posterior desde
       // /api/pesaje/sap-pendientes. Las rows ya se construyeron ANTES del intento
       // de red, así que se puede descontar el inventario local igual que en éxito.
       try {
@@ -576,7 +610,7 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
       } catch (logErr) {
         logger.error(`Error logueando PENDING InventoryGenExits masa ${masaId}:`, logErr.message);
       }
-      logger.warn(`SAP no disponible (conexión) para masa ${masaId}: ${sapMsg}. Pesaje continúa con sincronización pendiente.`);
+      logger.warn(`SAP no disponible (${tipoError.toLowerCase()}) para masa ${masaId}: ${sapMsg}. Pesaje continúa con sincronización pendiente.`);
       return { success: true, pendiente_sap: true, docEntry: null, docNum: null, rows };
     }
 
@@ -1384,7 +1418,10 @@ const confirmarAjustesPendientes = async (req, res, next) => {
 
 /**
  * @desc    Lista transmisiones de pesaje a SAP pendientes de sincronizar
- *          (quedaron PENDING porque el Service Layer estaba inalcanzable).
+ *          (quedaron PENDING porque el Service Layer estaba inalcanzable, o
+ *          la sesión SAP no se pudo autenticar), AGRUPADAS POR FECHA DE
+ *          PRODUCCIÓN de la masa — vive como sección de Sincronizar SAP,
+ *          no dentro de Pesaje.
  * @route   GET /api/pesaje/sap-pendientes
  * @access  Private (admin, supervisor)
  */
@@ -1393,13 +1430,33 @@ const getPendientesSAP = async (req, res, next) => {
     const result = await db.query(
       `SELECT ssl.id, ssl.masa_id, ssl.request_payload, ssl.error_message,
               ssl.fecha_operacion, ssl.intentos, ssl.usuario_id,
-              mp.codigo_masa, mp.tipo_masa, mp.lote_produccion, mp.fase_actual
+              mp.codigo_masa, mp.tipo_masa, mp.lote_produccion, mp.fase_actual,
+              mp.fecha_produccion
        FROM sap_sync_log ssl
        LEFT JOIN masas_produccion mp ON mp.id = ssl.masa_id
        WHERE ssl.estado = 'PENDING' AND ssl.tipo_operacion = 'GOODS_ISSUE_PESAJE'
-       ORDER BY ssl.fecha_operacion ASC`
+       ORDER BY mp.fecha_produccion DESC NULLS LAST, ssl.fecha_operacion ASC`
     );
-    res.json({ success: true, data: result.rows });
+
+    // Agrupar en JS (no en SQL) — más simple de leer y de mantener que un
+    // array_agg/json_agg, y el volumen esperado (pendientes reales) es bajo.
+    const grupos = new Map();
+    for (const row of result.rows) {
+      // fecha_produccion es DATE — Postgres ya la devuelve como string 'YYYY-MM-DD'
+      // vía el driver de node-postgres, no como objeto Date, así que no hace
+      // falta convertir timezone.
+      const clave = row.fecha_produccion || 'sin_fecha';
+      if (!grupos.has(clave)) grupos.set(clave, []);
+      grupos.get(clave).push(row);
+    }
+
+    const data = Array.from(grupos.entries()).map(([fecha_produccion, masas]) => ({
+      fecha_produccion,
+      total: masas.length,
+      masas,
+    }));
+
+    res.json({ success: true, data });
   } catch (error) {
     logger.error('Error en getPendientesSAP:', error);
     next(error);
@@ -1408,19 +1465,52 @@ const getPendientesSAP = async (req, res, next) => {
 
 /**
  * @desc    Reenvía a SAP uno o más registros de pesaje pendientes de sincronizar,
- *          reutilizando el request_payload tal cual quedó guardado. NO vuelve a
- *          descontar inventario local — ya se descontó en el pesaje original.
+ *          reutilizando el request_payload tal cual quedó guardado (NO se
+ *          reconstruye llamando a enviarInventoryGenExits de nuevo: los lotes
+ *          reservados en pesaje_lotes_consumo ya quedaron marcados
+ *          confirmado_sap=true al momento del pesaje original, así que
+ *          recalcular el payload perdería los BatchNumbers — reenviar el
+ *          documento ya armado es lo correcto). NO vuelve a descontar
+ *          inventario local — ya se descontó en el pesaje original.
+ *
+ *          Acepta `ids` (array explícito de sap_sync_log.id) o
+ *          `fecha_produccion` ('YYYY-MM-DD', o 'todas') para reintentar en
+ *          lote todo lo pendiente de un día de producción — la UI vive en
+ *          Sincronizar SAP, agrupada por fecha.
  * @route   POST /api/pesaje/sap-pendientes/reenviar
  * @access  Private (admin, supervisor)
  */
 const reenviarPendientesSAP = async (req, res, next) => {
   try {
-    const { ids } = req.body;
+    const { fecha_produccion } = req.body;
+    let { ids } = req.body;
+
     if (!Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Debe indicar al menos un id de sap_sync_log a reintentar.',
-      });
+      if (!fecha_produccion) {
+        return res.status(400).json({
+          success: false,
+          message: 'Debe indicar "ids" (array) o "fecha_produccion" ("YYYY-MM-DD", o "todas").',
+        });
+      }
+      const query = fecha_produccion === 'todas'
+        ? `SELECT ssl.id FROM sap_sync_log ssl
+           WHERE ssl.estado = 'PENDING' AND ssl.tipo_operacion = 'GOODS_ISSUE_PESAJE'`
+        : `SELECT ssl.id FROM sap_sync_log ssl
+           JOIN masas_produccion mp ON mp.id = ssl.masa_id
+           WHERE ssl.estado = 'PENDING' AND ssl.tipo_operacion = 'GOODS_ISSUE_PESAJE'
+             AND mp.fecha_produccion = $1`;
+      const params = fecha_produccion === 'todas' ? [] : [fecha_produccion];
+      const idsResult = await db.query(query, params);
+      ids = idsResult.rows.map((r) => r.id);
+
+      if (ids.length === 0) {
+        return res.json({
+          success: true,
+          message: 'No hay transmisiones pendientes para ese grupo.',
+          data: [],
+          resumen: { total: 0, exitosos: 0, fallidos: 0 },
+        });
+      }
     }
 
     const pendientesResult = await db.query(
@@ -1480,16 +1570,16 @@ const reenviarPendientesSAP = async (req, res, next) => {
           || err?.response?.data?.error?.message
           || err?.response?.data?.message
           || err.message;
-        const tipoError = clasificarErrorSAP(sapMsg);
+        const tipoError = clasificarErrorSAP(sapMsg, err);
 
-        if (tipoError === 'CONEXION') {
+        if (tipoError === 'CONEXION' || tipoError === 'AUTENTICACION') {
           await db.query(
             `UPDATE sap_sync_log
              SET intentos = intentos + 1, error_message = $1, tiempo_respuesta = $2
              WHERE id = $3`,
             [sapMsg, tiempoRespuesta, log.id]
           );
-          logger.warn(`Reenvío SAP sigue fallando por conexión, sap_sync_log ${log.id} permanece PENDING: ${sapMsg}`);
+          logger.warn(`Reenvío SAP sigue fallando por ${tipoError.toLowerCase()}, sap_sync_log ${log.id} permanece PENDING: ${sapMsg}`);
           resultados.push({ id: log.id, masa_id: log.masa_id, success: false, pendiente_sap: true, error: sapMsg });
         } else {
           await db.query(
@@ -1504,10 +1594,12 @@ const reenviarPendientesSAP = async (req, res, next) => {
       }
     }
 
+    const exitosos = resultados.filter((r) => r.success).length;
     res.json({
       success: true,
-      message: `Reintento procesado: ${resultados.filter(r => r.success).length}/${resultados.length} exitoso(s).`,
+      message: `Reintento procesado: ${exitosos}/${resultados.length} exitoso(s).`,
       data: resultados,
+      resumen: { total: resultados.length, exitosos, fallidos: resultados.length - exitosos },
     });
   } catch (error) {
     logger.error('Error en reenviarPendientesSAP:', error);
