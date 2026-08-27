@@ -33,6 +33,7 @@ export const API_CONFIG = {
       CREATE: '/users',
       LIST: '/users',
       UPDATE: (id: number) => `/users/${id}`,
+      UNLOCK: (id: number) => `/users/${id}/unlock`,
     },
 
     // Masas

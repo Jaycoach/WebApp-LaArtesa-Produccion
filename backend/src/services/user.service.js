@@ -7,6 +7,26 @@ const bcrypt = require('bcrypt');
 const pool = require('../database/connection');
 const logger = require('../utils/logger');
 
+/**
+ * Bloquea una operación que dejaría al sistema sin ningún admin activo.
+ * Debe llamarse dentro de la misma transacción que la mutación, DESPUÉS de
+ * un `SELECT ... FOR UPDATE` sobre la fila del usuario objetivo (evita que
+ * dos operaciones concurrentes sobre los dos últimos admins pasen ambas el
+ * chequeo). Solo actúa si el objetivo es HOY un admin activo — si no lo es,
+ * no hay nada que proteger.
+ */
+const ensureNoQuedaSinAdmin = async (client, targetId, targetRolActual, targetActivoActual) => {
+  if ((targetRolActual || '').toUpperCase() !== 'ADMIN' || !targetActivoActual) return;
+
+  const otrosAdmins = await client.query(
+    "SELECT COUNT(*) AS total FROM usuarios WHERE rol = 'ADMIN' AND activo = true AND id != $1",
+    [targetId],
+  );
+  if (parseInt(otrosAdmins.rows[0].total, 10) === 0) {
+    throw new Error('No puedes dejar el sistema sin ningún administrador activo.');
+  }
+};
+
 class UserService {
   /**
    * Listar todos los usuarios con paginación y filtros
@@ -211,14 +231,26 @@ class UserService {
     const client = await pool.getClient();
 
     try {
-      // Verificar si el usuario existe
+      await client.query('BEGIN');
+
+      // Verificar si el usuario existe — FOR UPDATE: si este cambio de rol
+      // se combina con el chequeo de "último admin", necesitamos bloquear
+      // la fila para que dos operaciones concurrentes sobre los dos
+      // últimos admins no pasen ambas el conteo antes de que la otra
+      // confirme su UPDATE.
       const userExists = await client.query(
-        'SELECT id FROM usuarios WHERE id = $1',
+        'SELECT id, rol, activo FROM usuarios WHERE id = $1 FOR UPDATE',
         [userId],
       );
 
       if (userExists.rows.length === 0) {
         throw new Error('Usuario no encontrado');
+      }
+
+      // Si se está quitando el rol admin a quien hoy es el único admin
+      // activo, bloquear — el sistema no puede quedar sin ningún admin.
+      if (rol !== undefined && rol !== 'ADMIN') {
+        await ensureNoQuedaSinAdmin(client, userId, userExists.rows[0].rol, userExists.rows[0].activo);
       }
 
       // Verificar si el email ya está en uso
@@ -234,7 +266,7 @@ class UserService {
       }
 
       const result = await client.query(
-        `UPDATE usuarios 
+        `UPDATE usuarios
          SET nombre_completo = COALESCE($1, nombre_completo),
              email = COALESCE($2, email),
              rol = COALESCE($3, rol),
@@ -244,10 +276,13 @@ class UserService {
         [nombre_completo, email, rol, userId],
       );
 
+      await client.query('COMMIT');
+
       logger.info(`Usuario actualizado: ID ${userId}`);
 
       return result.rows[0];
     } catch (error) {
+      await client.query('ROLLBACK');
       logger.error('Error al actualizar usuario:', error);
       throw error;
     } finally {
@@ -264,15 +299,17 @@ class UserService {
     try {
       await client.query('BEGIN');
 
-      // Verificar que el usuario existe
+      // Verificar que el usuario existe (FOR UPDATE, ver nota en updateUser)
       const userExists = await client.query(
-        'SELECT id FROM usuarios WHERE id = $1',
+        'SELECT id, rol, activo FROM usuarios WHERE id = $1 FOR UPDATE',
         [userId],
       );
 
       if (userExists.rows.length === 0) {
         throw new Error('Usuario no encontrado');
       }
+
+      await ensureNoQuedaSinAdmin(client, userId, userExists.rows[0].rol, userExists.rows[0].activo);
 
       // Desactivar usuario en lugar de eliminarlo
       await client.query(
@@ -339,18 +376,24 @@ class UserService {
     try {
       await client.query('BEGIN');
 
+      // FOR UPDATE, ver nota en updateUser
+      const userExists = await client.query(
+        'SELECT id, rol, activo FROM usuarios WHERE id = $1 FOR UPDATE',
+        [userId],
+      );
+      if (userExists.rows.length === 0) {
+        throw new Error('Usuario no encontrado');
+      }
+      await ensureNoQuedaSinAdmin(client, userId, userExists.rows[0].rol, userExists.rows[0].activo);
+
       // Desactivar usuario
       const result = await client.query(
-        `UPDATE usuarios 
-         SET activo = false, fecha_actualizacion = NOW() 
+        `UPDATE usuarios
+         SET activo = false, fecha_actualizacion = NOW()
          WHERE id = $1
          RETURNING id, username, activo`,
         [userId],
       );
-
-      if (result.rows.length === 0) {
-        throw new Error('Usuario no encontrado');
-      }
 
       // Revocar sesiones activas
       await client.query(

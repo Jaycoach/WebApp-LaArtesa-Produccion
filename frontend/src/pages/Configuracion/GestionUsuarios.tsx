@@ -14,7 +14,23 @@ interface Usuario {
   activo: boolean;
   email_verificado: boolean;
   fecha_creacion: string;
+  intentos_fallidos?: number;
+  bloqueado_hasta?: string | null;
 }
+
+// Jerarquía de roles — debe reflejar backend/src/utils/roleHierarchy.js.
+// Esta es una capa adicional de UX (ocultar acciones que el backend de
+// todas formas va a rechazar); la protección real vive en el backend.
+const RANGO_ROL: Record<string, number> = {
+  ADMIN: 3,
+  SUPERVISOR: 2,
+  OPERARIO: 1,
+  CALIDAD: 1,
+  AUDITOR: 1,
+};
+
+const estaBloqueado = (u: Usuario) =>
+  !!u.bloqueado_hasta && new Date(u.bloqueado_hasta) > new Date();
 
 interface CrearUsuarioForm {
   username: string;
@@ -34,7 +50,28 @@ const ROLES_DISPONIBLES: { label: string; value: string }[] = [
 export const GestionUsuarios: React.FC = () => {
   const usuario = useAuthStore((state) => state.user);
   const actualizarUsuarioStore = useAuthStore((state) => state.updateUser);
-  const esAdmin = ['admin', 'supervisor', 'ADMIN', 'SUPERVISOR'].includes(usuario?.rol || '');
+  // esAdminOSupervisor: acceso a la sección de gestión de usuarios en general
+  // (crear, ver, aprobar). NO implica poder actuar sobre cualquier usuario —
+  // eso lo decide puedeModificar() fila por fila, y lo hace cumplir el
+  // backend de verdad (ver roleHierarchy.js). Antes esta variable se llamaba
+  // "esAdmin" pero incluía a supervisor — nombre corregido para no confundir
+  // "tiene acceso a la sección" con "es admin real".
+  const esAdminOSupervisor = ['admin', 'supervisor', 'ADMIN', 'SUPERVISOR'].includes(usuario?.rol || '');
+  const esAdminReal = (usuario?.rol || '').toUpperCase() === 'ADMIN';
+  const miRango = RANGO_ROL[(usuario?.rol || '').toUpperCase()] || 0;
+
+  // Capa adicional de UX — la protección real es del backend. Un admin
+  // puede modificar a cualquiera; el resto solo a rango estrictamente
+  // inferior al propio.
+  const puedeModificar = (target: Usuario) =>
+    esAdminReal || miRango > (RANGO_ROL[(target.rol || '').toUpperCase()] || 0);
+
+  // Solo un admin real puede asignar el rol admin (ver roleHierarchy.js).
+  const rolesParaSelect = esAdminReal
+    ? ROLES_DISPONIBLES
+    : ROLES_DISPONIBLES.filter((r) => r.value !== 'admin');
+
+  const [desbloqueando, setDesbloqueando] = useState<number | null>(null);
 
   const [pendientes, setPendientes] = useState<Usuario[]>([]);
   const [todos, setTodos] = useState<Usuario[]>([]);
@@ -214,6 +251,24 @@ export const GestionUsuarios: React.FC = () => {
     }
   };
 
+  const desbloquear = async (id: number) => {
+    setDesbloqueando(id);
+    try {
+      const res = await apiService.post(API_CONFIG.ENDPOINTS.USERS.UNLOCK(id), {});
+      if (res.success) {
+        setSuccess('Usuario desbloqueado.');
+        await cargarTodos();
+      } else {
+        setError(res.message || 'Error al desbloquear');
+      }
+    } catch (e: any) {
+      setError(e.message || 'Error al desbloquear');
+    } finally {
+      setDesbloqueando(null);
+      limpiarMensajes();
+    }
+  };
+
   const crearUsuario = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreando(true);
@@ -325,7 +380,7 @@ export const GestionUsuarios: React.FC = () => {
           >
             Mi contraseña
           </button>
-          {esAdmin && (
+          {esAdminOSupervisor && (
             <button
               onClick={() => setTab('crear')}
               className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
@@ -402,15 +457,29 @@ export const GestionUsuarios: React.FC = () => {
                     }`}>
                       {u.activo ? 'Activo' : 'Inactivo'}
                     </span>
+                    {estaBloqueado(u) && (
+                      <span
+                        className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700"
+                        title={`Bloqueado hasta ${new Date(u.bloqueado_hasta as string).toLocaleString()}`}
+                      >
+                        Bloqueado{u.intentos_fallidos ? ` (${u.intentos_fallidos} intentos)` : ''}
+                      </span>
+                    )}
                   </div>
                   <p className="text-sm text-gray-500">@{u.username} · {u.email}</p>
                 </div>
-                {esAdmin && u.username !== 'admin' && (
+                {esAdminOSupervisor && puedeModificar(u) && (
                   <div className="flex gap-2">
                     <Button variant="outline" size="sm"
                       onClick={() => abrirEdicion(u)}>
                       Editar usuario
                     </Button>
+                    {estaBloqueado(u) && (
+                      <Button variant="secondary" size="sm" isLoading={desbloqueando === u.id}
+                        onClick={() => desbloquear(u.id)}>
+                        Desbloquear
+                      </Button>
+                    )}
                     {!u.activo ? (
                       <Button variant="success" size="sm" isLoading={accionando === u.id}
                         onClick={() => aprobar(u.id)}>
@@ -431,11 +500,13 @@ export const GestionUsuarios: React.FC = () => {
       )}
 
       {/* Tab: Crear */}
-      {tab === 'crear' && esAdmin && (
+      {tab === 'crear' && esAdminOSupervisor && (
         <Card>
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Nuevo usuario</h3>
           <p className="text-sm text-gray-500 mb-6">
-            El usuario quedará activo inmediatamente. Comparte la contraseña temporal con el operario para que pueda ingresar.
+            El usuario queda pendiente de aprobación (visible en la pestaña "Pendientes de aprobación")
+            hasta que verifique su correo y un admin o supervisor lo apruebe. Comparte la contraseña
+            temporal con el operario para que pueda ingresar.
           </p>
           <form onSubmit={crearUsuario} className="space-y-4 max-w-lg">
             <div className="grid grid-cols-2 gap-4">
@@ -485,7 +556,7 @@ export const GestionUsuarios: React.FC = () => {
                   onChange={(e) => setForm({ ...form, rol: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
                 >
-                  {ROLES_DISPONIBLES.map((r) => (
+                  {rolesParaSelect.map((r) => (
                     <option key={r.value} value={r.value}>{r.label}</option>
                   ))}
                 </select>
@@ -616,7 +687,7 @@ export const GestionUsuarios: React.FC = () => {
               onChange={(e) => setRolEditando(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 mb-2"
             >
-              {ROLES_DISPONIBLES.map((r) => (
+              {rolesParaSelect.map((r) => (
                 <option key={r.value} value={r.value}>{r.label}</option>
               ))}
             </select>

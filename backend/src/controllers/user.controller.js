@@ -135,6 +135,7 @@ class UserController {
         'Usuario no encontrado',
         'El usuario o email ya existe',
         'El email ya está en uso',
+        'No puedes dejar el sistema sin ningún administrador activo.',
       ];
       if (businessErrors.includes(error.message)) {
         return res.status(400).json({ success: false, message: error.message });
@@ -171,6 +172,7 @@ class UserController {
         'Usuario no encontrado',
         'El usuario o email ya existe',
         'El email ya está en uso',
+        'No puedes dejar el sistema sin ningún administrador activo.',
       ];
       if (businessErrors.includes(error.message)) {
         return res.status(400).json({ success: false, message: error.message });
@@ -237,6 +239,7 @@ class UserController {
         'Usuario no encontrado',
         'El usuario o email ya existe',
         'El email ya está en uso',
+        'No puedes dejar el sistema sin ningún administrador activo.',
       ];
       if (businessErrors.includes(error.message)) {
         return res.status(400).json({ success: false, message: error.message });

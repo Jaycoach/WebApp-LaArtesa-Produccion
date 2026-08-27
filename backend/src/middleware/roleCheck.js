@@ -4,6 +4,8 @@
  */
 
 const logger = require('../utils/logger');
+const db = require('../database/connection');
+const { canModifyTarget, canAssignRole } = require('../utils/roleHierarchy');
 
 /**
  * Jerarquía de roles (de mayor a menor privilegio)
@@ -133,11 +135,65 @@ const canModifyResource = (req, res, next) => {
   }
 };
 
+/**
+ * Verifica que quien hace la petición pueda modificar al usuario objetivo
+ * (:id de la ruta) según la jerarquía de roles real (ver utils/roleHierarchy).
+ * Un admin puede modificar a cualquiera; cualquier otro rol solo puede
+ * modificar a alguien de rango estrictamente inferior al suyo (nunca a un
+ * par ni a un superior). Se consulta el rol REAL y actual del usuario
+ * objetivo en BD — nunca el que venga en el body de la petición.
+ */
+const requireCanModifyTarget = async (req, res, next) => {
+  try {
+    const targetId = parseInt(req.params.id, 10);
+    if (!targetId) return next(); // la validación de :id se encarga de esto
+
+    const result = await db.query('SELECT rol FROM usuarios WHERE id = $1', [targetId]);
+    if (result.rows.length === 0) return next(); // 404 lo maneja el controller/servicio
+
+    const targetRol = result.rows[0].rol;
+    const requesterRol = req.user?.rol;
+
+    if (!canModifyTarget(requesterRol, targetRol)) {
+      logger.warn(`Usuario ${req.user.username} (${requesterRol}) intentó modificar a usuario id=${targetId} (${targetRol}) — jerarquía insuficiente`);
+      return res.status(403).json({
+        success: false,
+        message: 'No tienes permisos para modificar a un usuario con rol igual o superior al tuyo.',
+      });
+    }
+    next();
+  } catch (error) {
+    logger.error('Error en requireCanModifyTarget:', error);
+    return res.status(500).json({ success: false, message: 'Error al verificar permisos' });
+  }
+};
+
+/**
+ * Bloquea la asignación del rol admin a cualquiera que no venga de un
+ * admin (crear o actualizar usuario). No decide nada sobre otros roles —
+ * ver utils/roleHierarchy.canAssignRole.
+ */
+const preventRoleEscalation = (req, res, next) => {
+  const { rol } = req.body;
+  if (!rol) return next();
+
+  if (!canAssignRole(req.user?.rol, rol)) {
+    logger.warn(`Usuario ${req.user.username} (${req.user.rol}) intentó asignar el rol '${rol}' sin ser admin`);
+    return res.status(403).json({
+      success: false,
+      message: 'Solo un administrador puede asignar el rol admin.',
+    });
+  }
+  next();
+};
+
 module.exports = {
   checkRole,
   checkMinimumRole,
   isAdmin,
   isAdminOrSupervisor,
   canModifyResource,
+  requireCanModifyTarget,
+  preventRoleEscalation,
   roleHierarchy,
 };
