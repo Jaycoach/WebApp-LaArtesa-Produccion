@@ -181,7 +181,7 @@ echo "PREP: crear usuario de prueba no productivo"
 echo "===================================================="
 # La contraseña se pasa por stdin al proceso de node (no como argumento de
 # línea de comandos) para no dejarla visible en `ps` durante el hasheo.
-HASH=$(printf '%s' "$TEST_PASSWORD" | run_node -e "
+HASH=$(cd "$REPO_ROOT/backend" && printf '%s' "$TEST_PASSWORD" | run_node -e "
 let pw = '';
 process.stdin.on('data', d => pw += d);
 process.stdin.on('end', () => {
