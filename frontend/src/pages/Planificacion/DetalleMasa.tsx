@@ -575,7 +575,7 @@ export const DetalleMasa: React.FC = () => {
                                   value={ajuste.delta}
                                   onChange={e => setAjusteCampo(producto.id, 'delta', e.target.value)}
                                   className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:border-indigo-400 text-center"
-                                  title="Ajuste en paquetes. Si no modificas, no se aplicará ningún ajuste automático al aprobar."
+                                  title="Ajuste en paquetes. Si no modificas, se aplicará +1 paq por defecto al aprobar."
                                 />
                                 <span className="text-xs text-gray-400">paq</span>
                                 <button
