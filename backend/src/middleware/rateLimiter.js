@@ -13,6 +13,7 @@
  */
 
 const rateLimit = require('express-rate-limit');
+const jwt = require('jsonwebtoken');
 const config = require('../config');
 const logger = require('../utils/logger');
 
@@ -91,7 +92,19 @@ const generalLimiter = rateLimit({
     const excludedPaths = ['/health', '/api-docs', '/swagger'];
     return excludedPaths.some((path) => req.path.startsWith(path));
   },
-  keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip,
+  keyGenerator: (req) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : req.cookies?.token;
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, config.jwt.secret);
+        if (decoded?.id) return `user_${decoded.id}`;
+      } catch (err) {
+        // Token inválido/expirado: cae a IP, no bloquea la petición aquí
+      }
+    }
+    return `ip_${req.headers['x-forwarded-for'] || req.ip}`;
+  },
 });
 
 /**
