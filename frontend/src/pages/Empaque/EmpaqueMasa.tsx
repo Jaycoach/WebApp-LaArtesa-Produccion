@@ -828,8 +828,11 @@ const PanelEmpaqueMasa: React.FC<{
   const totalProductos = masa.ovs.reduce((s, o) => s + o.productos.length, 0);
   const totalProgramadas = masa.ovs.reduce((s, o) =>
     s + o.productos.reduce((ss, p) => ss + (p.unidades_programadas || 0), 0), 0);
+  // A2: "Divididas" muestra unidades_producidas (evolutivo, mismo campo que
+  // prellena DivisionMasa.tsx), NO cantidad_divisiones (histórico crudo de
+  // División, que puede quedar obsoleto tras Horneado -- ver masa 840/PANPAQ16).
   const totalDivision = masa.ovs.reduce((s, o) =>
-    s + o.productos.reduce((ss, p) => ss + (p.unidades_divididas || 0), 0), 0);
+    s + o.productos.reduce((ss, p) => ss + (p.unidades_producidas || 0), 0), 0);
   const totalHorneadas = masa.ovs.reduce((s, o) =>
     s + o.productos.reduce((ss, p) => ss + (p.unidades_horneadas || 0), 0), 0);
   const totalEmpacadas = Object.values(detalles).reduce((s, v) => s + (parseInt(v.emp) || 0), 0);
@@ -1050,7 +1053,10 @@ const PanelEmpaqueMasa: React.FC<{
                   // veía ninguna advertencia.
                   const xPaqConfiable = panesPorPaquete > 1;
                   const panesEmpacados = empacadas * panesPorPaquete;
-                  const panesEsperados = p.unidades_divididas > 0 ? p.unidades_divididas : p.unidades_horneadas;
+                  // H4b (masa 842): precedencia debe ser horneadas > divididas, igual que
+                  // panesReferencia en la construcción de ovsMap (arriba) — divididas es el
+                  // dato de División (puede quedar obsoleto si Horneado horneó más/menos).
+                  const panesEsperados = p.unidades_horneadas > 0 ? p.unidades_horneadas : p.unidades_divididas;
                   const mermaCalculada = panesEsperados - panesEmpacados;
                   const faltante = p.unidades_referencia - panesEmpacados;
                   // Sugerido del input SIEMPRE en paquetes, no en unidades_referencia (panes)
@@ -1073,9 +1079,9 @@ const PanelEmpaqueMasa: React.FC<{
                       </td>
                       <td className="p-2 text-right">
                         <span className={`font-mono font-medium ${
-                          p.division_completada && p.unidades_divididas > 0 ? 'text-blue-700' : 'text-gray-400'
+                          p.division_completada && p.unidades_producidas > 0 ? 'text-blue-700' : 'text-gray-400'
                         }`}>
-                          {p.division_completada && p.unidades_divididas > 0 ? p.unidades_divididas : '—'}
+                          {p.division_completada && p.unidades_producidas > 0 ? p.unidades_producidas : '—'}
                         </span>
                         {!p.division_completada && (
                           <div className="text-xs text-gray-400">Sin división</div>
@@ -1775,8 +1781,10 @@ export const EmpaqueMasa: React.FC = () => {
       const xSAP = parseFloat(String(p.unidades_por_paquete || 0));
       const xNombre = p.producto_nombre?.match(/ X ?(\d+)/i);
       const xPaq = xSAP > 1 ? xSAP : (xNombre ? parseInt(xNombre[1]) : 1);
-      // Paquetes programados = unidades_programadas (ya incluye delta)
-      const paquetesProgramados = p.unidades_programadas || 0;
+      // Paquetes programados: mismo criterio que DivisionMasa.tsx (getMinimoRequerido)
+      // -- unidades_ajustadas si existe y es > 0, si no unidades_programadas. Antes leía
+      // solo unidades_programadas, campo que getEmpaqueInfo nunca devolvía -> "Pedidas 0".
+      const paquetesProgramados = (parseInt(p.unidades_ajustadas) > 0 ? p.unidades_ajustadas : p.unidades_programadas) || 0;
       // Panes: para referencia interna en fases de división/horneado
       const panesDivididos = p.division_completada && (p.cantidad_divisiones || 0) > 0
         ? parseInt(p.cantidad_divisiones)
@@ -1879,9 +1887,12 @@ export const EmpaqueMasa: React.FC = () => {
     if (prodRef) {
       const empVal = parseInt(vals.emp) || 0;
       const xPaqP = Number(prodRef.unidades_por_paquete) > 0 ? Number(prodRef.unidades_por_paquete) : 1;
-      const panesReferenciaOV = (prodRef.unidades_divididas ?? 0) > 0
-        ? (prodRef.unidades_divididas ?? 0)
-        : (prodRef.unidades_horneadas ?? 0);
+      // H4b: horneadas > divididas (ver mismo fix en la tabla de detalle single-masa).
+      // NOTA: getEmpaqueByOV hoy no devuelve unidades_divididas ni unidades_horneadas
+      // -- ambos quedan en 0 en este flujo hasta que se amplíe esa query (ver informe).
+      const panesReferenciaOV = (prodRef.unidades_horneadas ?? 0) > 0
+        ? (prodRef.unidades_horneadas ?? 0)
+        : (prodRef.unidades_divididas ?? 0);
       if (esPosibleErrorPanes(empVal, prodRef.unidades_ajustadas, panesReferenciaOV, xPaqP)) {
         const continuar = window.confirm(
           `¿Seguro que son ${empVal} PAQUETES?\n\nParece que podrías haber escrito la cantidad de panes en vez de paquetes (se esperaban ~${prodRef.unidades_ajustadas} paquetes).\n\nAceptar = guardar así de todos modos · Cancelar = corregir el valor`
@@ -1901,7 +1912,8 @@ export const EmpaqueMasa: React.FC = () => {
             const emp = parseInt(vals.emp) || 0;
             const divididas = prod?.unidades_divididas ?? 0;
             const horneadas = prod?.unidades_horneadas ?? 0;
-            const base = divididas > 0 ? divididas : horneadas;
+            // H4b: horneadas > divididas.
+            const base = horneadas > 0 ? horneadas : divididas;
             return Math.max(0, base - emp);
           })(),
         }),
@@ -2222,7 +2234,8 @@ export const EmpaqueMasa: React.FC = () => {
                             const panesEmpacadosOV = empacadasEdit * panesPorPaqueteOV;
                             const divididasOV = p.unidades_divididas ?? 0;
                             const horneadasOV = p.unidades_horneadas ?? 0;
-                            const mermaCalculadaOV = (divididasOV > 0 ? divididasOV : horneadasOV) - panesEmpacadosOV;
+                            // H4b: horneadas > divididas.
+                            const mermaCalculadaOV = (horneadasOV > 0 ? horneadasOV : divididasOV) - panesEmpacadosOV;
                             const faltantes = p.unidades_ajustadas - empacadasEdit; // esto sí compara paquetes contra paquetes, queda igual
                             return (
                               <tr key={p.id} className="border-b hover:bg-gray-50">

@@ -237,7 +237,7 @@ exports.getEmpaqueInfo = async (req, res) => {
 
     const productosR = await db.query(
       `SELECT id, sap_item_code, producto_codigo, producto_nombre, presentacion,
-              gramaje_unitario, unidades_pedidas,
+              gramaje_unitario, unidades_pedidas, unidades_programadas,
               COALESCE(unidades_ajustadas, unidades_programadas) AS unidades_ajustadas,
               COALESCE(unidades_producidas, 0) AS unidades_producidas,
               COALESCE(cantidad_divisiones, 0) AS cantidad_divisiones,
