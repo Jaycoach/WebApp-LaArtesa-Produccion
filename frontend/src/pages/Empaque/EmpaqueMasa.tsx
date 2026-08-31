@@ -828,11 +828,15 @@ const PanelEmpaqueMasa: React.FC<{
   const totalProductos = masa.ovs.reduce((s, o) => s + o.productos.length, 0);
   const totalProgramadas = masa.ovs.reduce((s, o) =>
     s + o.productos.reduce((ss, p) => ss + (p.unidades_programadas || 0), 0), 0);
-  // A2: "Divididas" muestra unidades_producidas (evolutivo, mismo campo que
-  // prellena DivisionMasa.tsx), NO cantidad_divisiones (histórico crudo de
+  // A2: "Divididas" prioriza unidades_producidas (evolutivo, mismo campo que
+  // prellena DivisionMasa.tsx) sobre cantidad_divisiones (histórico crudo de
   // División, que puede quedar obsoleto tras Horneado -- ver masa 840/PANPAQ16).
+  // Fallback a cantidad_divisiones cuando unidades_producidas es 0 -- hay masas
+  // reales en EMPAQUE con registros_horneado legacy sin desglose por producto,
+  // donde unidades_producidas nunca se pobló; sin este fallback perderían el
+  // dato real de División (regresión detectada en validación staging, masa 429).
   const totalDivision = masa.ovs.reduce((s, o) =>
-    s + o.productos.reduce((ss, p) => ss + (p.unidades_producidas || 0), 0), 0);
+    s + o.productos.reduce((ss, p) => ss + ((p.unidades_producidas || 0) > 0 ? p.unidades_producidas : (p.unidades_divididas || 0)), 0), 0);
   const totalHorneadas = masa.ovs.reduce((s, o) =>
     s + o.productos.reduce((ss, p) => ss + (p.unidades_horneadas || 0), 0), 0);
   const totalEmpacadas = Object.values(detalles).reduce((s, v) => s + (parseInt(v.emp) || 0), 0);
@@ -1078,11 +1082,16 @@ const PanelEmpaqueMasa: React.FC<{
                         {p.unidades_programadas}
                       </td>
                       <td className="p-2 text-right">
-                        <span className={`font-mono font-medium ${
-                          p.division_completada && p.unidades_producidas > 0 ? 'text-blue-700' : 'text-gray-400'
-                        }`}>
-                          {p.division_completada && p.unidades_producidas > 0 ? p.unidades_producidas : '—'}
-                        </span>
+                        {(() => {
+                          const divididasDisplay = (p.unidades_producidas || 0) > 0 ? p.unidades_producidas : (p.unidades_divididas || 0);
+                          return (
+                            <span className={`font-mono font-medium ${
+                              p.division_completada && divididasDisplay > 0 ? 'text-blue-700' : 'text-gray-400'
+                            }`}>
+                              {p.division_completada && divididasDisplay > 0 ? divididasDisplay : '—'}
+                            </span>
+                          );
+                        })()}
                         {!p.division_completada && (
                           <div className="text-xs text-gray-400">Sin división</div>
                         )}
