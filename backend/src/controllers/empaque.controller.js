@@ -484,8 +484,8 @@ exports.actualizarDetalle = async (req, res) => {
         : 1;
       const panesEquivalentes = Math.round(unidades_empacadas * panesPorPaquete);
       await db.query(
-        `UPDATE productos_por_masa SET unidades_producidas = $1 WHERE id = $2`,
-        [panesEquivalentes, productoId]
+        `UPDATE productos_por_masa SET unidades_producidas = $1, usuario_id = $3 WHERE id = $2`,
+        [panesEquivalentes, productoId, req.user.id]
       );
     }
 

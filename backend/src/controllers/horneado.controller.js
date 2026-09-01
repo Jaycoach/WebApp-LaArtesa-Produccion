@@ -655,9 +655,9 @@ exports.editarUnidadesPorProducto = async (req, res) => {
         prevR.rows[0]?.unidades_producidas, cant);
 
       await client.query(
-        `UPDATE productos_por_masa SET unidades_producidas = $2, updated_at = NOW()
+        `UPDATE productos_por_masa SET unidades_producidas = $2, usuario_id = $4, updated_at = NOW()
          WHERE id = $1 AND masa_id = $3`,
-        [parseInt(prodId), cant, Number(masaId)]
+        [parseInt(prodId), cant, Number(masaId), req.user.id]
       );
     }
 
@@ -825,9 +825,9 @@ exports.completarHorneado = async (req, res) => {
     for (const [prodId, cantidad] of Object.entries(distribucionFinal)) {
       await client.query(`
         UPDATE productos_por_masa
-        SET unidades_producidas = $2, updated_at = NOW()
+        SET unidades_producidas = $2, usuario_id = $4, updated_at = NOW()
         WHERE id = $1 AND masa_id = $3
-      `, [parseInt(prodId), cantidad, Number(masaId)]);
+      `, [parseInt(prodId), cantidad, Number(masaId), req.user.id]);
     }
 
     // Marcar fase HORNEADO como COMPLETADA

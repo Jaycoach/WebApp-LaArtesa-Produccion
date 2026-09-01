@@ -1753,9 +1753,10 @@ const completarFase = async (req, res, next) => {
                unidades_faltantes   = $3,
                division_parcial     = $4,
                unidades_producidas  = $5,
+               usuario_id           = $7,
                updated_at           = NOW()
            WHERE id = $6`,
-          [cantidad, excedenteReal, faltante, esParcial, cantidad, prod.id]
+          [cantidad, excedenteReal, faltante, esParcial, cantidad, prod.id, req.user.id]
         );
       }
 
