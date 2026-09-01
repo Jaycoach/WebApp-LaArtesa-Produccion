@@ -405,8 +405,15 @@ export const ListaMasas: React.FC = () => {
               return (a.tipo_masa || '').localeCompare(b.tipo_masa || '', 'es');
             }).map((masa: MasaProduccionResumen) => {
               const expandida = expandidas.has(masa.id);
-              const totalMostrado = masa.division_completada_total && Number(masa.total_panes_cortados) > 0
-                ? `${Number(masa.total_panes_cortados).toLocaleString('es-CO')} panes`
+              // A5: mismo criterio de fallback que EmpaqueMasa.tsx (A2) -- unidades_producidas
+              // (evolutivo) tiene prioridad, cantidad_divisiones (historico crudo de Division)
+              // como segundo nivel para masas legacy sin desglose por producto (ver masa 429),
+              // unidades_programadas como tercer nivel cuando ni siquiera hay division.
+              const panesCortadosMostrar = Number(masa.total_panes_cortados) > 0
+                ? Number(masa.total_panes_cortados)
+                : Number(masa.total_panes_divididos) || 0;
+              const totalMostrado = masa.division_completada_total && panesCortadosMostrar > 0
+                ? `${panesCortadosMostrar.toLocaleString('es-CO')} panes`
                 : (Number(masa.total_unidades_programadas) > 0
                     ? `${Number(masa.total_unidades_programadas).toLocaleString('es-CO')} paq`
                     : '—');
@@ -520,11 +527,24 @@ export const ListaMasas: React.FC = () => {
                                   {p.producto_nombre}
                                 </span>
                                 <span className="text-xs font-bold text-emerald-700 shrink-0">
-                                  {p.division_completada && Number(p.unidades_producidas) > 0
-                                    ? `${Math.round(Number(p.unidades_producidas) / Number(p.unidades_por_paquete || 1)).toLocaleString('es-CO')} paq · ${Number(p.unidades_producidas).toLocaleString('es-CO')} panes (cortado)`
-                                    : (Number(p.cantidad_paquetes) > 0
-                                        ? `${Number(p.cantidad_paquetes).toLocaleString('es-CO')} paq · ${(Number(p.cantidad_paquetes) * Number(p.unidades_por_paquete || 1)).toLocaleString('es-CO')} panes`
-                                        : '—')}
+                                  {(() => {
+                                    // A5: mismo criterio de fallback que EmpaqueMasa.tsx (A2) --
+                                    // unidades_producidas (evolutivo) primero, cantidad_divisiones
+                                    // (historico crudo de Division) como segundo nivel para masas
+                                    // legacy sin desglose por producto (ver masa 429), y
+                                    // cantidad_paquetes (programado, no real) como tercer nivel
+                                    // solo cuando ni siquiera hay division -- ahi sí es la unica
+                                    // referencia disponible de "cuanto se espera producir".
+                                    const panesDivididos = (p.unidades_producidas || 0) > 0
+                                      ? Number(p.unidades_producidas)
+                                      : Number(p.cantidad_divisiones || 0);
+                                    if (p.division_completada && panesDivididos > 0) {
+                                      return `${Math.round(panesDivididos / Number(p.unidades_por_paquete || 1)).toLocaleString('es-CO')} paq · ${panesDivididos.toLocaleString('es-CO')} panes (cortado)`;
+                                    }
+                                    return Number(p.cantidad_paquetes) > 0
+                                      ? `${Number(p.cantidad_paquetes).toLocaleString('es-CO')} paq · ${(Number(p.cantidad_paquetes) * Number(p.unidades_por_paquete || 1)).toLocaleString('es-CO')} panes`
+                                      : '—';
+                                  })()}
                                 </span>
                               </div>
                               {/* Independiente de apto_produccion a propósito (bug encontrado

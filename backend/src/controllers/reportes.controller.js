@@ -49,7 +49,7 @@ exports.getReporteCostos = async (req, res) => {
         SELECT
           ppm.id, ppm.sap_item_code, ppm.producto_nombre, ppm.presentacion,
           ppm.gramaje_unitario,
-          ppm.unidades_pedidas, ppm.unidades_producidas,
+          ppm.unidades_pedidas, ppm.unidades_producidas, ppm.cantidad_divisiones,
           ppm.costo_mp_unitario, ppm.costo_mp_total_prod,
           ppm.costo_mo_total, ppm.costo_empaque_total,
           ppm.costo_indirecto_total, ppm.costo_total_final,
@@ -119,6 +119,7 @@ exports.getReporteCostos = async (req, res) => {
           gramaje_unitario:    p.gramaje_unitario,
           unidades_pedidas:    p.unidades_pedidas,
           unidades_producidas: p.unidades_producidas,
+          cantidad_divisiones: p.cantidad_divisiones,
           sap_doc_num:         p.sap_doc_num,
           costos: {
             mp_unitario:     parseFloat(p.costo_mp_unitario     || 0),

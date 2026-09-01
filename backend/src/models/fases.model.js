@@ -89,6 +89,12 @@ const getMasasByFecha = async (fecha, fase = null) => {
       SUM(COALESCE(pm.unidades_ajustadas, pm.unidades_programadas) * pm.unidades_por_paquete) as total_panes,
       BOOL_AND(COALESCE(pm.division_completada, false)) as division_completada_total,
       SUM(CASE WHEN pm.division_completada THEN pm.unidades_producidas ELSE NULL END) as total_panes_cortados,
+      -- A5: mismo fallback que EmpaqueMasa.tsx (A2) -- cantidad_divisiones es el
+      -- historico crudo de Division, unidades_producidas es el evolutivo que
+      -- Horneado/Empaque sobreescriben despues. Se agrega el agregado paralelo
+      -- para que ListaMasas.tsx pueda caer a este total cuando unidades_producidas
+      -- este en 0 (masas legacy sin desglose por producto, ver masa 429).
+      SUM(CASE WHEN pm.division_completada THEN pm.cantidad_divisiones ELSE NULL END) as total_panes_divididos,
       json_agg(
         json_build_object(
           'producto_nombre', pm.producto_nombre,
@@ -96,6 +102,7 @@ const getMasasByFecha = async (fecha, fase = null) => {
           'unidades_por_paquete', pm.unidades_por_paquete,
           'cantidad_paquetes', pm.cantidad_paquetes,
           'unidades_producidas', pm.unidades_producidas,
+          'cantidad_divisiones', pm.cantidad_divisiones,
           'division_completada', COALESCE(pm.division_completada, false),
           'apto_produccion', pm.apto_produccion,
           'campos_incompletos', sa.campos_incompletos

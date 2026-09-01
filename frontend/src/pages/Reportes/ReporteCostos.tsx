@@ -194,7 +194,15 @@ export const ReporteCostos: React.FC = () => {
                             </td>
                             <td className="p-3 text-gray-600">{p.sap_doc_num || '—'}</td>
                             <td className="p-3 text-right font-mono">{p.unidades_pedidas || 0}</td>
-                            <td className="p-3 text-right font-mono">{p.unidades_producidas || 0}</td>
+                            {/* A5: mismo criterio de fallback que EmpaqueMasa.tsx (A2) -- unidades_producidas
+                                (evolutivo) primero, cantidad_divisiones (historico crudo de Division) como
+                                segundo nivel para masas legacy sin desglose por producto (ver masa 429).
+                                Este reporte es solo lectura: no toca costo_total_final/costo_unitario_final,
+                                que se calculan aparte a partir de uds_empacadas real (empaque.controller.js),
+                                no de este campo -- el fallback aqui es puramente de presentacion. */}
+                            <td className="p-3 text-right font-mono">
+                              {(p.unidades_producidas || 0) > 0 ? p.unidades_producidas : (p.cantidad_divisiones || 0)}
+                            </td>
                             <td className="p-3 text-right font-mono text-blue-700">${COP(p.costos?.mp_unitario)}</td>
                             <td className="p-3 text-right font-mono text-purple-700">${COP(p.costos?.mo_total)}</td>
                             <td className="p-3 text-right font-mono text-orange-700">${COP(p.costos?.empaque_total)}</td>
