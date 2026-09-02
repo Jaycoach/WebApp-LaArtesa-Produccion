@@ -81,3 +81,25 @@ también está afectado. Un trigger sobre una tabla compartida
 lectura del alcance suele quedarse corta. Reportar la lista completa de
 puntos de llamada como parte de VALIDADO EN STAGING, incluso los que
 resultaron no afectados.Me refiero a Skill de ClaudeCode, quiero que la metodología de desarrollo sea uy confiable y refinada
+
+### Deploy: shell no interactivo pierde el PATH de nvm
+
+`deploy.sh` puede fallar en shells no interactivos (ej. cuando ClaudeCode
+ejecuta el script directo por SSH) porque nvm no carga node/npm en ese
+contexto — el PATH del shell no interactivo no incluye lo que nvm
+inyecta normalmente en un shell de login.
+
+**Síntoma:** `deploy.sh` falla en el paso de npm/build con `command not
+found: npm` o similar, pese a que `npm` funciona perfecto en una sesión
+SSH manual normal.
+
+**Fix:** correr el script con shell de login explícito:
+
+\`\`\`bash
+ssh artesa-staging "bash -l -c '~/LaArtesa/deployment/deploy.sh staging'"
+# análogo para producción:
+ssh artesa-prod "bash -l -c '~/LaArtesa/deployment/deploy.sh prod'"
+\`\`\`
+
+o, si ya estás en una sesión SSH abierta, asegurate de que sea `bash -l`
+(login shell) y no `bash` a secas, antes de invocar `deploy.sh`.
