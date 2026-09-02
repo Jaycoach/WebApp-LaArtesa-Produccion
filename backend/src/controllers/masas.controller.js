@@ -549,7 +549,7 @@ const aprobarMasaCore = async (id, userId, opts = {}) => {
      WHERE masa_id = $1 AND delta_ajuste IS NULL`,
     [id]
   );
-  const DELTA_DEFAULT_PAQ = 1;
+  const DELTA_DEFAULT_PAQ = 0;
   for (const prod of prodsSinAjuste.rows) {
     const divisor        = Math.max(0, Number(prod.multiplo_divisor) || 0);
     const upq             = Math.max(1, Number(prod.unidades_por_paquete) || 1);
