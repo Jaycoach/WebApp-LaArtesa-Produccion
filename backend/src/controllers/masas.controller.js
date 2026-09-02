@@ -270,7 +270,7 @@ const updateUnidadesProgramadas = async (req, res, next) => {
     }
 
     const masaResult = await db.query(
-      'SELECT id, fase_actual FROM masas_produccion WHERE id = $1',
+      'SELECT id, fase_actual, fue_subdividida FROM masas_produccion WHERE id = $1',
       [masaId]
     );
     if (masaResult.rows.length === 0) {
@@ -280,6 +280,21 @@ const updateUnidadesProgramadas = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: `Solo se puede ajustar en fase PLANIFICACION (actual: ${masaResult.rows[0].fase_actual})`,
+      });
+    }
+
+    // Fix B (mismo criterio que sap.controller.js:696-711, masa 2067): una masa
+    // padre ya subdividida queda con fase_actual='PLANIFICACION' A PROPÓSITO
+    // (sus tandas avanzan solas) — el chequeo de arriba no la detecta. Sin este
+    // guard, se puede editar el delta de una masa cuyas sub-masas ya están en
+    // producción (o ya COMPLETADAS/empacadas), reescribiendo masas_lotes_simulados
+    // con un plan que no tiene ninguna relación con la producción física real, y
+    // disparando el correo de "Lote actualizado" con información falsa a Empaque
+    // (incidente real: masas 971 y 747 en producción, 2026-09-02 y 2026-08-29).
+    if (masaResult.rows[0].fue_subdividida) {
+      return res.status(409).json({
+        success: false,
+        message: 'No se puede ajustar el delta: esta masa ya fue subdividida en tandas de producción.',
       });
     }
 
