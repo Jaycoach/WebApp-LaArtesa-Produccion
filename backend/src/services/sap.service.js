@@ -184,7 +184,14 @@ class SAPService {
       return this.sessionId;
     } catch (error) {
       logger.error('Error al iniciar sesión en SAP:', error.message);
-      throw new Error(`Error de autenticación SAP: ${error.message}`);
+      const loginError = new Error(`Error de autenticación SAP: ${error.message}`);
+      // Preservar response/code del error original de axios: quienes llaman
+      // ensureSession() necesitan distinguir un rechazo de negocio de SAP
+      // (credenciales inválidas, con response) de una falla de transporte
+      // (SAP inalcanzable, sin response) para decidir si reintentar.
+      loginError.response = error.response;
+      loginError.code = error.code;
+      throw loginError;
     }
   }
 

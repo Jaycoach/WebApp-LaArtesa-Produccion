@@ -26,21 +26,15 @@ const { upqDesdeProducto } = require('../utils/unidadesPorPaquete');
 // etc.) nunca se reintentan automáticamente — deben llegar al usuario de inmediato.
 const SAP_RETRY_BACKOFF_MS = [2000, 5000];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const esFallaTransitoriaSap = (err) => {
-  if (err?.response) return false;
-  const code = err?.code || '';
-  const msg = err?.message || '';
-  return (
-    code === 'ECONNABORTED' ||
-    code === 'ECONNRESET' ||
-    code === 'ETIMEDOUT' ||
-    code === 'ECONNREFUSED' ||
-    /timeout/i.test(msg) ||
-    /failure when receiving data from the peer/i.test(msg) ||
-    /socket hang up/i.test(msg) ||
-    /network error/i.test(msg)
-  );
-};
+// sapService (login/InventoryGenExits) siempre adjunta err.response cuando SAP
+// llegó a contestar con un rechazo de negocio (stock, lote, etc. — ver parseo
+// más abajo, que lee de err.response.data.error). Si err.response NO está, SAP
+// nunca llegó a responder (timeout, conexión rechazada/cortada, DNS, lo que
+// sea) — eso es por definición transporte, no negocio. sapService.login()
+// además re-envuelve el error de axios en un Error nuevo ("Error de
+// autenticación SAP: ...", ver sap.service.js) que pierde err.code; por eso
+// NO se depende de err.code/mensaje como señal primaria, solo como apoyo.
+const esFallaTransitoriaSap = (err) => !err?.response;
 const MENSAJE_SAP_TRANSITORIO = 'SAP no respondió a tiempo. El consumo NO quedó registrado. Podés reintentar la confirmación en unos segundos.';
 
 /**
@@ -525,11 +519,10 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
       DocumentLines: documentLines,
     };
 
-    await sapService.ensureSession();
-
     let response;
     for (let intento = 0; intento <= SAP_RETRY_BACKOFF_MS.length; intento++) {
       try {
+        await sapService.ensureSession();
         response = await sapService.client.post('/InventoryGenExits', requestPayload);
         break;
       } catch (postErr) {

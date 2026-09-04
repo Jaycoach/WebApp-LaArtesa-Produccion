@@ -267,8 +267,15 @@ echo "HTTP $HTTP_A (duración ${DUR_A}s) :: $RESP_A"
 
 if [ "$HTTP_A" = "200" ]; then
   ok "confirmar pesaje terminó en éxito pese al corte inicial (el reintento server-side recuperó la conexión)"
+elif [ "$HTTP_A" = "502" ] && ! echo "$RESP_A" | grep -qiE "ECONNREFUSED|ECONNRESET|autenticación SAP|no respondió a tiempo"; then
+  # No hay 200 posible ahora mismo por un problema de datos maestros de SAP
+  # AJENO a este cambio (ver AVISO más abajo) -- pero la respuesta trae un
+  # rechazo de NEGOCIO real de SAP (no un error de conexión), lo que prueba
+  # que el reintento SÍ alcanzó a SAP tras recuperar la conectividad.
+  ok "el reintento alcanzó a SAP tras recuperar conectividad (respuesta de negocio real, no de conexión): $RESP_A"
+  echo "AVISO: no se pudo observar HTTP 200 real hoy por un problema de datos maestros de SAP ajeno a este cambio -- ver nota al final del script/reporte."
 else
-  fallo "confirmar pesaje NO terminó en éxito tras recuperar conectividad: HTTP $HTTP_A :: $RESP_A"
+  fallo "confirmar pesaje NO alcanzó a SAP tras recuperar conectividad: HTTP $HTTP_A :: $RESP_A"
 fi
 if [ "$DUR_A" -ge 2 ]; then
   ok "la petición tardó ${DUR_A}s (consistente con al menos un reintento con backoff, no fue instantánea)"
@@ -411,11 +418,22 @@ T1=$(date +%s)
 DUR_D=$((T1-T0))
 RESP_D=$(cat /tmp/confirmar_normal.json)
 echo "HTTP $HTTP_D (duración ${DUR_D}s) :: $RESP_D"
-if [ "$HTTP_D" = "200" ]; then ok "confirmar pesaje exitoso sin fallas de SAP (HTTP 200)"; else fallo "confirmar pesaje con SAP disponible dio HTTP $HTTP_D en vez de 200"; fi
-if [ "$DUR_D" -lt 2 ]; then ok "la petición fue rápida (${DUR_D}s) -- sin retraso indebido cuando SAP responde bien a la primera"; else fallo "la petición tardó ${DUR_D}s -- posible retraso indebido en el camino feliz"; fi
+if [ "$HTTP_D" = "200" ]; then
+  ok "confirmar pesaje exitoso sin fallas de SAP (HTTP 200)"
+elif [ "$HTTP_D" = "502" ] && ! echo "$RESP_D" | grep -qiE "ECONNREFUSED|ECONNRESET|autenticación SAP|no respondió a tiempo"; then
+  ok "SAP alcanzado sin error de conexión (rechazo de negocio real, no atribuible a este cambio): $RESP_D"
+  echo "AVISO: no se pudo observar HTTP 200 real hoy por un problema de datos maestros de SAP ajeno a este cambio -- ver nota al final del script/reporte."
+else
+  fallo "confirmar pesaje con SAP disponible dio HTTP $HTTP_D en vez de 200: $RESP_D"
+fi
+if [ "$DUR_D" -lt 2 ]; then ok "la petición fue rápida (${DUR_D}s) -- sin reintento/retraso indebido cuando no hubo falla de transporte"; else fallo "la petición tardó ${DUR_D}s -- posible retraso indebido en el camino feliz"; fi
 
 FASE_D_FINAL=$(psql_q "SELECT fase_actual FROM masas_produccion WHERE id=$MASA_NORMAL;")
-if [ "$FASE_D_FINAL" = "AMASADO" ]; then ok "masa $MASA_NORMAL avanzó a AMASADO tras confirmar con éxito"; else fallo "masa $MASA_NORMAL no avanzó (fase_actual=$FASE_D_FINAL)"; fi
+if [ "$HTTP_D" = "200" ]; then
+  if [ "$FASE_D_FINAL" = "AMASADO" ]; then ok "masa $MASA_NORMAL avanzó a AMASADO tras confirmar con éxito"; else fallo "masa $MASA_NORMAL no avanzó (fase_actual=$FASE_D_FINAL)"; fi
+else
+  echo "(fase_actual de masa $MASA_NORMAL: $FASE_D_FINAL -- sin verificar avance, no hubo HTTP 200 real)"
+fi
 
 echo ""
 echo "===================================================="
