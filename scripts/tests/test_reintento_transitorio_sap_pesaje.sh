@@ -210,6 +210,21 @@ prep_stock_suficiente() {
   psql_q "UPDATE sap_lotes_mp SET cantidad_disponible = 500, ultimo_sync = NOW() WHERE cantidad_disponible < 500 AND item_code IN (SELECT DISTINCT ingrediente_sap_code FROM ingredientes_masa WHERE masa_id = $masa_id);" > /dev/null
 }
 
+# confirmarPesaje bloquea con 409 ANTES de llegar a SAP si el snapshot local
+# de algún lote reservado (sap_lotes_mp.ultimo_sync) es más viejo que el
+# umbral configurado (pesaje_umbral_sync_lotes_horas, default 6h) -- ese
+# guard es de un ciclo de trabajo previo y no es lo que este script valida.
+# Se refresca el snapshot de los lotes YA asignados a la masa (después de
+# completar_checklist, que es cuando pesaje_lotes_consumo se puebla) para
+# que la petición de confirmar llegue hasta enviarInventoryGenExits.
+freshen_lotes_masa() {
+  local masa_id="$1"
+  psql_q "UPDATE sap_lotes_mp sl SET ultimo_sync = NOW(), cantidad_disponible = GREATEST(sl.cantidad_disponible, 500)
+          FROM pesaje_lotes_consumo plc
+          WHERE plc.masa_id = $masa_id AND plc.confirmado_sap = false AND plc.liberado_en IS NULL
+            AND sl.item_code = plc.item_code AND sl.batch = plc.batch;" > /dev/null
+}
+
 # El logger (winston) escribe timestamp "YYYY-MM-DD HH:mm:ss" en hora del
 # servidor (UTC en staging) dentro de líneas JSON con códigos ANSI embebidos
 # en los valores -- se despojan antes de parsear con jq.
@@ -231,6 +246,7 @@ echo "FASE A: falla TRANSITORIA con recuperación durante el backoff -> debe ter
 echo "===================================================="
 prep_stock_suficiente "$MASA_RETRY_OK"
 completar_checklist "$MASA_RETRY_OK"
+freshen_lotes_masa "$MASA_RETRY_OK"
 COMPLETADO=$(curl -s -H "$AUTH_HEADER" "$API_URL/pesaje/$MASA_RETRY_OK/checklist" | jq -r '.data.completado')
 if [ "$COMPLETADO" = "true" ]; then ok "checklist de masa $MASA_RETRY_OK completo"; else fallo "checklist de masa $MASA_RETRY_OK incompleto"; fi
 
@@ -289,16 +305,27 @@ echo "===================================================="
 # ya está cubierto y sin tocar (líneas ~562-593 del controller).
 prep_stock_suficiente "$MASA_STOCK"
 completar_checklist "$MASA_STOCK"
+freshen_lotes_masa "$MASA_STOCK"
 COMPLETADO_B=$(curl -s -H "$AUTH_HEADER" "$API_URL/pesaje/$MASA_STOCK/checklist" | jq -r '.data.completado')
 if [ "$COMPLETADO_B" = "true" ]; then ok "checklist de masa $MASA_STOCK completo"; else fallo "checklist de masa $MASA_STOCK incompleto"; fi
 
-BATCH_ROW_ID=$(psql_q "SELECT plc.id FROM pesaje_lotes_consumo plc WHERE plc.masa_id = $MASA_STOCK AND plc.confirmado_sap = false AND plc.liberado_en IS NULL ORDER BY plc.id LIMIT 1;")
+BATCH_ROW=$(psql_q "SELECT plc.id, plc.item_code FROM pesaje_lotes_consumo plc WHERE plc.masa_id = $MASA_STOCK AND plc.confirmado_sap = false AND plc.liberado_en IS NULL ORDER BY plc.id LIMIT 1;")
+BATCH_ROW_ID="${BATCH_ROW%%|*}"
+BATCH_ITEM_CODE="${BATCH_ROW##*|}"
 if [ -z "$BATCH_ROW_ID" ]; then
   fallo "no se encontró fila en pesaje_lotes_consumo para masa $MASA_STOCK -- no se puede forzar el error de negocio"
 else
   BATCH_FALSO="NOEXISTE-TEST-$$-${RANDOM}"
+  # El batch falso se inserta también en el mirror local (sap_lotes_mp) con
+  # sync fresco y stock suficiente para que el guard de "snapshot viejo"
+  # (líneas ~854-893) no bloquee antes de llegar a SAP -- el objetivo es que
+  # el rechazo real venga de SAP mismo (lote inexistente en su propia BD),
+  # no de nuestra validación local.
+  psql_q "INSERT INTO sap_lotes_mp (item_code, batch, status, cantidad_disponible, ultimo_sync)
+          VALUES ('$BATCH_ITEM_CODE', '$BATCH_FALSO', 'released', 500, NOW())
+          ON CONFLICT (item_code, batch) DO UPDATE SET ultimo_sync = NOW(), cantidad_disponible = 500, status = 'released';" > /dev/null
   psql_q "UPDATE pesaje_lotes_consumo SET batch = '$BATCH_FALSO' WHERE id = $BATCH_ROW_ID;" > /dev/null
-  ok "batch de la fila $BATCH_ROW_ID de pesaje_lotes_consumo (masa $MASA_STOCK) corrompido a '$BATCH_FALSO' (lote inexistente en SAP, a propósito)"
+  ok "batch de la fila $BATCH_ROW_ID de pesaje_lotes_consumo (masa $MASA_STOCK, item $BATCH_ITEM_CODE) corrompido a '$BATCH_FALSO' (lote inexistente en SAP, a propósito; mirror local fresco para que el rechazo venga de SAP real)"
 fi
 
 MARK_B=$(log_marker)
@@ -330,7 +357,9 @@ echo ""
 echo "===================================================="
 echo "FASE C: falla TRANSITORIA persistente (SAP caído todo el tiempo) -> mensaje final claro"
 echo "===================================================="
+prep_stock_suficiente "$MASA_TIMEOUT_PERSISTENTE"
 completar_checklist "$MASA_TIMEOUT_PERSISTENTE"
+freshen_lotes_masa "$MASA_TIMEOUT_PERSISTENTE"
 COMPLETADO_C=$(curl -s -H "$AUTH_HEADER" "$API_URL/pesaje/$MASA_TIMEOUT_PERSISTENTE/checklist" | jq -r '.data.completado')
 if [ "$COMPLETADO_C" = "true" ]; then ok "checklist de masa $MASA_TIMEOUT_PERSISTENTE completo"; else fallo "checklist de masa $MASA_TIMEOUT_PERSISTENTE incompleto"; fi
 
@@ -371,6 +400,7 @@ echo "FASE D: flujo normal exitoso (SAP disponible) -- sin regresión"
 echo "===================================================="
 prep_stock_suficiente "$MASA_NORMAL"
 completar_checklist "$MASA_NORMAL"
+freshen_lotes_masa "$MASA_NORMAL"
 COMPLETADO_D=$(curl -s -H "$AUTH_HEADER" "$API_URL/pesaje/$MASA_NORMAL/checklist" | jq -r '.data.completado')
 if [ "$COMPLETADO_D" = "true" ]; then ok "checklist de masa $MASA_NORMAL completo"; else fallo "checklist de masa $MASA_NORMAL incompleto"; fi
 
