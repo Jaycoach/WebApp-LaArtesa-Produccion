@@ -19,6 +19,30 @@ const sapService    = require('../services/sap.service');
 const { sendPesajeCompletadoEmail } = require('../services/email.service');
 const { upqDesdeProducto } = require('../utils/unidadesPorPaquete');
 
+// Resiliencia ante fallas TRANSITORIAS del Service Layer de SAP (timeouts, cortes
+// de conexión) al confirmar pesaje — ver incidente masas 1139/1149 del 2026-09-03.
+// Solo aplica a errores de TRANSPORTE (sin err.response, SAP nunca llegó a contestar).
+// Errores de NEGOCIO (err.response presente: stock insuficiente, lote inexistente,
+// etc.) nunca se reintentan automáticamente — deben llegar al usuario de inmediato.
+const SAP_RETRY_BACKOFF_MS = [2000, 5000];
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const esFallaTransitoriaSap = (err) => {
+  if (err?.response) return false;
+  const code = err?.code || '';
+  const msg = err?.message || '';
+  return (
+    code === 'ECONNABORTED' ||
+    code === 'ECONNRESET' ||
+    code === 'ETIMEDOUT' ||
+    code === 'ECONNREFUSED' ||
+    /timeout/i.test(msg) ||
+    /failure when receiving data from the peer/i.test(msg) ||
+    /socket hang up/i.test(msg) ||
+    /network error/i.test(msg)
+  );
+};
+const MENSAJE_SAP_TRANSITORIO = 'SAP no respondió a tiempo. El consumo NO quedó registrado. Podés reintentar la confirmación en unos segundos.';
+
 /**
  * Notifica a correos_empaque al completar pesaje. Fire-and-forget — nunca bloquea.
  */
@@ -502,7 +526,25 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
     };
 
     await sapService.ensureSession();
-    const response = await sapService.client.post('/InventoryGenExits', requestPayload);
+
+    let response;
+    for (let intento = 0; intento <= SAP_RETRY_BACKOFF_MS.length; intento++) {
+      try {
+        response = await sapService.client.post('/InventoryGenExits', requestPayload);
+        break;
+      } catch (postErr) {
+        const esUltimoIntento = intento === SAP_RETRY_BACKOFF_MS.length;
+        if (!esFallaTransitoriaSap(postErr) || esUltimoIntento) {
+          throw postErr;
+        }
+        const espera = SAP_RETRY_BACKOFF_MS[intento];
+        logger.warn(
+          `InventoryGenExits masa ${masaId}: falla transitoria de SAP (${postErr.message}), ` +
+          `reintentando en ${espera}ms (intento ${intento + 1}/${SAP_RETRY_BACKOFF_MS.length})`
+        );
+        await sleep(espera);
+      }
+    }
 
     const tiempoRespuesta = Date.now() - inicio;
     const docEntry = response.data?.DocEntry ?? null;
@@ -640,7 +682,15 @@ const enviarInventoryGenExits = async (masaId, usuarioId, fechaLocal) => {
         }
       }
     }
-    return { success: false, error: sapMsg, lote_fallido, alternativas };
+    // Falla de transporte (sin respuesta de negocio de SAP) que agotó los reintentos:
+    // el mensaje técnico crudo (timeout, socket cortado) no le dice al usuario si es
+    // seguro reintentar — se reemplaza por uno claro y accionable. El detalle técnico
+    // ya quedó guardado arriba en sap_sync_log.error_message para diagnóstico.
+    const transient = esFallaTransitoriaSap(err);
+    if (transient) {
+      sapMsg = MENSAJE_SAP_TRANSITORIO;
+    }
+    return { success: false, error: sapMsg, lote_fallido, alternativas, transient };
   }
 };
 
@@ -950,11 +1000,15 @@ const confirmarPesaje = async (req, res, next) => {
     // Enviar a SAP — bloqueante. PESAJE aún no se marcó COMPLETADA, no hay nada que revertir.
     const sapResult = await enviarInventoryGenExits(masaId, req.user.id, fecha_local);
     if (!sapResult.success) {
+      const message = sapResult.transient
+        ? sapResult.error
+        : `No se pudo registrar el consumo en SAP: ${sapResult.error}`;
       return res.status(502).json({
         success: false,
-        message: `No se pudo registrar el consumo en SAP: ${sapResult.error}`,
+        message,
         data: {
           reintentable: true,
+          transient:     !!sapResult.transient,
           lote_fallido:  sapResult.lote_fallido  || null,
           alternativas:  sapResult.alternativas  || [],
         },
