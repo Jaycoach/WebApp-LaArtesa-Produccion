@@ -37,7 +37,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENV_FILE="$REPO_ROOT/backend/.env"
 API_URL="${API_URL:-http://localhost:3000/api}"
-BACKEND_LOG="${BACKEND_LOG:-$REPO_ROOT/backend/logs/combined.log}"
+BACKEND_LOG="${BACKEND_LOG:-$(ls -t "$REPO_ROOT"/backend/logs/combined-*.log 2>/dev/null | head -1)}"
 
 MASA_RETRY_OK="${1:?Uso: $0 <MASA_RETRY_OK> <MASA_STOCK> <MASA_TIMEOUT_PERSISTENTE> <MASA_NORMAL>}"
 MASA_STOCK="${2:?falta MASA_STOCK}"
@@ -205,7 +205,20 @@ prep_stock_suficiente() {
   psql_q "UPDATE sap_lotes_mp SET cantidad_disponible = 500, ultimo_sync = NOW() WHERE cantidad_disponible < 500 AND item_code IN (SELECT DISTINCT ingrediente_sap_code FROM ingredientes_masa WHERE masa_id = $masa_id);" > /dev/null
 }
 
-log_marker() { date -u +"%Y-%m-%dT%H:%M:%S.%3NZ"; }
+# El logger (winston) escribe timestamp "YYYY-MM-DD HH:mm:ss" en hora del
+# servidor (UTC en staging) dentro de líneas JSON con códigos ANSI embebidos
+# en los valores -- se despojan antes de parsear con jq.
+log_marker() { date -u +"%Y-%m-%d %H:%M:%S"; }
+evidencia_reintento() {
+  # $1=marca (desde log_marker) $2=masa_id -- imprime líneas "reintentando"
+  # posteriores a la marca para esa masa, vacío si no hay ninguna.
+  local marca="$1" masa_id="$2"
+  [ -f "$BACKEND_LOG" ] || return 1
+  sed -E 's/\x1b\[[0-9;]*m//g' "$BACKEND_LOG" \
+    | jq -r --arg d "$marca" 'select(.timestamp >= $d) | .message' 2>/dev/null \
+    | grep "InventoryGenExits masa ${masa_id}:" \
+    | grep -i "reintentando"
+}
 
 echo ""
 echo "===================================================="
@@ -244,7 +257,7 @@ fi
 
 echo "-- evidencia en logs del backend (reintento visible) --"
 if [ -f "$BACKEND_LOG" ]; then
-  EVIDENCIA_RETRY=$(awk -v d="$MARK_A" '$0 >= d' "$BACKEND_LOG" 2>/dev/null | grep "InventoryGenExits masa $MASA_RETRY_OK" | grep -i "reintentando")
+  EVIDENCIA_RETRY=$(evidencia_reintento "$MARK_A" "$MASA_RETRY_OK")
   if [ -n "$EVIDENCIA_RETRY" ]; then
     ok "log muestra reintento automático:"
     echo "$EVIDENCIA_RETRY"
@@ -260,11 +273,28 @@ if [ "$FASE_A_FINAL" = "AMASADO" ]; then ok "masa $MASA_RETRY_OK avanzó a AMASA
 
 echo ""
 echo "===================================================="
-echo "FASE B: falla de NEGOCIO (stock insuficiente) -> NUNCA debe reintentarse"
+echo "FASE B: falla de NEGOCIO (lote inexistente en SAP) -> NUNCA debe reintentarse"
 echo "===================================================="
+# No se fuerza "stock insuficiente" real (dependería del inventario real de SAP en
+# staging, no controlable de forma determinista desde este script). En su lugar se
+# corrompe deliberadamente el batch de un ingrediente con manejo de lote a un valor
+# que no existe en SAP -- dispara el mismo tipo de rechazo de NEGOCIO (err.response
+# presente), que es justamente la condición que esFallaTransitoriaSap debe excluir
+# del reintento automático. El parseo de "Batch/serial number ... does not exist"
+# ya está cubierto y sin tocar (líneas ~562-593 del controller).
+prep_stock_suficiente "$MASA_STOCK"
 completar_checklist "$MASA_STOCK"
 COMPLETADO_B=$(curl -s -H "$AUTH_HEADER" "$API_URL/pesaje/$MASA_STOCK/checklist" | jq -r '.data.completado')
 if [ "$COMPLETADO_B" = "true" ]; then ok "checklist de masa $MASA_STOCK completo"; else fallo "checklist de masa $MASA_STOCK incompleto"; fi
+
+BATCH_ROW_ID=$(psql_q "SELECT plc.id FROM pesaje_lotes_consumo plc WHERE plc.masa_id = $MASA_STOCK AND plc.confirmado_sap = false AND plc.liberado_en IS NULL ORDER BY plc.id LIMIT 1;")
+if [ -z "$BATCH_ROW_ID" ]; then
+  fallo "no se encontró fila en pesaje_lotes_consumo para masa $MASA_STOCK -- no se puede forzar el error de negocio"
+else
+  BATCH_FALSO="NOEXISTE-TEST-$$-${RANDOM}"
+  psql_q "UPDATE pesaje_lotes_consumo SET batch = '$BATCH_FALSO' WHERE id = $BATCH_ROW_ID;" > /dev/null
+  ok "batch de la fila $BATCH_ROW_ID de pesaje_lotes_consumo (masa $MASA_STOCK) corrompido a '$BATCH_FALSO' (lote inexistente en SAP, a propósito)"
+fi
 
 MARK_B=$(log_marker)
 T0=$(date +%s)
@@ -283,7 +313,7 @@ if [ "$TRANSIENT_B" = "false" ]; then ok "data.transient=false (correctamente cl
 if [ "$DUR_B" -lt 2 ]; then ok "la petición fue rápida (${DUR_B}s) -- confirma que NO hubo reintento ante error de negocio"; else fallo "la petición tardó ${DUR_B}s -- ¿se reintentó indebidamente un error de negocio?"; fi
 
 if [ -f "$BACKEND_LOG" ]; then
-  REINTENTO_INDEBIDO=$(awk -v d="$MARK_B" '$0 >= d' "$BACKEND_LOG" 2>/dev/null | grep "InventoryGenExits masa $MASA_STOCK" | grep -i "reintentando")
+  REINTENTO_INDEBIDO=$(evidencia_reintento "$MARK_B" "$MASA_STOCK")
   if [ -z "$REINTENTO_INDEBIDO" ]; then
     ok "log confirma: ninguna línea de 'reintentando' para el error de negocio de masa $MASA_STOCK"
   else
