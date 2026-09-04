@@ -420,6 +420,7 @@ freshen_lotes_masa "$MASA_NORMAL"
 COMPLETADO_D=$(curl -s -H "$AUTH_HEADER" "$API_URL/pesaje/$MASA_NORMAL/checklist" | jq -r '.data.completado')
 if [ "$COMPLETADO_D" = "true" ]; then ok "checklist de masa $MASA_NORMAL completo"; else fallo "checklist de masa $MASA_NORMAL incompleto"; fi
 
+MARK_D=$(log_marker)
 T0=$(date +%s)
 HTTP_D=$(curl -s -o /tmp/confirmar_normal.json -w '%{http_code}' -X POST -H "$AUTH_HEADER" -H 'Content-Type: application/json' \
   -d '{}' "$API_URL/pesaje/$MASA_NORMAL/confirmar")
@@ -435,7 +436,26 @@ elif [ "$HTTP_D" = "502" ] && ! echo "$RESP_D" | grep -qiE "ECONNREFUSED|ECONNRE
 else
   fallo "confirmar pesaje con SAP disponible dio HTTP $HTTP_D en vez de 200: $RESP_D"
 fi
-if [ "$DUR_D" -lt 2 ]; then ok "la petición fue rápida (${DUR_D}s) -- sin reintento/retraso indebido cuando no hubo falla de transporte"; else fallo "la petición tardó ${DUR_D}s -- posible retraso indebido en el camino feliz"; fi
+# Se removió el umbral de duración (antes: "DUR_D -lt 2s") tras confirmar con 6
+# corridas de FASE D en staging (2026-09-05, ver hilo de validación) que la
+# latencia del Service Layer de SAP al rechazar por "Posting period locked"
+# varía legítimamente entre ~1.2s y ~7s de una corrida a otra -- en las 6
+# corridas revisadas, incluida la más lenta (~7s) con su log completo
+# inspeccionado línea por línea, no apareció ninguna línea de "reintentando"
+# ni de renovación de sesión SAP (esta última se descartó explícitamente como
+# causa). Un umbral de tiempo fijo mide latencia externa de SAP, no el
+# comportamiento del Cambio 1 -- lo único que este script puede afirmar con
+# evidencia es "no hubo reintento", igual que en las demás fases.
+if [ -f "$BACKEND_LOG" ]; then
+  REINTENTO_INDEBIDO_D=$(evidencia_reintento "$MARK_D" "$MASA_NORMAL")
+  if [ -z "$REINTENTO_INDEBIDO_D" ]; then
+    ok "log confirma: ninguna línea de 'reintentando' para masa $MASA_NORMAL (duración ${DUR_D}s no atribuible a un reintento indebido)"
+  else
+    fallo "el log muestra reintento en el camino feliz (no debería reintentarse si no hubo falla de transporte): $REINTENTO_INDEBIDO_D"
+  fi
+else
+  echo "AVISO: no se encontró $BACKEND_LOG -- ajustar BACKEND_LOG= si el log vive en otra ruta/journalctl"
+fi
 
 FASE_D_FINAL=$(psql_q "SELECT fase_actual FROM masas_produccion WHERE id=$MASA_NORMAL;")
 if [ "$HTTP_D" = "200" ]; then
