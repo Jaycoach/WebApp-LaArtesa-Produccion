@@ -152,6 +152,11 @@ if [ -z "$TEST_USER_ID" ]; then
   exit 1
 fi
 ok "usuario de prueba creado: $TEST_USERNAME (id $TEST_USER_ID, rol ADMIN, se desactiva al final)"
+# auth.js compara decoded.iat (segundos enteros) contra ultimo_cambio_password
+# (con milisegundos); si el login ocurre en el mismo segundo del INSERT, iat
+# trunca por debajo del timestamp con fracción y el token queda invalidado de
+# inmediato ("Sesión inválida"). Se separa deliberadamente el INSERT del login.
+sleep 2
 
 echo ""
 echo "===================================================="
