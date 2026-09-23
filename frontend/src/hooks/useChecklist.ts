@@ -20,7 +20,7 @@ export const useChecklist = (masaId: number) => {
     queryKey: CHECKLIST_QUERY_KEYS.byMasa(masaId),
     queryFn: () => checklistService.getChecklist(masaId),
     enabled: !!masaId,
-    refetchInterval: 5000, // Refrescar cada 5 segundos
+    refetchInterval: 15000, // Refrescar cada 15 segundos
     // Con refetchInterval activo, cualquier poll fallido (red inestable en planta)
     // no debe tumbar `checklist` a undefined y disparar "Masa no encontrada".
     placeholderData: keepPreviousData,
