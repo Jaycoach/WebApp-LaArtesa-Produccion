@@ -47,6 +47,23 @@ const initializeRedis = () => {
 };
 
 /**
+ * Extrae y valida el JWT de la petición (header Authorization o cookie).
+ * Devuelve el payload decodificado si el token es válido, o null si no hay
+ * token o es inválido/expirado.
+ */
+const getValidatedToken = (req) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : req.cookies?.token;
+  if (!token) return null;
+  try {
+    const decoded = jwt.verify(token, config.jwt.secret);
+    return decoded?.id ? decoded : null;
+  } catch (err) {
+    return null;
+  }
+};
+
+/**
  * Manejador de error estándar para rate limiting
  */
 const defaultHandler = (limitType, message) => (req, res) => {
@@ -83,27 +100,27 @@ const defaultHandler = (limitType, message) => (req, res) => {
  */
 const generalLimiter = rateLimit({
   windowMs: config.rateLimit.windowMs || 15 * 60 * 1000,
-  max: config.rateLimit.max || 500, // Incrementado de 100 a 500 para desarrollo
+  // express-rate-limit v7.5.1 (confirmado en node_modules/express-rate-limit/
+  // dist/index.d.mts): `limit` es la opción canónica, `max` queda como alias
+  // deprecado. Tipo: `number | ValueDeterminingMiddleware<number>`, donde
+  // `ValueDeterminingMiddleware<T> = (request, response) => T | Promise<T>`.
+  limit: (req) => {
+    const decoded = getValidatedToken(req);
+    if (decoded) return config.rateLimit.userMax || 2000;
+    return config.rateLimit.max || 500; // Incrementado de 100 a 500 para desarrollo
+  },
   standardHeaders: true,
   legacyHeaders: false,
   handler: defaultHandler('GENERAL', 'Demasiadas peticiones desde esta IP. Por favor intenta de nuevo más tarde.'),
   skip: (req) => {
-    // Excepciones: health check y swagger
-    const excludedPaths = ['/health', '/api-docs', '/swagger'];
+    // Excepciones: health check, swagger y version (no requieren protección)
+    const excludedPaths = ['/health', '/api-docs', '/swagger', '/version'];
     return excludedPaths.some((path) => req.path.startsWith(path));
   },
   keyGenerator: (req) => {
-    const authHeader = req.headers.authorization;
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : req.cookies?.token;
-    if (token) {
-      try {
-        const decoded = jwt.verify(token, config.jwt.secret);
-        if (decoded?.id) return `user_${decoded.id}`;
-      } catch (err) {
-        // Token inválido/expirado: cae a IP, no bloquea la petición aquí
-      }
-    }
-    return `ip_${req.headers['x-forwarded-for'] || req.ip}`;
+    const decoded = getValidatedToken(req);
+    if (decoded) return `user_${decoded.id}`;
+    return `ip_${req.headers['x-real-ip'] || req.ip}`;
   },
 });
 
@@ -123,7 +140,7 @@ const authLimiter = rateLimit({
   keyGenerator: (req) => {
     // Limitar por username + IP para prevenir ataques distribuidos
     const username = req.body?.username || 'unknown';
-    const ip = req.headers['x-forwarded-for'] || req.ip;
+    const ip = req.headers['x-real-ip'] || req.ip;
     return `${ip}_${username}`;
   },
 });

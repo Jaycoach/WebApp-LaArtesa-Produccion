@@ -60,6 +60,7 @@ module.exports = {
   rateLimit: {
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 15 * 60 * 1000, // 15 minutos
     max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS, 10) || 100,
+    userMax: parseInt(process.env.RATE_LIMIT_USER_MAX_REQUESTS, 10) || 2000,
     message: 'Demasiadas solicitudes desde esta IP, por favor intente más tarde',
     standardHeaders: true,
     legacyHeaders: false,
