@@ -1,6 +1,18 @@
 #!/bin/bash
 # ============================================================================
 # test_rate_limit_diferenciado.sh
+#
+# >>> SOLO STAGING <<< Este script firma un JWT con el JWT_SECRET real leído
+# de backend/.env y hace login con usuario inexistente. NUNCA correrlo contra
+# producción. Aborta solo si detecta NODE_ENV=production (ver chequeo abajo);
+# aun así, es responsabilidad de quien lo ejecuta invocarlo SIEMPRE desde el
+# host de staging.
+#
+# Este script se ejecuta DESDE EL REPO YA DESPLEGADO en el servidor (staging),
+# igual que el resto de scripts/tests/ — NUNCA se copia a un servidor por SSH
+# fuera de deploy.sh. Si el archivo no está en el repo remoto, es porque aún
+# no se desplegó: hay que esperar al deploy, no copiarlo manualmente.
+#
 # Script de aceptación — C1 (límite diferenciado por token + IP real +
 # exclusión de /version), C2 (authLimiter en login).
 #
@@ -17,25 +29,31 @@
 #   3. Una petición con JWT válido trae RateLimit-Limit = RATE_LIMIT_USER_MAX_REQUESTS.
 #   4. Mismo X-Real-IP con X-Forwarded-For distinto en cada request cae en
 #      la MISMA cubeta (RateLimit-Remaining baja de forma monótona).
-#   5. POST /api/auth/login con usuario inexistente responde 429 tras
-#      agotar el cupo de authLimiter (NO usa cuentas reales — evita tocar
-#      intentos_fallidos/bloqueado_hasta de usuarios de producción).
+#   5. POST /api/auth/login con usuario inexistente pero con formato válido
+#      (username/password no vacíos, cumple loginValidation) responde 429
+#      tras agotar el cupo de authLimiter. NOTA: en este backend,
+#      "credenciales inválidas" se mapea a HTTP 400, NO 401
+#      (auth.controller.js líneas ~82-99, array `businessErrors` — es
+#      lógica de negocio explícita, no un error de validación de formato).
+#      Por eso este script no asume 401: solo exige que cada intento fallido
+#      responda con un status de error (4xx, distinto de 429) hasta que el
+#      limiter corte con 429. NO usa cuentas reales — evita tocar
+#      intentos_fallidos/bloqueado_hasta de usuarios de producción.
 #
 # Manejo de credenciales (secrets-hygiene-in-tests): el JWT de prueba se
 # firma en runtime con JWT_SECRET leído del .env real (nunca hardcodeado
-# en este archivo), con un id de usuario inventado. El login de prueba usa
-# un username inexistente generado con PID+random, nunca una cuenta real.
-# La salida de curl se filtra con jq — nunca se vuelca el body crudo
-# (podría reflejar el username/password enviado).
+# en este archivo, nunca impreso — ver `run_node` abajo, que solo devuelve
+# el JWT ya firmado, jamás el secreto). El login de prueba usa un username
+# inexistente generado con PID+random, nunca una cuenta real. La salida de
+# curl se filtra — nunca se vuelca el body crudo (podría reflejar el
+# username/password enviado). JWT_SECRET y TEST_JWT se `unset` al final.
 #
-# Uso:
-#   API_URL=http://localhost:3000/api bash scripts/tests/test_rate_limit_diferenciado.sh
-#   (por defecto API_URL=http://localhost:3000/api — para correr EN
-#   staging/producción, ejecutar este script vía SSH en esa máquina, igual
-#   que el resto de scripts/tests/, apuntando a su propio localhost:3000)
+# Uso (siempre en staging, desde la raíz del repo ya desplegado):
+#   bash scripts/tests/test_rate_limit_diferenciado.sh
+#   (API_URL por defecto: http://localhost:3000/api — el propio backend
+#   local del servidor, no a través de NGINX)
 #
-# Requiere: curl, jq, node (para firmar el JWT de prueba con el secreto
-# real del backend).
+# Requiere: curl, node (para firmar el JWT de prueba con el secreto real).
 # ============================================================================
 
 set -uo pipefail
@@ -54,6 +72,16 @@ run_node() {
   fi
 }
 
+# --- Guardas de entorno: nunca correr esto contra producción ---
+if [ "${NODE_ENV:-}" = "production" ]; then
+  echo "FALLO: NODE_ENV=production detectado en el entorno del shell — abortando. Este script es SOLO STAGING."
+  exit 1
+fi
+if [ -f "$ENV_FILE" ] && grep -qE '^NODE_ENV=production\s*$' "$ENV_FILE"; then
+  echo "FALLO: backend/.env tiene NODE_ENV=production — abortando. Este script es SOLO STAGING."
+  exit 1
+fi
+
 if [ ! -f "$ENV_FILE" ]; then
   echo "FALLO: no se encontró $ENV_FILE — no se puede firmar un JWT de prueba con el secreto real."
   exit 1
@@ -64,6 +92,10 @@ if [ -z "$JWT_SECRET" ]; then
   exit 1
 fi
 
+# run_node firma el JWT DENTRO del proceso node y solo imprime el JWT ya
+# firmado (jwt.sign(...)) — el secreto nunca pasa por un `echo`/`console.log`
+# propio, solo se usa como argumento posicional de node (no queda en $0 de
+# un proceso separado grep-eable: se invoca dentro de esta misma shell).
 TEST_JWT=$(cd "$REPO_ROOT/backend" && run_node -e "
 const jwt = require('jsonwebtoken');
 console.log(jwt.sign({ id: 999999 }, process.argv[1], { expiresIn: '5m' }));
@@ -71,9 +103,11 @@ console.log(jwt.sign({ id: 999999 }, process.argv[1], { expiresIn: '5m' }));
 
 if [ -z "$TEST_JWT" ]; then
   fallo "no se pudo firmar el JWT de prueba"
+  unset JWT_SECRET
   exit 1
 fi
-ok "JWT de prueba firmado con el JWT_SECRET real del .env (id inventado, no corresponde a un usuario real)"
+ok "JWT de prueba firmado (id inventado, no corresponde a un usuario real) — el secreto no se imprime"
+unset JWT_SECRET
 
 echo ""
 echo "===================================================="
@@ -127,12 +161,19 @@ fi
 
 echo ""
 echo "===================================================="
-echo "5) Login con usuario inexistente: authLimiter responde 429 tras agotar el cupo"
+echo "5) Login con usuario inexistente (formato válido): authLimiter responde 429 tras agotar el cupo"
 echo "===================================================="
+# Formato válido según loginValidation (auth.validator.js): username y
+# password no vacíos — eso basta para pasar express-validator y llegar al
+# controller. La respuesta a "credenciales inválidas" es 400 en este
+# backend (no 401 — ver nota arriba), así que solo exigimos: cada intento
+# devuelve un status de error != 429 hasta que el limiter corta con 429.
 FAKE_USER="test_ratelimit_login_$$_$RANDOM"
 LAST_STATUS=""
+UNEXPECTED=0
+LOGIN_BODY_FILE=$(mktemp)
 for i in $(seq 1 25); do
-  RESP=$(curl -s -o /tmp/rl_login_body.json -w "%{http_code}" -X POST "$API_URL/auth/login" \
+  RESP=$(curl -s -o "$LOGIN_BODY_FILE" -w "%{http_code}" -X POST "$API_URL/auth/login" \
     -H "Content-Type: application/json" \
     -H "x-real-ip: 203.0.113.50" \
     -d "{\"username\":\"$FAKE_USER\",\"password\":\"no-existe-$RANDOM\"}")
@@ -140,13 +181,21 @@ for i in $(seq 1 25); do
   if [ "$RESP" = "429" ]; then
     break
   fi
+  # Antes del bloqueo, cualquier respuesta 2xx sería inesperada (implicaría
+  # que el usuario inventado existe o que el login no está validando nada).
+  case "$RESP" in
+    2??) UNEXPECTED=1 ;;
+  esac
 done
-rm -f /tmp/rl_login_body.json
-if [ "$LAST_STATUS" = "429" ]; then
+rm -f "$LOGIN_BODY_FILE"
+if [ "$UNEXPECTED" = "1" ]; then
+  fallo "el login con usuario inexistente devolvió un status 2xx en algún intento — inesperado"
+elif [ "$LAST_STATUS" = "429" ]; then
   ok "authLimiter bloqueó el login con usuario inexistente tras $i intentos (status 429)"
 else
   fallo "no se alcanzó 429 en 25 intentos de login con usuario inexistente (último status: $LAST_STATUS) — authLimiter no parece estar aplicado"
 fi
+unset TEST_JWT
 
 echo ""
 echo "===================================================="
