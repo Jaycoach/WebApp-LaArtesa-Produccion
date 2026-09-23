@@ -67,9 +67,16 @@ const getValidatedToken = (req) => {
  * Manejador de error estándar para rate limiting
  */
 const defaultHandler = (limitType, message) => (req, res) => {
-  const retryAfter = req.rateLimit?.resetTime || Math.ceil(
-    (req.rateLimit?.retryAfter || 60) / 1000,
-  );
+  // express-rate-limit v7.5.1 (confirmado en node_modules/express-rate-limit/
+  // dist/index.d.mts, ClientRateLimitInfo): req.rateLimit solo expone
+  // `resetTime` (Date|undefined) — nunca existió un campo `retryAfter`, así
+  // que la rama `Math.ceil((req.rateLimit?.retryAfter || 60) / 1000)` era
+  // código muerto y `retryAfter` terminaba siendo el propio `resetTime`
+  // (una fecha), no un número de segundos.
+  const resetTime = req.rateLimit?.resetTime;
+  const retryAfter = resetTime
+    ? Math.max(0, Math.ceil((resetTime.getTime() - Date.now()) / 1000))
+    : 60;
 
   logger.logSecurity(`RATE_LIMIT_EXCEEDED_${limitType}`, {
     ip: req.ip,
@@ -87,7 +94,7 @@ const defaultHandler = (limitType, message) => (req, res) => {
       type: limitType,
       message,
       retryAfter,
-      resetTime: new Date(Date.now() + retryAfter * 1000).toISOString(),
+      resetTime: (resetTime || new Date(Date.now() + retryAfter * 1000)).toISOString(),
     },
   });
 };
