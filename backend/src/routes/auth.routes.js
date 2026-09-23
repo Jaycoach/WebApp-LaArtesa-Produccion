@@ -7,6 +7,7 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/auth.controller');
 const { verifyToken } = require('../middleware/auth');
+const { auth: authLimiter } = require('../middleware/rateLimiter');
 const {
   registerValidation,
   loginValidation,
@@ -166,7 +167,7 @@ router.post('/register', registerValidation, authController.register);
  *       500:
  *         description: Error del servidor
  */
-router.post('/login', loginValidation, authController.login);
+router.post('/login', authLimiter, loginValidation, authController.login);
 
 /**
  * @swagger
