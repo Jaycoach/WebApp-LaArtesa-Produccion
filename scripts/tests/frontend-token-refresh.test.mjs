@@ -46,12 +46,19 @@ import os from 'node:os';
 import { createRequire } from 'node:module';
 import crypto from 'node:crypto';
 
+// Un error de axios sin capturar vuelca la configuración de la petición (incluido el cuerpo con la
+// contraseña de prueba). Ningún error debe llegar a la salida sin sanear.
+const saneado = (e) => (e && e.response ? `HTTP ${e.response.status}` : (e && e.code) || (e && e.message) || 'error');
+process.on('uncaughtException', (e) => { console.log(`FALLO: excepción no controlada en el harness (${saneado(e)})`); process.exit(1); });
+process.on('unhandledRejection', (e) => { console.log(`FALLO: promesa rechazada sin controlar en el harness (${saneado(e)})`); process.exit(1); });
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const API_URL = process.env.API_URL || 'http://localhost:3000/api';
 const TEST_USERNAME = process.env.TEST_USERNAME;
 const TEST_PASSWORD = process.env.TEST_PASSWORD;
 const NEW_PASSWORD = process.env.NEW_PASSWORD;
+let claveActual = TEST_PASSWORD; // F7 la cambia; los escenarios posteriores deben usar la vigente
 
 if (!TEST_USERNAME || !TEST_PASSWORD || !NEW_PASSWORD) {
   console.error('FALLO: faltan TEST_USERNAME / TEST_PASSWORD / NEW_PASSWORD en el entorno');
@@ -144,9 +151,13 @@ function tokenVencido(payload) {
 // --- login real (HTTP) para obtener sesión legítima ---
 async function loginReal() {
   const axios = requireFromFrontend('axios');
-  const r = await axios.post(`${API_URL}/auth/login`, { username: TEST_USERNAME, password: TEST_PASSWORD },
-    { headers: { 'X-Real-IP': '198.51.100.77', 'User-Agent': 'frontend-token-refresh-test/1.0' } });
-  return r.data.data; // { user, accessToken, refreshToken }
+  try {
+    const r = await axios.post(`${API_URL}/auth/login`, { username: TEST_USERNAME, password: claveActual },
+      { headers: { 'X-Real-IP': '198.51.100.77', 'User-Agent': 'frontend-token-refresh-test/1.0' } });
+    return r.data.data; // { user, accessToken, refreshToken }
+  } catch (e) {
+    throw new Error(`login de prueba falló (${saneado(e)})`);
+  }
 }
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 async function nuevaSesionConAccessVencido() {
@@ -281,6 +292,7 @@ localStorage.setItem('refresh_token', dActual.refreshToken); // tal como lo deja
 let cambioOk = true;
 try { await authService.changePassword(TEST_PASSWORD, NEW_PASSWORD); } catch (e) { cambioOk = false; console.log(`  error: ${e.message}`); }
 check(cambioOk, 'F7: authService.changePassword terminó con éxito', 'F7: authService.changePassword falló');
+if (cambioOk) claveActual = NEW_PASSWORD;
 const stOtra = await refrescarCon(dOtra.refreshToken);
 // Con sesión única la otra estación ya cayó al iniciar sesión la actual; la revocación por cambio de
 // contraseña con varias sesiones vivas se prueba en test_sesion_unica.sh (caso 4).
