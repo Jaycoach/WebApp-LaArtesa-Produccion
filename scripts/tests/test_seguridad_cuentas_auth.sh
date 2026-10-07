@@ -162,6 +162,15 @@ bloqueado_null() { psql_q "SELECT bloqueado_hasta IS NULL FROM usuarios WHERE id
 sesiones_activas() { psql_q "SELECT count(*) FROM usuarios_sesiones WHERE usuario_id=$1 AND revocado=false;"; }
 sesiones_total() { psql_q "SELECT count(*) FROM usuarios_sesiones WHERE usuario_id=$1;"; }
 historial_count() { psql_q "SELECT count(*) FROM usuarios_historial_passwords WHERE usuario_id=$1;"; }
+# Con la SESIÓN ÚNICA un segundo login del mismo usuario cierra el primero, así que las "otras estaciones"
+# con sesión viva se simulan insertando filas en usuarios_sesiones (refresh token aleatorio, sin JWT real).
+# Los asserts de conteo de sesiones de las secciones 2 y 2e se mantienen idénticos.
+insertar_sesiones_extra() { # usuario_id n
+  local i
+  for i in $(seq 1 "$2"); do
+    psql_q "INSERT INTO usuarios_sesiones (usuario_id, refresh_token, expires_at, ip_address, user_agent) VALUES ($1, '$(rand_chars 48 'A-Za-z0-9')', NOW() + INTERVAL '7 days', '198.51.100.$((140+i))', 'estacion-extra-$i/1.0');" > /dev/null
+  done
+}
 audit_count() { # usuario_id motivo_prefijo
   psql_q "SELECT count(*) FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id=$1 AND motivo LIKE '$2%';"
 }
@@ -293,8 +302,7 @@ preparar_usuario_con_sesiones() { # rol pw -> setea P_ID P_NAME P_PW S1_ACCESS S
   P_PW="$2"; registrar_secreto "$P_PW"
   crear_usuario "$1" "$P_PW"; P_ID="$NEW_ID"; P_NAME="$NEW_NAME"
   nuevo_login "$P_NAME" "$P_PW" 198.51.100.41; S1_ACCESS="$ACCESS"; S1_REFRESH="$REFRESH"
-  nuevo_login "$P_NAME" "$P_PW" 198.51.100.42
-  nuevo_login "$P_NAME" "$P_PW" 198.51.100.43
+  insertar_sesiones_extra "$P_ID" 2   # otras 2 estaciones con sesión viva (3 en total, como antes)
 }
 
 echo "-- 2a) changePassword CON refreshToken de la sesión actual => se conserva esa sesión, el resto se revoca"
@@ -427,7 +435,8 @@ assert_eq "tras el unlock la API ya no informa bloqueo (se refleja en la UI)" "$
 echo ""
 echo "-- 4b) filas de auditoría de ESTA corrida (sin hash, token ni contraseña)"
 IDS_PRUEBA=$(IFS=,; echo "${TEST_USER_IDS[*]}")
-psql_tab "SELECT id, registro_id AS objetivo, operacion, campos_modificados, usuario_id AS actor, usuario_nombre, host(ip_address) AS ip, left(user_agent,24) AS ua, motivo, datos_nuevos FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id IN ($IDS_PRUEBA) ORDER BY id;"
+psql_tab "SELECT id, registro_id AS objetivo, operacion, campos_modificados, usuario_id AS actor, usuario_nombre, host(ip_address) AS ip, left(user_agent,24) AS ua, motivo, datos_nuevos FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id IN ($IDS_PRUEBA) AND motivo NOT LIKE 'SESION_REEMPLAZADA%' ORDER BY id;"
+echo "(las filas SESION_REEMPLAZADA que generan los logins repetidos de esta prueba se verifican en test_sesion_unica.sh; aquí: $(psql_q "SELECT count(*) FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id IN ($IDS_PRUEBA) AND motivo LIKE 'SESION_REEMPLAZADA%';") filas)"
 assert_eq "CAMBIO_PASSWORD (C1)"             "$(audit_count "$C1" CAMBIO_PASSWORD)" "1"
 assert_eq "CAMBIO_PASSWORD (C2)"             "$(audit_count "$C2" CAMBIO_PASSWORD)" "1"
 assert_eq "auditoría C1: sesion_actual_conservada = true (se envió su refreshToken y esa sesión sigue viva)" "$(psql_q "SELECT datos_nuevos->>'sesion_actual_conservada' FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id=$C1 AND motivo LIKE 'CAMBIO_PASSWORD%' ORDER BY id DESC LIMIT 1;")" "true"
@@ -496,7 +505,9 @@ echo "Sesiones de la prueba (login y rotación caen en el mismo segundo; evidenc
 psql_tab "SELECT id, revocado, to_char(created_at,'HH24:MI:SS') AS segundo FROM usuarios_sesiones WHERE usuario_id=$R_ID ORDER BY id LIMIT 10;"
 assert_eq "5 rondas login->refresh en el mismo segundo => HTTP 200 en todas (antes: 409/23505)" "$OK7A" "5"
 assert_eq "el refresh token rotado es distinto del anterior en las 5 rondas" "$DISTINTOS" "5"
-assert_eq "tras 5 rondas hay 5 sesiones vivas (una por ronda) y las 5 viejas revocadas" "$(sesiones_activas "$R_ID")|$(psql_q "SELECT count(*) FROM usuarios_sesiones WHERE usuario_id=$R_ID AND revocado=true;")" "5|5"
+# Con la sesión única cada login cierra la sesión de la ronda anterior: de las 10 filas (5 logins + 5 rotaciones)
+# queda UNA viva y 9 revocadas (antes: 5 vivas y 5 revocadas). La aserción es más estricta, no más débil.
+assert_eq "tras 5 rondas (5 logins + 5 rotaciones = 10 filas) queda UNA sesión viva y 9 revocadas" "$(sesiones_activas "$R_ID")|$(psql_q "SELECT count(*) FROM usuarios_sesiones WHERE usuario_id=$R_ID AND revocado=true;")" "1|9"
 
 echo ""
 echo "-- 7b) DOS refresh SIMULTÁNEOS con el mismo token: uno gana, el otro falla limpio (5 rondas)"
@@ -504,7 +515,7 @@ ACTIVAS_BASE=$(sesiones_activas "$R_ID")
 GANA_OK=0; PIERDE_OK=0; SESION_OK=0; ESPERADO=$ACTIVAS_BASE
 for i in 1 2 3 4 5; do
   login "$R_NAME" "$PW_R" 198.51.100.82
-  RT="$REFRESH"; ESPERADO=$((ESPERADO+1))
+  RT="$REFRESH"; ESPERADO=1   # sesión única: cada login cierra la ronda anterior, siempre queda 1 viva
   REQ_ESTE=$(R="$RT" jq -n '{refreshToken:env.R}')
   rm -f "/tmp/par1_$$" "/tmp/par2_$$" "/tmp/par1b_$$" "/tmp/par2b_$$"
   ( printf '%s' "$REQ_ESTE" | curl -s -o "/tmp/par1b_$$" -w '%{http_code}' -X POST "$API_URL/auth/refresh" -H 'Content-Type: application/json' -H 'X-Real-IP: 198.51.100.82' --data-binary @- > "/tmp/par1_$$" ) &
@@ -581,7 +592,7 @@ else
   echo "AVISO: user_hierarchy_and_full_regression.sh desactiva BREVEMENTE a los admins REALES de staging y los restaura (trap)."
   echo "Admins reales ANTES de la regresión:"; psql_tab "$SQL_ADMINS_REALES"
   ADMINS_ANTES=$(psql_q "SELECT string_agg(id||':'||activo::text, ',' ORDER BY id) FROM usuarios WHERE rol='ADMIN' AND username !~ '^test_' AND username !~ '_DEACTIVATED$'")
-  for s in test_error_desconocido_cambio_password.sh fix-audit-session-trigger.sh user_hierarchy_and_full_regression.sh test_session_replaced_guard.sh test_rate_limit_diferenciado.sh; do
+  for s in test_error_desconocido_cambio_password.sh fix-audit-session-trigger.sh user_hierarchy_and_full_regression.sh test_session_replaced_guard.sh test_rate_limit_diferenciado.sh test_sesion_unica.sh; do
     echo ""; echo "-- $s"
     if [ -f "$REPO_ROOT/scripts/tests/$s" ]; then
       if bash "$REPO_ROOT/scripts/tests/$s" > "/tmp/reg_$s.out" 2>&1; then
@@ -602,7 +613,7 @@ fi
 seccion "SANIDAD DE SECRETOS (secrets-hygiene-in-tests, regla 6)"
 # ===========================================================================
 # Lista explícita (el árbol de staging puede tener archivos sucios ajenos a esta tarea).
-ARCHIVOS_TOCADOS="backend/src/utils/clientInfo.js backend/src/utils/__tests__/clientInfo.test.js backend/src/services/securityHelpers.js backend/src/services/auth.service.js backend/src/services/user.service.js backend/src/controllers/auth.controller.js backend/src/controllers/user.controller.js backend/src/services/__tests__/auth.service.security.test.js backend/src/services/__tests__/passwords.flujos.test.js backend/src/services/__tests__/auditoria.seguridad.test.js backend/src/services/__tests__/helpers/secretos.js backend/src/services/__tests__/helpers/fakeClient.js backend/src/services/__tests__/refresh.transaccional.test.js backend/src/utils/jwt.js frontend/src/services/api.ts frontend/src/services/authService.ts frontend/src/utils/bloqueoCuenta.ts frontend/src/pages/Configuracion/GestionUsuarios.tsx scripts/tests/test_seguridad_cuentas_auth.sh scripts/tests/frontend-token-refresh.test.mjs scripts/tests/frontend-bloqueo-cuenta.test.mjs"
+ARCHIVOS_TOCADOS="backend/src/utils/clientInfo.js backend/src/utils/__tests__/clientInfo.test.js backend/src/services/securityHelpers.js backend/src/services/auth.service.js backend/src/services/user.service.js backend/src/controllers/auth.controller.js backend/src/controllers/user.controller.js backend/src/services/__tests__/auth.service.security.test.js backend/src/services/__tests__/passwords.flujos.test.js backend/src/services/__tests__/auditoria.seguridad.test.js backend/src/services/__tests__/helpers/secretos.js backend/src/services/__tests__/helpers/fakeClient.js backend/src/services/__tests__/refresh.transaccional.test.js backend/src/utils/jwt.js frontend/src/services/api.ts frontend/src/services/authService.ts frontend/src/utils/bloqueoCuenta.ts frontend/src/pages/Configuracion/GestionUsuarios.tsx scripts/tests/test_seguridad_cuentas_auth.sh scripts/tests/frontend-token-refresh.test.mjs scripts/tests/frontend-bloqueo-cuenta.test.mjs backend/src/config/index.js backend/src/middleware/auth.js backend/src/middleware/errorHandler.js backend/src/middleware/__tests__/auth.sid.test.js backend/src/services/__tests__/sesion.unica.test.js frontend/src/utils/sesionReemplazada.ts frontend/src/pages/Login/Login.tsx scripts/tests/test_sesion_unica.sh"
 echo "Archivos revisados:"; echo "$ARCHIVOS_TOCADOS" | tr ' ' '\n' | sed 's/^/  /'
 # Patrones (NO se excluyen líneas por contener "test": ahí viven justo los literales que importan):
 #   1) identificador de aspecto secreto asignado a un literal entre comillas (propiedad u

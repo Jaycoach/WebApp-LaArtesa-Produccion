@@ -23,6 +23,10 @@
  *       reintenta con el token nuevo SIN llamar a /auth/refresh.
  *   F0  COLISIÓN EXPLÍCITA (punto 7): login y refresh en el MISMO segundo, 5 veces
  *       seguidas, sin esperas -> todas las renovaciones tienen éxito (antes: 409/23505).
+ *   F8  sesión única (punto 8e): 401 con code SESSION_REPLACED (sesión reemplazada por otro
+ *       login, y access token SIN sid) => 0 llamadas a /auth/refresh, limpia la sesión,
+ *       redirige a /login, deja el aviso UNA sola vez y no hay bucle (5 peticiones
+ *       simultáneas => 5 llamadas, ninguna reintentada).
  *   F7  cambio de contraseña real (authService.changePassword con el refresh_token
  *       de localStorage): la sesión desde la que se cambia se CONSERVA y la de otra
  *       estación se revoca (el usuario que cambia su clave no queda expulsado).
@@ -75,6 +79,12 @@ globalThis.localStorage = {
   removeItem: (k) => { store.delete(k); },
   clear: () => store.clear(),
 };
+const sstore = new Map();
+globalThis.sessionStorage = {
+  getItem: (k) => (sstore.has(k) ? sstore.get(k) : null),
+  setItem: (k, v) => { sstore.set(k, String(v)); },
+  removeItem: (k) => { sstore.delete(k); },
+};
 globalThis.window = { location: { href: '', pathname: '/dashboard' }, addEventListener() {}, removeEventListener() {} };
 
 // --- compilar el api.ts REAL ---
@@ -93,6 +103,14 @@ buildSync({
 });
 const { apiService } = await import(`file://${outfile}`);
 fs.rmSync(outfile, { force: true });
+// utilidad real del aviso (la misma que lee la pantalla de login)
+const outAviso = path.join(os.tmpdir(), `sesionReemplazada.${Date.now()}.cjs`);
+buildSync({
+  entryPoints: [path.join(REPO_ROOT, 'frontend/src/utils/sesionReemplazada.ts')],
+  bundle: true, platform: 'node', format: 'cjs', outfile: outAviso, logLevel: 'silent',
+});
+const { consumirAvisoSesionReemplazada, MENSAJE_SESION_REEMPLAZADA } = await import(`file://${outAviso}`);
+fs.rmSync(outAviso, { force: true });
 // authService real (misma clase que usa la pantalla de cambio de contraseña)
 const outAuth = path.join(os.tmpdir(), `authService.refresh.${Date.now()}.cjs`);
 buildSync({
@@ -219,7 +237,7 @@ inst.defaults.adapter = adapterOriginal;
 console.log('\n=== F6: otra pestaña ya rotó el token -> reintento con el token nuevo, sin /auth/refresh ===');
 const d6 = await nuevaSesionConAccessVencido();
 // Simula que OTRA pestaña, entre el envío y el 401, ya renovó y dejó un access vigente:
-const vigente = jwt.sign({ id: d6.user.id, username: d6.user.username, email: d6.user.email, rol: d6.user.rol }, JWT_SECRET, { expiresIn: '5m' });
+const vigente = jwt.sign({ id: d6.user.id, username: d6.user.username, email: d6.user.email, rol: d6.user.rol, sid: jwt.decode(d6.accessToken).sid }, JWT_SECRET, { expiresIn: '5m' });
 inst.interceptors.request.use((cfg) => {
   // Solo en el primer envío: tras salir con el token viejo, "otra pestaña" escribe el nuevo.
   if (!globalThis.__otraPestaña && (cfg.url || '').includes('/auth/profile')) {
@@ -255,8 +273,8 @@ const refrescarCon = async (rt) => {
   try { const r = await axiosReal.post(`${API_URL}/auth/refresh`, { refreshToken: rt }); return r.status; }
   catch (e) { return e.response ? e.response.status : 0; }
 };
-const dActual = await loginReal();      // la estación que cambia la clave
 const dOtra = await loginReal();        // otra estación con sesión abierta
+const dActual = await loginReal();      // la estación que cambia la clave (con sesión única cierra la de arriba)
 store.clear();
 localStorage.setItem('auth_token', dActual.accessToken);
 localStorage.setItem('refresh_token', dActual.refreshToken); // tal como lo deja authService.login
@@ -264,9 +282,69 @@ let cambioOk = true;
 try { await authService.changePassword(TEST_PASSWORD, NEW_PASSWORD); } catch (e) { cambioOk = false; console.log(`  error: ${e.message}`); }
 check(cambioOk, 'F7: authService.changePassword terminó con éxito', 'F7: authService.changePassword falló');
 const stOtra = await refrescarCon(dOtra.refreshToken);
-check(stOtra === 400, `F7: la sesión de la OTRA estación quedó revocada (refresh => HTTP ${stOtra})`, `F7: la otra estación NO quedó revocada (HTTP ${stOtra}, se esperaba 400)`);
+// Con sesión única la otra estación ya cayó al iniciar sesión la actual; la revocación por cambio de
+// contraseña con varias sesiones vivas se prueba en test_sesion_unica.sh (caso 4).
+check(stOtra === 400, `F7: la sesión de la OTRA estación está revocada (refresh => HTTP ${stOtra})`, `F7: la otra estación NO está revocada (HTTP ${stOtra}, se esperaba 400)`);
 const stActual = await refrescarCon(dActual.refreshToken);
 check(stActual === 200, `F7: la sesión que cambió la clave SIGUE viva (refresh => HTTP ${stActual}): no queda expulsada`, `F7: la sesión que cambió la clave quedó revocada (HTTP ${stActual}, se esperaba 200)`);
+
+// ============================ F8 ============================
+console.log('\n=== F8: SESSION_REPLACED => sin renovar, limpia sesión, redirige a /login, aviso UNA vez, sin bucle ===');
+const restablecerNavegador = () => {
+  store.clear();
+  sstore.clear();
+  globalThis.window.location.href = '';
+  globalThis.window.location.pathname = '/dashboard';
+  reset();
+};
+
+// F8a: sesión reemplazada de verdad (el login B cierra la sesión de A)
+const A = await loginReal();
+const B = await loginReal();
+restablecerNavegador();
+localStorage.setItem('auth_token', A.accessToken);
+localStorage.setItem('refresh_token', A.refreshToken);
+let r8;
+try { r8 = await apiService.get('/auth/profile'); } catch (e) { r8 = { rejected: true, e }; }
+console.log(`peticiones: ${peticiones.map((p) => `${p.method} ${p.url}`).join(' | ')}`);
+check(r8 && r8.rejected === true, 'F8a: la petición con el access token de A se rechazó', 'F8a: la petición NO se rechazó');
+check(contar('/auth/refresh') === 0, 'F8a: 0 llamadas a /auth/refresh (no se intenta renovar)', `F8a: /auth/refresh llamado ${contar('/auth/refresh')} veces`);
+check(contar('/auth/profile') === 1, 'F8a: la petición no se reintentó (1 sola llamada)', `F8a: /auth/profile llamado ${contar('/auth/profile')} veces`);
+check(globalThis.window.location.href === '/login', 'F8a: redirigió a /login', `F8a: href=${JSON.stringify(globalThis.window.location.href)}`);
+check(localStorage.getItem('auth_token') === null && localStorage.getItem('refresh_token') === null, 'F8a: sesión limpiada (auth_token y refresh_token)', 'F8a: quedaron tokens');
+check(consumirAvisoSesionReemplazada() === MENSAJE_SESION_REEMPLAZADA, `F8a: el login muestra el aviso: "${MENSAJE_SESION_REEMPLAZADA}"`, 'F8a: no había aviso pendiente');
+check(consumirAvisoSesionReemplazada() === '', 'F8a: el aviso se muestra UNA sola vez (la segunda lectura está vacía)', 'F8a: el aviso se repite');
+
+// F8b: 5 peticiones simultáneas con la sesión reemplazada: sin bucle, aviso único
+restablecerNavegador();
+localStorage.setItem('auth_token', A.accessToken);
+localStorage.setItem('refresh_token', A.refreshToken);
+const res8b = await Promise.allSettled(Array.from({ length: 5 }, () => apiService.get('/auth/profile')));
+console.log(`peticiones: refresh=${contar('/auth/refresh')} profile=${contar('/auth/profile')} rechazadas=${res8b.filter((x) => x.status === 'rejected').length}/5`);
+check(res8b.every((x) => x.status === 'rejected'), 'F8b: las 5 se rechazaron', 'F8b: alguna tuvo éxito');
+check(contar('/auth/refresh') === 0 && contar('/auth/profile') === 5, 'F8b: 0 renovaciones y exactamente 5 llamadas (ninguna reintentada: sin bucle)', `F8b: refresh=${contar('/auth/refresh')} profile=${contar('/auth/profile')}`);
+check(consumirAvisoSesionReemplazada() === MENSAJE_SESION_REEMPLAZADA && consumirAvisoSesionReemplazada() === '', 'F8b: aviso único aunque fallaran 5 peticiones a la vez', 'F8b: aviso duplicado o ausente');
+reset();
+try { await apiService.get('/auth/profile'); } catch { /* esperado */ }
+check(contar('/auth/refresh') === 0, 'F8b: una petición posterior sin sesión tampoco renueva', `F8b: refresh=${contar('/auth/refresh')}`);
+
+// F8c: access token SIN sid (emitido con el código anterior) => mismo tratamiento
+restablecerNavegador();
+const sinSid = jwt.sign({ id: B.user.id, username: B.user.username, email: B.user.email, rol: B.user.rol }, JWT_SECRET, { expiresIn: '5m' });
+localStorage.setItem('auth_token', sinSid);
+localStorage.setItem('refresh_token', B.refreshToken);
+let r8c;
+try { r8c = await apiService.get('/auth/profile'); } catch (e) { r8c = { rejected: true, e }; }
+check(r8c && r8c.rejected === true && contar('/auth/refresh') === 0, 'F8c: access token sin sid => rechazado SIN intentar renovar', `F8c: rejected=${r8c && r8c.rejected} refresh=${contar('/auth/refresh')}`);
+check(globalThis.window.location.href === '/login' && consumirAvisoSesionReemplazada() === MENSAJE_SESION_REEMPLAZADA, 'F8c: redirige a /login con el aviso', 'F8c: sin redirección o sin aviso');
+
+// F8d: la sesión B (la vigente) sigue funcionando
+restablecerNavegador();
+localStorage.setItem('auth_token', B.accessToken);
+localStorage.setItem('refresh_token', B.refreshToken);
+let r8d;
+try { r8d = await apiService.get('/auth/profile'); } catch (e) { r8d = { error: e }; }
+check(r8d && r8d.success === true && globalThis.window.location.href === '' && consumirAvisoSesionReemplazada() === '', 'F8d: la sesión vigente (B) sigue funcionando, sin redirección ni aviso', `F8d: ${JSON.stringify(r8d?.error?.message || r8d)}`);
 
 console.log('');
 if (fallos === 0) {
