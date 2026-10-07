@@ -37,22 +37,28 @@ Rutas que **no** dependen del `sid`: `/auth/login`, `/auth/refresh`, `/auth/logo
 
 ### Usarlo con PM2 (trampa del entorno)
 
-PM2 guarda el entorno con el que arrancó el proceso; si reinicias desde un shell que tiene variables
-exportadas, esas variables pasan al proceso. Por eso:
+**PM2 fusiona, no reemplaza.** `pm2 restart --update-env` mezcla el entorno del shell con el que PM2 ya
+tiene guardado para el proceso: una variable que se definió una vez **no desaparece** aunque la quites del
+shell y reinicies (verificado en staging con `scripts/tests/test_sesion_unica.sh`). Por eso `unset` + `restart`
+**no** sirve para volver al valor por defecto. Siempre en una sesión SSH nueva:
 
 ```bash
-# Desactivar (emergencia). Siempre en una sesión SSH NUEVA, definiendo la variable solo para este comando:
+# 1) Desactivar (emergencia): la variable solo para este comando
 ssh artesa-prod "bash -l -c 'source ~/.nvm/nvm.sh; SINGLE_SESSION_PER_USER=false pm2 restart artesa-backend-prod --update-env'"
 
-# Restaurar el valor por defecto (variable NO definida). Otra sesión SSH nueva y entorno limpio:
-ssh artesa-prod "bash -l -c 'source ~/.nvm/nvm.sh; unset SINGLE_SESSION_PER_USER; pm2 restart artesa-backend-prod --update-env'"
+# 2a) Reactivar YA (rápido, sin recrear el proceso): dejarla explícita en true (equivale al valor por defecto)
+ssh artesa-prod "bash -l -c 'source ~/.nvm/nvm.sh; SINGLE_SESSION_PER_USER=true pm2 restart artesa-backend-prod --update-env'"
 
-# Confirmar (solo NOMBRES de variables, nunca valores):
+# 2b) Volver al estado "variable NO definida": recrear el proceso desde el ecosistema, con el entorno limpio
+#     (el ecosistema solo define NODE_ENV y PORT; lo demás lo lee la app de backend/.env)
+ssh artesa-prod "bash -l -c 'source ~/.nvm/nvm.sh; unset SINGLE_SESSION_PER_USER; cd ~/LaArtesa/backend && pm2 delete artesa-backend-prod; pm2 start ecosystem.config.js --only artesa-backend-prod; pm2 save'"
+
+# 3) Confirmar (solo NOMBRES de variables, nunca valores):
 ssh artesa-prod "bash -l -c 'source ~/.nvm/nvm.sh; pm2 jlist' | node -e \"let t='';process.stdin.on('data',d=>t+=d).on('end',()=>{const p=JSON.parse(t.slice(t.indexOf('['))).find(x=>x.name==='artesa-backend-prod');console.log(Object.keys(p.pm2_env).filter(k=>/^SINGLE_SESSION/.test(k)).join(',')||'(ninguna)')})\""
 ```
 
 Para staging el proceso se llama `artesa-backend-staging`. `scripts/tests/test_sesion_unica.sh` ejercita
-exactamente este ciclo (desactivar → comprobar → restaurar → comprobar) y lo deja restaurado.
+este ciclo (desactivar → comprobar → recrear el proceso con el entorno limpio → comprobar) y lo deja restaurado.
 
 ## Despliegue
 

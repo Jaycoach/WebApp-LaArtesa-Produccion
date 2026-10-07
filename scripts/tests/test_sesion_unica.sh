@@ -96,8 +96,11 @@ const p=l.find(x=>x.name===process.argv[1]);const e=(p&&p.pm2_env)||{};
 console.log(Object.keys(e).filter(k=>/^SINGLE_SESSION/.test(k)).join(',')||'(ninguna)')}catch(e){console.log('(error)')}})" "$PM2_NAME"
 }
 esperar_backend() { local i; for i in $(seq 1 30); do [ "$(curl -s -o /dev/null -w '%{http_code}' "${API_URL%/api}/health")" = "200" ] && return 0; sleep 1; done; return 1; }
-restaurar_interruptor() { # reinicio con el entorno LIMPIO (sin la variable)
-  ( env -u SINGLE_SESSION_PER_USER bash -c 'source ~/.nvm/nvm.sh >/dev/null 2>&1; pm2 restart "'"$PM2_NAME"'" --update-env >/dev/null 2>&1' )
+restaurar_interruptor() {
+  # TRAMPA DE PM2: `pm2 restart --update-env` FUSIONA el entorno actual con el guardado, así que quitar la
+  # variable del shell NO la quita del proceso (verificado). Para volver al valor por defecto (variable no
+  # definida) hay que recrear el proceso desde el ecosistema, con el entorno limpio, y guardar la lista.
+  ( env -u SINGLE_SESSION_PER_USER bash -c 'source ~/.nvm/nvm.sh >/dev/null 2>&1; cd "'"$REPO_ROOT"'/backend" && pm2 delete "'"$PM2_NAME"'" >/dev/null 2>&1; pm2 start ecosystem.config.js --only "'"$PM2_NAME"'" >/dev/null 2>&1; pm2 save >/dev/null 2>&1' )
   esperar_backend
 }
 
@@ -384,7 +387,7 @@ assert_eq "access de B funciona => HTTP" "$(call GET /auth/profile "$A6B"; echo 
 refresh_con "$R6A"; assert_eq "refresh de A funciona => HTTP" "$HTTP" "200"
 assert_eq "NO hay SESION_REEMPLAZADA" "$(audit_reemp "$U6")" "0"
 assert_eq "el access sigue llevando sid con el interruptor en false" "$([ -n "$(sid_de "$A6A")" ] && echo si || echo no)" "si"
-echo "Restaurando el valor por defecto (PM2 reiniciado con el entorno limpio: env -u SINGLE_SESSION_PER_USER)…"
+echo "Restaurando el valor por defecto (proceso PM2 recreado desde ecosystem.config.js con el entorno limpio)…"
 restaurar_interruptor && ok "backend arriba tras restaurar" || fallo "el backend no volvió a responder tras restaurar"
 SWITCH_TOCADO=0
 echo "Variables SINGLE_SESSION* en PM2 tras restaurar (solo nombres): $(pm2_env_nombres)"
