@@ -306,7 +306,8 @@ preparar_usuario_con_sesiones() { # rol pw -> setea P_ID P_NAME P_PW S1_ACCESS S
 }
 
 echo "-- 2a) changePassword CON refreshToken de la sesión actual => se conserva esa sesión, el resto se revoca"
-preparar_usuario_con_sesiones OPERARIO "$(gen_valid_password)"; C1="$P_ID"; C1_NAME="$P_NAME"; C1_PW="$P_PW"
+# (cambio voluntario de contraseña: SOLO ADMIN; el cambio obligatorio de los demás roles va por /auth/set-initial-password)
+preparar_usuario_con_sesiones ADMIN "$(gen_valid_password)"; C1="$P_ID"; C1_NAME="$P_NAME"; C1_PW="$P_PW"
 psql_q "UPDATE usuarios SET intentos_fallidos=5, bloqueado_hasta = NOW() - INTERVAL '1 minute', ultimo_cambio_password = NOW() - INTERVAL '1 day' WHERE id=$C1;" > /dev/null
 HASH_ANTES=$(psql_q "SELECT password_hash FROM usuarios WHERE id=$C1;")
 CAMBIO_ANTES=$(psql_q "SELECT EXTRACT(EPOCH FROM ultimo_cambio_password)::bigint FROM usuarios WHERE id=$C1;")
@@ -330,7 +331,7 @@ login "$C1_NAME" "$C1_PW" 198.51.100.44;       assert_eq "login con la contrase�
 
 echo ""
 echo "-- 2b) changePassword SIN refreshToken (o con uno ajeno) => se revocan TODAS las sesiones"
-preparar_usuario_con_sesiones OPERARIO "$(gen_valid_password)"; C2="$P_ID"; C2_NAME="$P_NAME"; C2_PW="$P_PW"; C2_ACCESS="$S1_ACCESS"
+preparar_usuario_con_sesiones ADMIN "$(gen_valid_password)"; C2="$P_ID"; C2_NAME="$P_NAME"; C2_PW="$P_PW"; C2_ACCESS="$S1_ACCESS"
 assert_eq "sesiones activas antes" "$(sesiones_activas "$C2")" "3"
 NEW_C2=$(gen_valid_password); registrar_secreto "$NEW_C2"
 REQ_BODY=$(C="$C2_PW" N="$NEW_C2" R="refresh-ajeno-inexistente" jq -n '{currentPassword:env.C,newPassword:env.N,refreshToken:env.R}')
@@ -386,7 +387,7 @@ nuevo_login "$C4_NAME" "$NEW_C4" 198.51.100.51; assert_eq "el usuario entra con 
 
 echo ""
 echo "-- 2e) NEGATIVOS: nada cambia si la operación falla o no está permitida"
-preparar_usuario_con_sesiones OPERARIO "$(gen_valid_password)"; N1="$P_ID"; N1_NAME="$P_NAME"; N1_PW="$P_PW"; N1_ACCESS="$S1_ACCESS"
+preparar_usuario_con_sesiones ADMIN "$(gen_valid_password)"; N1="$P_ID"; N1_NAME="$P_NAME"; N1_PW="$P_PW"; N1_ACCESS="$S1_ACCESS"
 psql_q "UPDATE usuarios SET intentos_fallidos=2 WHERE id=$N1;" > /dev/null
 AUD_ANTES=$(psql_q "SELECT count(*) FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id=$N1;")
 REQ_BODY=$(C="$(gen_password_generica)" N="$(gen_valid_password)" jq -n '{currentPassword:env.C,newPassword:env.N}')
@@ -397,11 +398,18 @@ assert_eq "intentos_fallidos intacto" "$(intentos "$N1")" "2"
 assert_eq "sesiones intactas" "$(sesiones_activas "$N1")" "3"
 assert_eq "sin fila de historial" "$(historial_count "$N1")" "0"
 assert_eq "sin fila de auditoría nueva" "$(psql_q "SELECT count(*) FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id=$N1;")" "$AUD_ANTES"
-# rol sin permiso: un OPERARIO intenta reset admin sobre otro usuario
+# rol sin permiso: un OPERARIO intenta reset admin sobre otro usuario y cambiar SU contraseña
+PW_N0=$(gen_valid_password); registrar_secreto "$PW_N0"; crear_usuario OPERARIO "$PW_N0"; N0="$NEW_ID"; N0_NAME="$NEW_NAME"
+nuevo_login "$N0_NAME" "$PW_N0" 198.51.100.63; N0_ACCESS="$ACCESS"
 REQ_BODY=$(N="$(gen_valid_password)" jq -n '{newPassword:env.N}')
-call POST "/users/$C1/reset-password" "$N1_ACCESS" 198.51.100.61
+call POST "/users/$C1/reset-password" "$N0_ACCESS" 198.51.100.61
 assert_eq "OPERARIO intenta reset admin => HTTP" "$HTTP" "403"
 assert_eq "no se creó auditoría de reset para el objetivo" "$(audit_count "$C1" RESET_PASSWORD_ADMIN)" "0"
+HASH_N0=$(psql_q "SELECT md5(password_hash) FROM usuarios WHERE id=$N0;")
+REQ_BODY=$(C="$PW_N0" N="$(gen_valid_password)" jq -n '{currentPassword:env.C,newPassword:env.N}')
+call POST /auth/change-password "$N0_ACCESS" 198.51.100.64
+assert_eq "OPERARIO intenta cambiar su contraseña (solo ADMIN) => HTTP" "$HTTP" "403"
+assert_eq "la contraseña del OPERARIO no cambió" "$(psql_q "SELECT md5(password_hash) FROM usuarios WHERE id=$N0;")" "$HASH_N0"
 # nueva contraseña que incumple la regla real
 SIN_ESPECIAL=$(rand_chars 12 'A-Za-z0-9')
 REQ_BODY=$(C="$N1_PW" N="$SIN_ESPECIAL" jq -n '{currentPassword:env.C,newPassword:env.N}')
@@ -467,7 +475,7 @@ seccion "PUNTO 6 — renovación automática de token (interceptor REAL de api.t
 # ===========================================================================
 PW_F=$(gen_valid_password); registrar_secreto "$PW_F"
 PW_F2=$(gen_valid_password); registrar_secreto "$PW_F2"
-crear_usuario OPERARIO "$PW_F"; UF="$NEW_ID"; UF_NAME="$NEW_NAME"
+crear_usuario ADMIN "$PW_F"; UF="$NEW_ID"; UF_NAME="$NEW_NAME"
 if (cd "$REPO_ROOT" && API_URL="$API_URL" TEST_USERNAME="$UF_NAME" TEST_PASSWORD="$PW_F" NEW_PASSWORD="$PW_F2" run_node scripts/tests/frontend-token-refresh.test.mjs); then
   ok "harness del interceptor: TODOS los escenarios F0–F7 pasaron"
 else
@@ -548,7 +556,7 @@ JA1=$(jti_de "$A1"); JA2=$(jti_de "$A2"); JB1=$(jti_de "$B1"); JB2=$(jti_de "$B2
 echo ""
 echo "-- 7d) encabezados inválidos NUNCA rompen un login, un refresh ni un cambio de contraseña (6e)"
 PW_G=$(gen_valid_password); registrar_secreto "$PW_G"
-crear_usuario OPERARIO "$PW_G"; G_ID="$NEW_ID"; G_NAME="$NEW_NAME"
+crear_usuario ADMIN "$PW_G"; G_ID="$NEW_ID"; G_NAME="$NEW_NAME"
 IP_BASURA="no-es-ip'; DROP TABLE usuarios;--"
 IP_ENORME=$(head -c 12000 /dev/zero | tr '\0' 'x')
 UA_ENORME=$(head -c 8000 /dev/zero | tr '\0' 'A')
@@ -592,7 +600,7 @@ else
   echo "AVISO: user_hierarchy_and_full_regression.sh desactiva BREVEMENTE a los admins REALES de staging y los restaura (trap)."
   echo "Admins reales ANTES de la regresión:"; psql_tab "$SQL_ADMINS_REALES"
   ADMINS_ANTES=$(psql_q "SELECT string_agg(id||':'||activo::text, ',' ORDER BY id) FROM usuarios WHERE rol='ADMIN' AND username !~ '^test_' AND username !~ '_DEACTIVATED$'")
-  for s in test_error_desconocido_cambio_password.sh fix-audit-session-trigger.sh user_hierarchy_and_full_regression.sh test_session_replaced_guard.sh test_rate_limit_diferenciado.sh test_sesion_unica.sh; do
+  for s in test_error_desconocido_cambio_password.sh fix-audit-session-trigger.sh user_hierarchy_and_full_regression.sh test_session_replaced_guard.sh test_rate_limit_diferenciado.sh test_sesion_unica.sh test_aviso_sesion_y_password_admin.sh; do
     echo ""; echo "-- $s"
     if [ -f "$REPO_ROOT/scripts/tests/$s" ]; then
       if bash "$REPO_ROOT/scripts/tests/$s" > "/tmp/reg_$s.out" 2>&1; then
@@ -613,7 +621,7 @@ fi
 seccion "SANIDAD DE SECRETOS (secrets-hygiene-in-tests, regla 6)"
 # ===========================================================================
 # Lista explícita (el árbol de staging puede tener archivos sucios ajenos a esta tarea).
-ARCHIVOS_TOCADOS="backend/src/utils/clientInfo.js backend/src/utils/__tests__/clientInfo.test.js backend/src/services/securityHelpers.js backend/src/services/auth.service.js backend/src/services/user.service.js backend/src/controllers/auth.controller.js backend/src/controllers/user.controller.js backend/src/services/__tests__/auth.service.security.test.js backend/src/services/__tests__/passwords.flujos.test.js backend/src/services/__tests__/auditoria.seguridad.test.js backend/src/services/__tests__/helpers/secretos.js backend/src/services/__tests__/helpers/fakeClient.js backend/src/services/__tests__/refresh.transaccional.test.js backend/src/utils/jwt.js frontend/src/services/api.ts frontend/src/services/authService.ts frontend/src/utils/bloqueoCuenta.ts frontend/src/pages/Configuracion/GestionUsuarios.tsx scripts/tests/test_seguridad_cuentas_auth.sh scripts/tests/frontend-token-refresh.test.mjs scripts/tests/frontend-bloqueo-cuenta.test.mjs backend/src/config/index.js backend/src/middleware/auth.js backend/src/middleware/errorHandler.js backend/src/middleware/__tests__/auth.sid.test.js backend/src/services/__tests__/sesion.unica.test.js frontend/src/utils/sesionReemplazada.ts frontend/src/pages/Login/Login.tsx scripts/tests/test_sesion_unica.sh"
+ARCHIVOS_TOCADOS="backend/src/utils/clientInfo.js backend/src/utils/__tests__/clientInfo.test.js backend/src/services/securityHelpers.js backend/src/services/auth.service.js backend/src/services/user.service.js backend/src/controllers/auth.controller.js backend/src/controllers/user.controller.js backend/src/services/__tests__/auth.service.security.test.js backend/src/services/__tests__/passwords.flujos.test.js backend/src/services/__tests__/auditoria.seguridad.test.js backend/src/services/__tests__/helpers/secretos.js backend/src/services/__tests__/helpers/fakeClient.js backend/src/services/__tests__/refresh.transaccional.test.js backend/src/utils/jwt.js frontend/src/services/api.ts frontend/src/services/authService.ts frontend/src/utils/bloqueoCuenta.ts frontend/src/pages/Configuracion/GestionUsuarios.tsx scripts/tests/test_seguridad_cuentas_auth.sh scripts/tests/frontend-token-refresh.test.mjs scripts/tests/frontend-bloqueo-cuenta.test.mjs backend/src/config/index.js backend/src/middleware/auth.js backend/src/middleware/errorHandler.js backend/src/middleware/__tests__/auth.sid.test.js backend/src/services/__tests__/sesion.unica.test.js frontend/src/utils/sesionReemplazada.ts frontend/src/pages/Login/Login.tsx scripts/tests/test_sesion_unica.sh scripts/tests/test_aviso_sesion_y_password_admin.sh backend/src/middleware/__tests__/auth.motivo.test.js backend/src/services/securityHelpers.js frontend/src/utils/avisoSesion.ts frontend/src/utils/reglasPassword.ts frontend/src/pages/Configuracion/ModalRestablecerPassword.tsx frontend/src/pages/Auth/SetPassword.tsx"
 echo "Archivos revisados:"; echo "$ARCHIVOS_TOCADOS" | tr ' ' '\n' | sed 's/^/  /'
 # Patrones (NO se excluyen líneas por contener "test": ahí viven justo los literales que importan):
 #   1) identificador de aspecto secreto asignado a un literal entre comillas (propiedad u

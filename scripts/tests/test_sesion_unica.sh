@@ -258,7 +258,7 @@ echo "Claves del jsonb (evidencia):"; psql_tab "SELECT DISTINCT k AS clave FROM 
 # ===========================================================================
 seccion "CASO 4 — changePassword: la otra estación cae de inmediato; la que cambió la clave sigue viva"
 # ===========================================================================
-PW4=$(gen_valid_password); registrar_secreto "$PW4"; crear_usuario OPERARIO "$PW4"; U4="$NEW_ID"; U4N="$NEW_NAME"
+PW4=$(gen_valid_password); registrar_secreto "$PW4"; crear_usuario ADMIN "$PW4"; U4="$NEW_ID"; U4N="$NEW_NAME"
 login "$U4N" "$PW4" 198.51.100.91 "estacion-que-cambia/1.0"; A4="$ACCESS"; R4="$REFRESH"
 sesion_extra "$U4" 1
 SID_OTRA=$(psql_q "SELECT id FROM usuarios_sesiones WHERE usuario_id=$U4 AND refresh_token NOT LIKE 'eyJ%' ORDER BY id DESC LIMIT 1;")

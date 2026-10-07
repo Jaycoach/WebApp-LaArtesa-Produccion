@@ -92,12 +92,24 @@ globalThis.sessionStorage = {
   setItem: (k, v) => { sstore.set(k, String(v)); },
   removeItem: (k) => { sstore.delete(k); },
 };
-globalThis.window = { location: { href: '', pathname: '/dashboard' }, addEventListener() {}, removeEventListener() {} };
+// location.replace/href cuentan las NAVEGACIONES: tras un 401 definitivo debe haber exactamente UNA.
+const location = {
+  href: '',
+  pathname: '/dashboard',
+  navegaciones: 0,
+  replace(url) { this.href = url; this.navegaciones += 1; },
+};
+globalThis.window = { location, addEventListener() {}, removeEventListener() {} };
 
 // --- compilar el api.ts REAL ---
 const outfile = path.join(os.tmpdir(), `api.refresh.${Date.now()}.cjs`);
+const entradaApi = path.join(os.tmpdir(), `entrada.api.${Date.now()}.ts`);
+fs.writeFileSync(entradaApi, [
+  `export { apiService } from ${JSON.stringify(path.join(REPO_ROOT, 'frontend/src/services/api.ts').replace(/\\/g, '/'))};`,
+  `export { useAuthStore } from ${JSON.stringify(path.join(REPO_ROOT, 'frontend/src/store/useAuthStore.ts').replace(/\\/g, '/'))};`,
+].join('\n'));
 buildSync({
-  entryPoints: [path.join(REPO_ROOT, 'frontend/src/services/api.ts')],
+  entryPoints: [entradaApi],
   bundle: true,
   platform: 'node',
   format: 'cjs',
@@ -108,15 +120,18 @@ buildSync({
     'import.meta.env.VITE_API_URL': JSON.stringify(API_URL),
   },
 });
-const { apiService } = await import(`file://${outfile}`);
+const { apiService, useAuthStore } = await import(`file://${outfile}`);
 fs.rmSync(outfile, { force: true });
+fs.rmSync(entradaApi, { force: true });
 // utilidad real del aviso (la misma que lee la pantalla de login)
 const outAviso = path.join(os.tmpdir(), `sesionReemplazada.${Date.now()}.cjs`);
 buildSync({
-  entryPoints: [path.join(REPO_ROOT, 'frontend/src/utils/sesionReemplazada.ts')],
+  entryPoints: [path.join(REPO_ROOT, 'frontend/src/utils/avisoSesion.ts')],
   bundle: true, platform: 'node', format: 'cjs', outfile: outAviso, logLevel: 'silent',
 });
-const { consumirAvisoSesionReemplazada, MENSAJE_SESION_REEMPLAZADA } = await import(`file://${outAviso}`);
+const {
+  leerAvisoSesion, descartarAvisoSesion, guardarAvisoSesion, contenidoAviso, motivoDesdeRespuesta, CLAVE_AVISO_SESION,
+} = await import(`file://${outAviso}`);
 fs.rmSync(outAviso, { force: true });
 // authService real (misma clase que usa la pantalla de cambio de contraseña)
 const outAuth = path.join(os.tmpdir(), `authService.refresh.${Date.now()}.cjs`);
@@ -170,6 +185,7 @@ async function nuevaSesionConAccessVencido() {
   localStorage.setItem('auth_token', vencido);
   localStorage.setItem('refresh_token', d.refreshToken);
   globalThis.window.location.href = '';
+  globalThis.window.location.navegaciones = 0;
   globalThis.window.location.pathname = '/dashboard';
   return d;
 }
@@ -210,7 +226,7 @@ try { r3 = await apiService.get('/auth/profile'); } catch (e) { r3 = { rejected:
 console.log(`peticiones: ${peticiones.map((p) => `${p.method} ${p.url}`).join(' | ')}`);
 check(r3 && r3.rejected === true, 'la petición se rechazó (no se enmascara el fallo)', 'la petición NO se rechazó');
 check(contar('/auth/refresh') === 1, '1 solo intento de refresh (sin bucle)', `POST /auth/refresh fue llamado ${contar('/auth/refresh')} veces (se esperaba 1)`);
-check(globalThis.window.location.href === '/login', 'redirigió a /login', `href=${JSON.stringify(globalThis.window.location.href)} (se esperaba /login)`);
+check(globalThis.window.location.href === '/login' && globalThis.window.location.navegaciones === 1, 'redirigió a /login con UNA sola navegación', `href=${JSON.stringify(globalThis.window.location.href)} navegaciones=${globalThis.window.location.navegaciones} (se esperaba /login y 1)`);
 check(localStorage.getItem('auth_token') === null && localStorage.getItem('refresh_token') === null, 'auth_token y refresh_token fueron limpiados', 'quedaron tokens en localStorage tras el fallo');
 reset();
 try { await apiService.get('/auth/profile'); } catch { /* esperado */ }
@@ -301,18 +317,21 @@ const stActual = await refrescarCon(dActual.refreshToken);
 check(stActual === 200, `F7: la sesión que cambió la clave SIGUE viva (refresh => HTTP ${stActual}): no queda expulsada`, `F7: la sesión que cambió la clave quedó revocada (HTTP ${stActual}, se esperaba 200)`);
 
 // ============================ F8 ============================
-console.log('\n=== F8: SESSION_REPLACED => sin renovar, limpia sesión, redirige a /login, aviso UNA vez, sin bucle ===');
+console.log('\n=== F8: SESSION_REPLACED => sin renovar, limpia sesión, UNA navegación a /login, aviso PERSISTENTE con su motivo, sin bucle ===');
 const restablecerNavegador = () => {
   store.clear();
   sstore.clear();
   globalThis.window.location.href = '';
+  globalThis.window.location.navegaciones = 0;
   globalThis.window.location.pathname = '/dashboard';
+  useAuthStore.setState({ user: { username: A_USERNAME }, isAuthenticated: true });
   reset();
 };
 
 // F8a: sesión reemplazada de verdad (el login B cierra la sesión de A)
 const A = await loginReal();
 const B = await loginReal();
+const A_USERNAME = A.user.username;
 restablecerNavegador();
 localStorage.setItem('auth_token', A.accessToken);
 localStorage.setItem('refresh_token', A.refreshToken);
@@ -322,10 +341,17 @@ console.log(`peticiones: ${peticiones.map((p) => `${p.method} ${p.url}`).join(' 
 check(r8 && r8.rejected === true, 'F8a: la petición con el access token de A se rechazó', 'F8a: la petición NO se rechazó');
 check(contar('/auth/refresh') === 0, 'F8a: 0 llamadas a /auth/refresh (no se intenta renovar)', `F8a: /auth/refresh llamado ${contar('/auth/refresh')} veces`);
 check(contar('/auth/profile') === 1, 'F8a: la petición no se reintentó (1 sola llamada)', `F8a: /auth/profile llamado ${contar('/auth/profile')} veces`);
-check(globalThis.window.location.href === '/login', 'F8a: redirigió a /login', `F8a: href=${JSON.stringify(globalThis.window.location.href)}`);
-check(localStorage.getItem('auth_token') === null && localStorage.getItem('refresh_token') === null, 'F8a: sesión limpiada (auth_token y refresh_token)', 'F8a: quedaron tokens');
-check(consumirAvisoSesionReemplazada() === MENSAJE_SESION_REEMPLAZADA, `F8a: el login muestra el aviso: "${MENSAJE_SESION_REEMPLAZADA}"`, 'F8a: no había aviso pendiente');
-check(consumirAvisoSesionReemplazada() === '', 'F8a: el aviso se muestra UNA sola vez (la segunda lectura está vacía)', 'F8a: el aviso se repite');
+check(globalThis.window.location.href === '/login' && globalThis.window.location.navegaciones === 1, 'F8a: UNA sola navegación, a /login (sin doble salida SPA + recarga)', `F8a: href=${JSON.stringify(globalThis.window.location.href)} navegaciones=${globalThis.window.location.navegaciones}`);
+check(localStorage.getItem('auth_token') === null && localStorage.getItem('refresh_token') === null && localStorage.getItem('auth-storage') === null, 'F8a: sesión limpiada (auth_token, refresh_token y auth-storage)', 'F8a: quedaron datos de sesión');
+const aviso8a = leerAvisoSesion();
+console.log(`  aviso guardado (clave ${CLAVE_AVISO_SESION}): ${JSON.stringify(aviso8a)}`);
+check(aviso8a && aviso8a.motivo === 'OTRO_INICIO' && aviso8a.username === A_USERNAME, 'F8a: el aviso trae motivo OTRO_INICIO (del backend) y el usuario leído del store ANTES de limpiar', `F8a: aviso=${JSON.stringify(aviso8a)}`);
+check(CLAVE_AVISO_SESION !== 'aviso_sesion_reemplazada' && sstore.size === 1 && sstore.has(CLAVE_AVISO_SESION), 'F8a: usa su propia clave de sessionStorage y no deja ninguna otra', `F8a: claves=${JSON.stringify([...sstore.keys()])}`);
+check(JSON.stringify(leerAvisoSesion()) === JSON.stringify(aviso8a) && JSON.stringify(leerAvisoSesion()) === JSON.stringify(aviso8a), 'F8a: leer el aviso NO lo borra (dos lecturas = la misma) => sobrevive a recargas', 'F8a: el aviso desapareció al leerlo');
+check(contenidoAviso(aviso8a).titulo === 'Tu sesión se cerró' && contenidoAviso(aviso8a).fragmentos.map((f) => f.texto).join('') === `Alguien inició sesión con el usuario «${A_USERNAME}» en otro equipo o navegador. Por seguridad, cada usuario solo puede estar abierto en un lugar a la vez. Si no fuiste tú, avísale a tu supervisor.`, 'F8a: texto exacto de OTRO_INICIO con el usuario', 'F8a: texto distinto al pedido');
+check(contenidoAviso(aviso8a).fragmentos.filter((f) => f.negrita).map((f) => f.texto).join() === A_USERNAME, 'F8a: el usuario va en negrita', 'F8a: el usuario no está en negrita');
+descartarAvisoSesion();
+check(leerAvisoSesion() === null && sstore.size === 0, 'F8a: «Entendido» / login exitoso (descartarAvisoSesion) lo borra', 'F8a: el aviso sigue después de descartarlo');
 
 // F8b: 5 peticiones simultáneas con la sesión reemplazada: sin bucle, aviso único
 restablecerNavegador();
@@ -335,7 +361,7 @@ const res8b = await Promise.allSettled(Array.from({ length: 5 }, () => apiServic
 console.log(`peticiones: refresh=${contar('/auth/refresh')} profile=${contar('/auth/profile')} rechazadas=${res8b.filter((x) => x.status === 'rejected').length}/5`);
 check(res8b.every((x) => x.status === 'rejected'), 'F8b: las 5 se rechazaron', 'F8b: alguna tuvo éxito');
 check(contar('/auth/refresh') === 0 && contar('/auth/profile') === 5, 'F8b: 0 renovaciones y exactamente 5 llamadas (ninguna reintentada: sin bucle)', `F8b: refresh=${contar('/auth/refresh')} profile=${contar('/auth/profile')}`);
-check(consumirAvisoSesionReemplazada() === MENSAJE_SESION_REEMPLAZADA && consumirAvisoSesionReemplazada() === '', 'F8b: aviso único aunque fallaran 5 peticiones a la vez', 'F8b: aviso duplicado o ausente');
+check(leerAvisoSesion() && leerAvisoSesion().motivo === 'OTRO_INICIO' && sstore.size === 1 && globalThis.window.location.navegaciones >= 1, 'F8b: aviso único (una sola clave, mismo contenido) aunque fallaran 5 peticiones a la vez', `F8b: aviso=${JSON.stringify(leerAvisoSesion())} claves=${sstore.size}`);
 reset();
 try { await apiService.get('/auth/profile'); } catch { /* esperado */ }
 check(contar('/auth/refresh') === 0, 'F8b: una petición posterior sin sesión tampoco renueva', `F8b: refresh=${contar('/auth/refresh')}`);
@@ -348,7 +374,10 @@ localStorage.setItem('refresh_token', B.refreshToken);
 let r8c;
 try { r8c = await apiService.get('/auth/profile'); } catch (e) { r8c = { rejected: true, e }; }
 check(r8c && r8c.rejected === true && contar('/auth/refresh') === 0, 'F8c: access token sin sid => rechazado SIN intentar renovar', `F8c: rejected=${r8c && r8c.rejected} refresh=${contar('/auth/refresh')}`);
-check(globalThis.window.location.href === '/login' && consumirAvisoSesionReemplazada() === MENSAJE_SESION_REEMPLAZADA, 'F8c: redirige a /login con el aviso', 'F8c: sin redirección o sin aviso');
+check(globalThis.window.location.href === '/login' && globalThis.window.location.navegaciones === 1, 'F8c: UNA navegación a /login', `F8c: navegaciones=${globalThis.window.location.navegaciones}`);
+const aviso8c = leerAvisoSesion();
+check(aviso8c && aviso8c.motivo === 'SESION_CERRADA', 'F8c: token sin sid => motivo SESION_CERRADA (no dice que alguien más entró)', `F8c: aviso=${JSON.stringify(aviso8c)}`);
+check(contenidoAviso(aviso8c).titulo === 'Vuelve a iniciar sesión' && contenidoAviso(aviso8c).fragmentos.map((f) => f.texto).join('') === 'Por seguridad, tu sesión se cerró. Ingresa de nuevo con tu usuario y contraseña.', 'F8c: texto exacto de SESION_CERRADA', 'F8c: texto distinto al pedido');
 
 // F8d: la sesión B (la vigente) sigue funcionando
 restablecerNavegador();
@@ -356,7 +385,29 @@ localStorage.setItem('auth_token', B.accessToken);
 localStorage.setItem('refresh_token', B.refreshToken);
 let r8d;
 try { r8d = await apiService.get('/auth/profile'); } catch (e) { r8d = { error: e }; }
-check(r8d && r8d.success === true && globalThis.window.location.href === '' && consumirAvisoSesionReemplazada() === '', 'F8d: la sesión vigente (B) sigue funcionando, sin redirección ni aviso', `F8d: ${JSON.stringify(r8d?.error?.message || r8d)}`);
+check(r8d && r8d.success === true && globalThis.window.location.href === '' && globalThis.window.location.navegaciones === 0 && leerAvisoSesion() === null, 'F8d: la sesión vigente (B) sigue funcionando, sin navegación ni aviso', `F8d: ${JSON.stringify(r8d?.error?.message || r8d)}`);
+
+// F9: utilidad del aviso (sin backend): textos por motivo con y sin usuario, motivo desconocido, JSON dañado, CAMBIO_PASSWORD
+console.log('\n=== F9: textos y robustez del aviso (utilidad real) ===');
+const txt = (a) => contenidoAviso(a).fragmentos.map((f) => f.texto).join('');
+const u9 = aleatorio().slice(0, 8);
+check(contenidoAviso({ motivo: 'CAMBIO_PASSWORD', username: u9 }).titulo === 'Tu sesión se cerró' && txt({ motivo: 'CAMBIO_PASSWORD', username: u9 }) === `La contraseña del usuario «${u9}» fue cambiada. Ingresa con la contraseña nueva; si no la conoces, pídela al administrador.`, 'F9: texto exacto de CAMBIO_PASSWORD con usuario', 'F9: CAMBIO_PASSWORD distinto al pedido');
+check(!txt({ motivo: 'CAMBIO_PASSWORD' }).includes('«') && !txt({ motivo: 'OTRO_INICIO' }).includes('«'), 'F9: sin usuario conocido el texto se redacta sin él', 'F9: quedó un « huérfano sin usuario');
+check(txt({ motivo: 'OTRA_PESTANA' }).includes('otro usuario en este navegador'), 'F9: el aviso de otra pestaña conserva su sentido', 'F9: texto de otra pestaña perdido');
+check(motivoDesdeRespuesta({ code: 'SESSION_REPLACED', motivo: 'CAMBIO_PASSWORD' }) === 'CAMBIO_PASSWORD' && motivoDesdeRespuesta({ code: 'SESSION_REPLACED' }) === 'SESION_CERRADA' && motivoDesdeRespuesta({ motivo: 'INVENTADO' }) === 'SESION_CERRADA' && motivoDesdeRespuesta(null) === 'SESION_CERRADA', 'F9: motivo desconocido o ausente => SESION_CERRADA', 'F9: motivoDesdeRespuesta incorrecto');
+sstore.set(CLAVE_AVISO_SESION, '{no es json');
+check(leerAvisoSesion() === null, 'F9: un JSON dañado en sessionStorage no rompe la pantalla (sin aviso)', 'F9: leyó un aviso inválido');
+sstore.set(CLAVE_AVISO_SESION, JSON.stringify({ motivo: 'HACK', username: 'x' }));
+check(leerAvisoSesion() === null, 'F9: un motivo no permitido en sessionStorage se ignora', 'F9: aceptó un motivo inválido');
+guardarAvisoSesion({ motivo: 'OTRO_INICIO', username: '  ' + 'x'.repeat(300) });
+check(leerAvisoSesion().username.length === 100, 'F9: el usuario se recorta a 100 caracteres', 'F9: no se recortó el usuario');
+descartarAvisoSesion();
+
+// F10: el aviso de sesión y el de nueva versión no comparten nada (claves ni flujo)
+console.log('\n=== F10: independencia respecto del aviso de nueva versión ===');
+const fuenteVersion = fs.readFileSync(path.join(REPO_ROOT, 'frontend/src/hooks/useVersionCheck.ts'), 'utf8');
+check(!/localStorage|sessionStorage/.test(fuenteVersion), 'F10: useVersionCheck no usa ningún storage (no puede borrar ni leer el aviso de sesión)', 'F10: useVersionCheck usa storage');
+check(!fuenteVersion.includes(CLAVE_AVISO_SESION), 'F10: useVersionCheck no menciona la clave del aviso de sesión', 'F10: useVersionCheck toca la clave del aviso');
 
 console.log('');
 if (fallos === 0) {
