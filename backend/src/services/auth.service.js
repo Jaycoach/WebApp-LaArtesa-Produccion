@@ -578,7 +578,7 @@ class AuthService {
 
       // Historial, hash nuevo, contador/bloqueo en cero y sesiones revocadas
       // (salvo la actual si es identificable) — igual que los otros flujos
-      const { sesionesRevocadas } = await aplicarNuevaPassword(client, {
+      const { sesionesRevocadas, sesionConservada } = await aplicarNuevaPassword(client, {
         userId,
         nuevoHash: hashedPassword,
         hashAnterior: user.password_hash,
@@ -591,7 +591,7 @@ class AuthService {
         usuarioObjetivoId: userId,
         actor: { id: userId, nombre: user.nombre_completo || user.username },
         camposModificados: ['password_hash', 'ultimo_cambio_password', 'intentos_fallidos', 'bloqueado_hasta'],
-        detalles: { sesiones_revocadas: sesionesRevocadas, sesion_actual_conservada: Boolean(refreshTokenActual) },
+        detalles: { sesiones_revocadas: sesionesRevocadas, sesion_actual_conservada: sesionConservada },
         ip,
         userAgent,
         transaccional: true,

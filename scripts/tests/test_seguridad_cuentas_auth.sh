@@ -430,6 +430,8 @@ IDS_PRUEBA=$(IFS=,; echo "${TEST_USER_IDS[*]}")
 psql_tab "SELECT id, registro_id AS objetivo, operacion, campos_modificados, usuario_id AS actor, usuario_nombre, host(ip_address) AS ip, left(user_agent,24) AS ua, motivo, datos_nuevos FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id IN ($IDS_PRUEBA) ORDER BY id;"
 assert_eq "CAMBIO_PASSWORD (C1)"             "$(audit_count "$C1" CAMBIO_PASSWORD)" "1"
 assert_eq "CAMBIO_PASSWORD (C2)"             "$(audit_count "$C2" CAMBIO_PASSWORD)" "1"
+assert_eq "auditoría C1: sesion_actual_conservada = true (se envió su refreshToken y esa sesión sigue viva)" "$(psql_q "SELECT datos_nuevos->>'sesion_actual_conservada' FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id=$C1 AND motivo LIKE 'CAMBIO_PASSWORD%' ORDER BY id DESC LIMIT 1;")" "true"
+assert_eq "auditoría C2: sesion_actual_conservada = false (refreshToken ajeno: se revocaron todas)" "$(psql_q "SELECT datos_nuevos->>'sesion_actual_conservada' FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id=$C2 AND motivo LIKE 'CAMBIO_PASSWORD%' ORDER BY id DESC LIMIT 1;")" "false"
 assert_eq "RESET_PASSWORD_TOKEN (C3)"        "$(audit_count "$C3" RESET_PASSWORD_TOKEN)" "1"
 assert_eq "RESET_PASSWORD_ADMIN (C4)"        "$(audit_count "$C4" RESET_PASSWORD_ADMIN)" "1"
 LOCKS=$(audit_count "$U1" BLOQUEO_CUENTA_INTENTOS)

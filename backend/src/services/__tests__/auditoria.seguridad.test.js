@@ -190,6 +190,7 @@ describe('auditoría en cada flujo de seguridad', () => {
       [/SELECT username, nombre_completo, password_hash FROM usuarios WHERE id = \$1/, { rows: [{ username: 'u7', nombre_completo: 'Usuario Siete', password_hash: HASH_VIEJO }] }],
       [/FROM usuarios_historial_passwords/, { rows: [] }],
       [/^UPDATE usuarios_sesiones/, { rowCount: 2, rows: [] }],
+      [/^SELECT 1 FROM usuarios_sesiones/, { rows: [{ '?column?': 1 }] }], // la sesión indicada sigue viva
     ]);
     pool.getClient.mockResolvedValue(client);
     bcrypt.compare.mockResolvedValueOnce(true).mockResolvedValue(false);
@@ -208,6 +209,24 @@ describe('auditoría en cada flujo de seguridad', () => {
     expect(orden.indexOf('COMMIT')).toBeGreaterThan(orden.findIndex((s) => INSERT_AUDITORIA.test(s)));
     expect(orden).toContain('SAVEPOINT auditoria_seguridad');
     esperarSinSecretos(client);
+  });
+
+  test('changePassword con un refreshToken que NO corresponde a ninguna sesión vigente: la auditoría dice sesion_actual_conservada=false', async () => {
+    const client = fakeClient([
+      [/SELECT username, nombre_completo, password_hash FROM usuarios WHERE id = \$1/, { rows: [{ username: 'u7', nombre_completo: 'Usuario Siete', password_hash: HASH_VIEJO }] }],
+      [/FROM usuarios_historial_passwords/, { rows: [] }],
+      [/^UPDATE usuarios_sesiones/, { rowCount: 3, rows: [] }],
+      [/^SELECT 1 FROM usuarios_sesiones/, { rows: [] }], // ninguna sesión vigente con ese token
+    ]);
+    pool.getClient.mockResolvedValue(client);
+    bcrypt.compare.mockResolvedValueOnce(true).mockResolvedValue(false);
+    bcrypt.hash.mockResolvedValue(HASH_NUEVO);
+
+    await authService.changePassword(7, PW_ACTUAL, PW_NUEVA, { refreshToken: tokenPrueba(), ...meta });
+
+    expect(JSON.parse(auditorias(client)[0].params[1])).toEqual({
+      evento: 'CAMBIO_PASSWORD', sesiones_revocadas: 3, sesion_actual_conservada: false,
+    });
   });
 
   test('changePassword: si la auditoría falla, el cambio de contraseña SÍ se confirma (COMMIT, sin ROLLBACK de la transacción)', async () => {

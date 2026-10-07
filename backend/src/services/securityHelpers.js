@@ -91,7 +91,9 @@ async function revocarSesionesUsuario(client, userId, conservarRefreshToken = nu
  *   limpiarTokenRecuperacion  — true en el reset por token (lo consume).
  *   conservarRefreshToken     — sesión a conservar (solo cambio propio).
  *
- * Devuelve { sesionesRevocadas }.
+ * Devuelve { sesionesRevocadas, sesionConservada }; `sesionConservada` es true solo si el
+ * refresh token indicado corresponde a una sesión vigente de ese usuario que quedó viva
+ * (no basta con que el cliente haya enviado un token).
  */
 async function aplicarNuevaPassword(client, {
   userId, nuevoHash, hashAnterior, limpiarTokenRecuperacion = false, conservarRefreshToken = null,
@@ -112,7 +114,17 @@ async function aplicarNuevaPassword(client, {
   );
 
   const sesionesRevocadas = await revocarSesionesUsuario(client, userId, conservarRefreshToken);
-  return { sesionesRevocadas };
+
+  let sesionConservada = false;
+  if (typeof conservarRefreshToken === 'string' && conservarRefreshToken.length > 0) {
+    const viva = await client.query(
+      `SELECT 1 FROM usuarios_sesiones
+       WHERE usuario_id = $1 AND refresh_token = $2 AND revocado = false`,
+      [userId, conservarRefreshToken],
+    );
+    sesionConservada = viva.rows.length > 0;
+  }
+  return { sesionesRevocadas, sesionConservada };
 }
 
 // ---------------------------------------------------------------------------
