@@ -427,7 +427,7 @@ assert_eq "GET /users/:id devuelve bloqueado_hasta con valor (UI puede mostrarlo
 echo "SELECT previo al desbloqueo:"; psql_tab "SELECT id, intentos_fallidos, bloqueado_hasta > NOW() AS bloqueado FROM usuarios WHERE id=$U1;"
 # negativo: un OPERARIO NO puede desbloquear (ni se audita ni cambia nada)
 REQ_BODY='{}'
-call POST "/users/$U1/unlock" "$N1_ACCESS" 198.51.100.62
+call POST "/users/$U1/unlock" "$N0_ACCESS" 198.51.100.62
 assert_eq "OPERARIO intenta desbloquear => HTTP" "$HTTP" "403"
 assert_eq "tras el intento sin permiso la cuenta sigue bloqueada" "$(psql_q "SELECT bloqueado_hasta > NOW() FROM usuarios WHERE id=$U1;")" "t"
 assert_eq "sin auditoría de desbloqueo por el intento sin permiso" "$(audit_count "$U1" DESBLOQUEO_MANUAL)" "0"
