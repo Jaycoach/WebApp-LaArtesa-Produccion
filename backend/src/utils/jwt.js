@@ -2,6 +2,7 @@
  * Utilidades para manejo de JWT
  */
 
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 const logger = require('./logger');
@@ -18,16 +19,19 @@ const generateTokens = (user) => {
       rol: user.rol,
     };
 
+    // jwtid (claim jti) único por emisión: sin él dos tokens del mismo usuario emitidos en el
+    // mismo segundo (iat tiene resolución de 1 s) salen idénticos y el refresh token choca con
+    // UNIQUE(usuarios_sesiones.refresh_token) (error 23505).
     const accessToken = jwt.sign(
       payload,
       config.jwt.secret,
-      { expiresIn: config.jwt.expiresIn },
+      { expiresIn: config.jwt.expiresIn, jwtid: crypto.randomUUID() },
     );
 
     const refreshToken = jwt.sign(
       { id: user.id },
       config.jwt.refreshSecret,
-      { expiresIn: config.jwt.refreshExpiresIn },
+      { expiresIn: config.jwt.refreshExpiresIn, jwtid: crypto.randomUUID() },
     );
 
     return {

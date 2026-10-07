@@ -19,6 +19,33 @@ const {
 } = require('./securityHelpers');
 
 /**
+ * Inserta una sesión (refresh token) con la IP y el navegador de origen.
+ * La IP/UA son trazabilidad, NO condición para iniciar sesión: si el INSERT falla por esos datos
+ * (valor inválido para inet/texto) se reintenta SIN ellos, de modo que un encabezado raro nunca
+ * haga fallar un login o un refresh. Una colisión real (23505) no se reintenta.
+ * `transaccional`: dentro de BEGIN/COMMIT; el primer intento va en un SAVEPOINT para que su error
+ * no aborte la transacción.
+ */
+async function insertarSesion(client, {
+  userId, refreshToken, ip = null, userAgent = null,
+}, transaccional = false) {
+  const conMeta = `INSERT INTO usuarios_sesiones (usuario_id, refresh_token, expires_at, ip_address, user_agent)
+         VALUES ($1, $2, NOW() + INTERVAL '7 days', $3, $4)`;
+  const sinMeta = `INSERT INTO usuarios_sesiones (usuario_id, refresh_token, expires_at)
+         VALUES ($1, $2, NOW() + INTERVAL '7 days')`;
+  try {
+    if (transaccional) await client.query('SAVEPOINT sesion_meta');
+    await client.query(conMeta, [userId, refreshToken, ip, userAgent]);
+    if (transaccional) await client.query('RELEASE SAVEPOINT sesion_meta');
+  } catch (error) {
+    if (transaccional) await client.query('ROLLBACK TO SAVEPOINT sesion_meta');
+    if (error.code === '23505') throw error;
+    logger.warn(`No se pudo guardar IP/navegador de la sesión del usuario ${userId} (${error.message}); se guarda sin ellos`);
+    await client.query(sinMeta, [userId, refreshToken]);
+  }
+}
+
+/**
  * Registra un intento de login fallido con lo necesario para investigarlo:
  * username intentado, IP real, navegador y motivo. NUNCA recibe ni registra la
  * contraseña. Username y user-agent los escribe quien ataca: se limpian de
@@ -26,10 +53,12 @@ const {
  * falsear líneas del log.
  */
 function registrarFalloLogin(username, motivo, meta = {}) {
-  const limpiar = (valor, max) => String(valor ?? '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, max);
-  const user = JSON.stringify(limpiar(username, 100));
-  const ua = JSON.stringify(limpiar(meta.userAgent, 150) || 'desconocido');
-  logger.warn(`Login fallido username=${user} ip=${meta.ip || 'desconocida'} motivo=${motivo} ua=${ua}`);
+  try {
+    const limpiar = (valor, max) => String(valor ?? '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, max);
+    const user = JSON.stringify(limpiar(username, 100));
+    const ua = JSON.stringify(limpiar(meta.userAgent, 150) || 'desconocido');
+    logger.warn(`Login fallido username=${user} ip=${meta.ip || 'desconocida'} motivo=${motivo} ua=${ua}`);
+  } catch (e) { /* el log nunca debe alterar el resultado del login */ }
 }
 
 class AuthService {
@@ -240,11 +269,9 @@ class AuthService {
       const tokens = generateTokens(user);
 
       // Guardar refresh token (con IP y navegador de origen, para trazabilidad)
-      await client.query(
-        `INSERT INTO usuarios_sesiones (usuario_id, refresh_token, expires_at, ip_address, user_agent)
-         VALUES ($1, $2, NOW() + INTERVAL '7 days', $3, $4)`,
-        [user.id, tokens.refreshToken, ip, userAgent],
-      );
+      await insertarSesion(client, {
+        userId: user.id, refreshToken: tokens.refreshToken, ip, userAgent,
+      });
 
       logger.info(`Usuario ${username} inició sesión`);
 
@@ -268,21 +295,32 @@ class AuthService {
   }
 
   /**
-   * Refrescar access token
+   * Refrescar access token (rotación del refresh token)
+   *
+   * Todo ocurre en UNA transacción: se inserta la sesión nueva y recién entonces se revoca la
+   * vieja. Si algo falla (colisión, error de BD) se hace ROLLBACK y la sesión vieja sigue viva:
+   * el usuario nunca queda sin sesión por un refresh fallido.
+   * La sesión vieja se bloquea con FOR UPDATE: de dos refresh simultáneos con el mismo token,
+   * uno gana; el otro espera, ve la sesión ya revocada y falla limpio ('Token inválido o revocado').
    */
   async refreshToken(refreshToken, meta = {}) {
     const { ip = null, userAgent = null } = meta;
     const client = await pool.getClient();
+    let enTransaccion = false;
 
     try {
-      // Verificar refresh token
-      const decoded = verifyRefreshToken(refreshToken);
+      // Verificar firma/expiración del refresh token (no toca la BD)
+      verifyRefreshToken(refreshToken);
 
-      // Verificar que el token exista en la BD y no haya expirado
+      await client.query('BEGIN');
+      enTransaccion = true;
+
+      // Verificar que el token exista en la BD, no esté revocado ni haya expirado
       const tokenResult = await client.query(
-        `SELECT usuario_id, expires_at 
-         FROM usuarios_sesiones 
-         WHERE refresh_token = $1 AND revocado = false`,
+        `SELECT usuario_id, expires_at
+         FROM usuarios_sesiones
+         WHERE refresh_token = $1 AND revocado = false
+         FOR UPDATE`,
         [refreshToken],
       );
 
@@ -299,7 +337,7 @@ class AuthService {
       // Obtener datos del usuario
       const userResult = await client.query(
         `SELECT id, username, email, nombre_completo, rol, activo
-         FROM usuarios 
+         FROM usuarios
          WHERE id = $1 AND activo = true`,
         [session.usuario_id],
       );
@@ -313,25 +351,29 @@ class AuthService {
       // Generar nuevos tokens
       const tokens = generateTokens(user);
 
-      // Revocar el token anterior
+      // 1) Guardar la sesión nueva (conserva la trazabilidad de IP y navegador)
+      await insertarSesion(client, {
+        userId: user.id, refreshToken: tokens.refreshToken, ip, userAgent,
+      }, true);
+
+      // 2) Solo entonces revocar la anterior
       await client.query(
-        `UPDATE usuarios_sesiones 
-         SET revocado = true 
+        `UPDATE usuarios_sesiones
+         SET revocado = true
          WHERE refresh_token = $1`,
         [refreshToken],
       );
 
-      // Guardar nuevo refresh token (conserva la trazabilidad de IP y navegador)
-      await client.query(
-        `INSERT INTO usuarios_sesiones (usuario_id, refresh_token, expires_at, ip_address, user_agent)
-         VALUES ($1, $2, NOW() + INTERVAL '7 days', $3, $4)`,
-        [user.id, tokens.refreshToken, ip, userAgent],
-      );
+      await client.query('COMMIT');
+      enTransaccion = false;
 
       logger.info(`Token refrescado para usuario ${user.username}`);
 
       return tokens;
     } catch (error) {
+      if (enTransaccion) {
+        try { await client.query('ROLLBACK'); } catch (e) { /* conexión ya caída */ }
+      }
       logger.error('Error al refrescar token:', error);
       throw error;
     } finally {
