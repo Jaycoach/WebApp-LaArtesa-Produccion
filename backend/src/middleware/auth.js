@@ -11,6 +11,54 @@ const db = require('../database/connection');
 const CODIGO_SESION_REEMPLAZADA = 'SESSION_REPLACED';
 const MENSAJE_SESION_REEMPLAZADA = 'Su sesión fue cerrada porque se inició sesión en otro dispositivo o navegador.';
 const RUTA_SET_PASSWORD = /\/auth\/set-initial-password\/?(\?|$)/;
+const CODIGO_CAMBIO_PASSWORD_REQUERIDO = 'PASSWORD_CHANGE_REQUIRED';
+
+// Motivos del cierre de sesión (campo `motivo` del 401 SESSION_REPLACED): el frontend explica cada caso.
+const MOTIVO_OTRO_INICIO = 'OTRO_INICIO';
+const MOTIVO_CAMBIO_PASSWORD = 'CAMBIO_PASSWORD';
+const MOTIVO_SESION_CERRADA = 'SESION_CERRADA';
+
+/**
+ * Por qué se cerró la sesión del token. SOLO se llama en la ruta de falla: una petición válida no
+ * ejecuta esta consulta (no agrega carga al camino normal).
+ *   OTRO_INICIO     — la sesión está revocada y hay una sesión vigente creada después de ella, salvo que
+ *                     un cambio de contraseña se haya producido antes de esa sesión posterior.
+ *   CAMBIO_PASSWORD — la sesión está revocada y ultimo_cambio_password es posterior a su creación (y la
+ *                     revocó el cambio, no un inicio de sesión intermedio).
+ *   SESION_CERRADA  — cualquier otro caso: token sin sid emitido antes del despliegue, sesión inexistente
+ *                     o de otro usuario, revocación masiva.
+ * Ambas marcas son timestamps de la misma BD, así que se comparan con su precisión completa (el
+ * redondeo a segundos del chequeo de iat solo aplica a los JWT).
+ */
+const motivoSesionCerrada = async (userId, sid, ultimoCambioPassword) => {
+  if (!Number.isInteger(sid) || sid <= 0) return MOTIVO_SESION_CERRADA;
+  try {
+    const { rows } = await db.query(
+      `SELECT s.revocado, s.created_at,
+              (SELECT MIN(n.created_at) FROM usuarios_sesiones n
+                 WHERE n.usuario_id = s.usuario_id AND n.id <> s.id AND n.created_at > s.created_at) AS siguiente_creada,
+              EXISTS (SELECT 1 FROM usuarios_sesiones v
+                 WHERE v.usuario_id = s.usuario_id AND v.revocado = false AND v.expires_at > NOW()
+                   AND v.created_at > s.created_at) AS hay_vigente_posterior
+       FROM usuarios_sesiones s
+       WHERE s.id = $1 AND s.usuario_id = $2`,
+      [sid, userId],
+    );
+    const sesion = rows[0];
+    if (!sesion || sesion.revocado !== true) return MOTIVO_SESION_CERRADA;
+
+    const cambio = ultimoCambioPassword ? new Date(ultimoCambioPassword).getTime() : null;
+    const creada = new Date(sesion.created_at).getTime();
+    const siguiente = sesion.siguiente_creada ? new Date(sesion.siguiente_creada).getTime() : null;
+    if (cambio !== null && cambio > creada && (siguiente === null || cambio <= siguiente)) {
+      return MOTIVO_CAMBIO_PASSWORD;
+    }
+    if (sesion.hay_vigente_posterior === true) return MOTIVO_OTRO_INICIO;
+  } catch (error) {
+    logger.warn(`No se pudo calcular el motivo del cierre de sesión: ${error.message}`);
+  }
+  return MOTIVO_SESION_CERRADA;
+};
 
 /**
  * Extraer token del header Authorization o cookies
@@ -39,7 +87,7 @@ const verifyToken = async (req, res, next) => {
     // Un sid (id de sesión) presente pero inválido solo puede venir de un token manipulado
     const tieneSid = decoded.sid !== undefined && decoded.sid !== null;
     if (tieneSid && !(Number.isInteger(decoded.sid) && decoded.sid > 0)) {
-      throw new AppError(MENSAJE_SESION_REEMPLAZADA, 401, CODIGO_SESION_REEMPLAZADA);
+      throw new AppError(MENSAJE_SESION_REEMPLAZADA, 401, CODIGO_SESION_REEMPLAZADA, MOTIVO_SESION_CERRADA);
     }
 
     // 3. Verificar que el usuario aún exista en BD. En la MISMA consulta (subconsulta por clave
@@ -47,6 +95,7 @@ const verifyToken = async (req, res, next) => {
     //    sid, que esa sesión sea del usuario y no esté revocada.
     const result = await db.query(
       `SELECT id, uuid, username, email, nombre_completo, rol, activo, bloqueado_hasta, ultimo_cambio_password,
+              debe_cambiar_password,
               (SELECT s.revocado = false AND s.usuario_id = usuarios.id
                  FROM usuarios_sesiones s WHERE s.id = $2::integer) AS sesion_vigente
        FROM usuarios 
@@ -90,7 +139,16 @@ const verifyToken = async (req, res, next) => {
     //     scp='set-password', solo vale en /auth/set-initial-password (alta de usuarios nuevos).
     const esTokenSetPassword = decoded.scp === 'set-password' && RUTA_SET_PASSWORD.test(req.originalUrl || '');
     if (!esTokenSetPassword && (!tieneSid || user.sesion_vigente !== true)) {
-      throw new AppError(MENSAJE_SESION_REEMPLAZADA, 401, CODIGO_SESION_REEMPLAZADA);
+      const motivo = await motivoSesionCerrada(user.id, tieneSid ? decoded.sid : null, user.ultimo_cambio_password);
+      throw new AppError(MENSAJE_SESION_REEMPLAZADA, 401, CODIGO_SESION_REEMPLAZADA, motivo);
+    }
+
+    // 5c. Cambio de contraseña obligatorio (alta, clave temporal de un admin o vencimiento de 3 meses):
+    //     el usuario solo puede establecer su contraseña nueva; el resto de la API queda cerrada hasta
+    //     entonces (no depende de que el frontend respete la pantalla de cambio). Sin consulta extra:
+    //     la columna viaja en el SELECT del paso 3.
+    if (user.debe_cambiar_password === true && !RUTA_SET_PASSWORD.test(req.originalUrl || '')) {
+      throw new AppError('Debes cambiar tu contraseña antes de continuar.', 403, CODIGO_CAMBIO_PASSWORD_REQUERIDO);
     }
 
     // 6. Verificar cambio de contraseña post-emisión del token

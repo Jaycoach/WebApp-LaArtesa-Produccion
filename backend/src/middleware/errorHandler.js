@@ -9,12 +9,14 @@ const config = require('../config');
  * Clase de error personalizada
  */
 class AppError extends Error {
-  constructor(message, statusCode, code) {
+  constructor(message, statusCode, code, motivo) {
     super(message);
     this.statusCode = statusCode;
     this.isOperational = true;
     // code (opcional): identificador estable para que el cliente distinga casos (ej. SESSION_REPLACED)
     if (code) this.code = code;
+    // motivo (opcional): detalle del code para que el cliente explique el caso (ej. OTRO_INICIO)
+    if (motivo) this.motivo = motivo;
 
     Error.captureStackTrace(this, this.constructor);
   }
@@ -130,6 +132,7 @@ const errorHandler = (err, req, res, next) => {
       status: statusCode < 500 ? 'fail' : 'error',
       message: err.message,
       ...(err.code && { code: err.code }),
+      ...(err.motivo && { motivo: err.motivo }),
       ...(isDevelopment && { stack: err.stack }),
     });
   }
