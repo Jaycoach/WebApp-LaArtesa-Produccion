@@ -40,7 +40,7 @@ module.exports = {
     lockoutDuration: parseInt(process.env.LOCKOUT_DURATION, 10) || 30, // minutos
     // Sesión única por usuario: SIEMPRE activa. Solo un 'false' explícito en el entorno la
     // desactiva (interruptor de emergencia, sin redeploy). Sin la variable = activa.
-    // Ver docs/SESION_UNICA_POR_USUARIO.md (incluye la trampa de PM2 al reiniciar).
+    // Para apagarla en PM2 hay que RECREAR el proceso: `restart --update-env` no quita variables.
     singleSessionPerUser: String(process.env.SINGLE_SESSION_PER_USER ?? '').trim().toLowerCase() !== 'false',
     passwordMinLength: 8,
     passwordRequireUppercase: true,
