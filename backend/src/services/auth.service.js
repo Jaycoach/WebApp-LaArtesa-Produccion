@@ -704,7 +704,7 @@ class AuthService {
         `SELECT id, username, nombre_completo, debe_cambiar_password, password_hash,
                 (ultimo_cambio_password < NOW() - INTERVAL '3 months') AS password_expirada,
                 (ultimo_cambio_password > fecha_creacion + INTERVAL '1 second') AS cambio_posterior_alta
-         FROM usuarios WHERE id = $1 FOR UPDATE`,
+         FROM usuarios WHERE id = $1`,
         [userId],
       );
 
@@ -729,25 +729,28 @@ class AuthService {
 
       const hashedPassword = await bcrypt.hash(newPassword, 12);
 
-      // Mismo comportamiento que los demás cambios de clave: historial, ultimo_cambio_password
-      // (reinicia el conteo de 3 meses), contador/bloqueo en cero y sesiones revocadas (la sesión de
-      // cambio —token de alta o de clave temporal— termina y la persona entra con su clave nueva),
-      // además de dejar de exigirle el cambio.
-      const { sesionesRevocadas } = await aplicarNuevaPassword(client, {
-        userId,
-        nuevoHash: hashedPassword,
-        hashAnterior: currentHash,
-        debeCambiarPassword: false,
-      });
+      // Guardar la contraseña que se reemplaza en el historial
+      await guardarPasswordEnHistorial(client, userId, currentHash);
+
+      // NO revoca sesiones: la persona sigue en su sesión tras el cambio obligatorio
+      await client.query(
+        `UPDATE usuarios
+         SET password_hash = $1,
+             debe_cambiar_password = false,
+             ultimo_cambio_password = NOW(),
+             fecha_actualizacion = NOW()
+         WHERE id = $2`,
+        [hashedPassword, userId],
+      );
 
       // El evento distingue alta, clave temporal de un admin y vencimiento (sin secretos)
       await registrarEventoSeguridad(client, {
         codigo: EVENTO[`CAMBIO_OBLIGATORIO_${motivo}`],
-        descripcion: `el usuario completó el cambio de contraseña obligatorio (${motivo.toLowerCase()}; sesiones revocadas: ${sesionesRevocadas})`,
+        descripcion: `el usuario completó el cambio de contraseña obligatorio (${motivo.toLowerCase()})`,
         usuarioObjetivoId: userId,
         actor: { id: userId, nombre: result.rows[0].nombre_completo || result.rows[0].username },
         camposModificados: ['password_hash', 'ultimo_cambio_password', 'debe_cambiar_password'],
-        detalles: { motivo, sesiones_revocadas: sesionesRevocadas },
+        detalles: { motivo },
         ip: ctx.ip || null,
         userAgent: ctx.userAgent || null,
         transaccional: true,
