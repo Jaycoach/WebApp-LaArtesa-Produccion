@@ -95,7 +95,10 @@ const verifyToken = async (req, res, next) => {
 
     // 6. Verificar cambio de contraseña post-emisión del token
     if (decoded.iat && user.ultimo_cambio_password) {
-      const passwordChangeTime = new Date(user.ultimo_cambio_password).getTime() / 1000;
+      // iat tiene resolución de 1 s y ultimo_cambio_password tiene fracción: se compara por segundos
+      // completos. Con la fracción, un token emitido en el MISMO segundo del cambio (p. ej. el refresh
+      // de la sesión que acaba de cambiar su clave) se rechazaba y esa sesión quedaba expulsada.
+      const passwordChangeTime = Math.floor(new Date(user.ultimo_cambio_password).getTime() / 1000);
       if (decoded.iat < passwordChangeTime) {
         throw new AppError('Sesión inválida. Por favor inicie sesión nuevamente.', 401);
       }

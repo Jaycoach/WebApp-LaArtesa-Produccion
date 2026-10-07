@@ -81,6 +81,22 @@ describe('verifyToken + sid', () => {
     expect(error.code).toBeUndefined();
   });
 
+  test('un token emitido en el MISMO segundo que el cambio de contraseña es válido (iat se compara por segundos)', async () => {
+    // cambio a las 1000 s + 700 ms; token con iat = 1000 s (mismo segundo): antes se rechazaba
+    const fila = usuarioBD({ ultimo_cambio_password: new Date(1000 * 1000 + 700) });
+    const { next, error } = await ejecutar(firmar({ sid: 55, iat: 1000 }, { expiresIn: '100y' }), { fila });
+    expect(error).toBeUndefined();
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  test('un token emitido en un segundo ANTERIOR al cambio de contraseña sigue rechazado con el mismo mensaje y sin code', async () => {
+    const fila = usuarioBD({ ultimo_cambio_password: new Date(1001 * 1000 + 1) });
+    const { error } = await ejecutar(firmar({ sid: 55, iat: 1000 }, { expiresIn: '100y' }), { fila });
+    expect(error.statusCode).toBe(401);
+    expect(error.message).toBe('Sesión inválida. Por favor inicie sesión nuevamente.');
+    expect(error.code).toBeUndefined();
+  });
+
   test('los demás 401/403 conservan mensaje y code: usuario inactivo, bloqueado, inexistente, sin token', async () => {
     let r = await ejecutar(firmar({ sid: 55 }), { fila: usuarioBD({ activo: false, sesion_vigente: false }) });
     expect(r.error.message).toBe('Usuario inactivo. Contacte al administrador.');
