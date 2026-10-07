@@ -11,7 +11,6 @@ const db = require('../database/connection');
 const CODIGO_SESION_REEMPLAZADA = 'SESSION_REPLACED';
 const MENSAJE_SESION_REEMPLAZADA = 'Su sesión fue cerrada porque se inició sesión en otro dispositivo o navegador.';
 const RUTA_SET_PASSWORD = /\/auth\/set-initial-password\/?(\?|$)/;
-const CODIGO_CAMBIO_PASSWORD_REQUERIDO = 'PASSWORD_CHANGE_REQUIRED';
 
 // Motivos del cierre de sesión (campo `motivo` del 401 SESSION_REPLACED): el frontend explica cada caso.
 const MOTIVO_OTRO_INICIO = 'OTRO_INICIO';
@@ -95,7 +94,6 @@ const verifyToken = async (req, res, next) => {
     //    sid, que esa sesión sea del usuario y no esté revocada.
     const result = await db.query(
       `SELECT id, uuid, username, email, nombre_completo, rol, activo, bloqueado_hasta, ultimo_cambio_password,
-              debe_cambiar_password,
               (SELECT s.revocado = false AND s.usuario_id = usuarios.id
                  FROM usuarios_sesiones s WHERE s.id = $2::integer) AS sesion_vigente
        FROM usuarios 
@@ -141,14 +139,6 @@ const verifyToken = async (req, res, next) => {
     if (!esTokenSetPassword && (!tieneSid || user.sesion_vigente !== true)) {
       const motivo = await motivoSesionCerrada(user.id, tieneSid ? decoded.sid : null, user.ultimo_cambio_password);
       throw new AppError(MENSAJE_SESION_REEMPLAZADA, 401, CODIGO_SESION_REEMPLAZADA, motivo);
-    }
-
-    // 5c. Cambio de contraseña obligatorio (alta, clave temporal de un admin o vencimiento de 3 meses):
-    //     el usuario solo puede establecer su contraseña nueva; el resto de la API queda cerrada hasta
-    //     entonces (no depende de que el frontend respete la pantalla de cambio). Sin consulta extra:
-    //     la columna viaja en el SELECT del paso 3.
-    if (user.debe_cambiar_password === true && !RUTA_SET_PASSWORD.test(req.originalUrl || '')) {
-      throw new AppError('Debes cambiar tu contraseña antes de continuar.', 403, CODIGO_CAMBIO_PASSWORD_REQUERIDO);
     }
 
     // 6. Verificar cambio de contraseña post-emisión del token
