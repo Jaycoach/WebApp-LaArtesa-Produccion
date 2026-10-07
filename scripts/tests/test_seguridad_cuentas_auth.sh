@@ -269,11 +269,12 @@ login "$U1_NAME" "$PW_LOG" 198.51.100.32
 psql_q "UPDATE usuarios SET bloqueado_hasta = NOW() + INTERVAL '10 minutes', intentos_fallidos = 5 WHERE id=$U1;" > /dev/null
 login "$U1_NAME" "$PW_U1" 198.51.100.33
 sleep 2
-log_linea() { tail -n 5000 "$LOG_FILE" 2>/dev/null | grep -F -- "$1" | grep -F -- "$2" | grep -F -- "$3" | head -1; }
+# El log es JSON (las comillas del username salen escapadas), así que se busca por fragmentos fijos.
+log_linea() { tail -n 5000 "$LOG_FILE" 2>/dev/null | grep -F -- 'Login fallido username=' | grep -F -- "$1" | grep -F -- "$2" | grep -F -- "$3" | head -1; }
 echo "Líneas de log de fallos de login (evidencia):"
 for caso in "$NOEXISTE|198.51.100.31|usuario_inexistente" "$U1_NAME|198.51.100.32|password_incorrecta" "$U1_NAME|198.51.100.33|cuenta_bloqueada"; do
   IFS='|' read -r un ip mo <<< "$caso"
-  L=$(log_linea "username=\"$un\"" "ip=$ip" "motivo=$mo")
+  L=$(log_linea "$un" "ip=$ip" "motivo=$mo")
   if [ -n "$L" ]; then ok "log con username, IP y motivo=$mo"; echo "    ${L:0:220}"; else fallo "NO hay línea de log para username=$un ip=$ip motivo=$mo"; fi
 done
 if [ -f "$LOG_FILE" ]; then
@@ -408,6 +409,12 @@ psql_q "UPDATE usuarios SET intentos_fallidos=5, bloqueado_hasta=NOW()+INTERVAL 
 call GET "/users/$U1" "$ADM_ACCESS" 198.51.100.50
 assert_eq "GET /users/:id devuelve bloqueado_hasta con valor (UI puede mostrarlo)" "$(echo "$BODY_JSON" | jq -r '.data.bloqueado_hasta // .data.user.bloqueado_hasta // empty' | grep -c .)" "1"
 echo "SELECT previo al desbloqueo:"; psql_tab "SELECT id, intentos_fallidos, bloqueado_hasta > NOW() AS bloqueado FROM usuarios WHERE id=$U1;"
+# negativo: un OPERARIO NO puede desbloquear (ni se audita ni cambia nada)
+REQ_BODY='{}'
+call POST "/users/$U1/unlock" "$N1_ACCESS" 198.51.100.62
+assert_eq "OPERARIO intenta desbloquear => HTTP" "$HTTP" "403"
+assert_eq "tras el intento sin permiso la cuenta sigue bloqueada" "$(psql_q "SELECT bloqueado_hasta > NOW() FROM usuarios WHERE id=$U1;")" "t"
+assert_eq "sin auditoría de desbloqueo por el intento sin permiso" "$(audit_count "$U1" DESBLOQUEO_MANUAL)" "0"
 REQ_BODY='{}'
 call POST "/users/$U1/unlock" "$ADM_ACCESS" 198.51.100.50 "$UA_TEST"
 echo "unlock => HTTP $HTTP :: $(print_safe)"
@@ -436,7 +443,10 @@ echo ""
 echo "-- 4c) escaneo de fugas: ni hash bcrypt, ni token, ni contraseña en claro en ningún jsonb/motivo"
 TEXTO_AUDIT=$(psql_q "SELECT COALESCE(datos_anteriores::text,'')||' '||COALESCE(datos_nuevos::text,'')||' '||COALESCE(motivo,'')||' '||COALESCE(usuario_nombre,'') FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id IN ($IDS_PRUEBA);")
 if printf '%s' "$TEXTO_AUDIT" | grep -qE '\$2[aby]\$'; then fallo "hay un hash bcrypt en auditoria_cambios"; else ok "ningún hash bcrypt (\$2a\$/\$2b\$/\$2y\$) en datos_anteriores/datos_nuevos/motivo"; fi
-if printf '%s' "$TEXTO_AUDIT" | grep -qiE 'password_hash|refresh_?token|token_recuperacion|"?newPassword|"?currentPassword'; then fallo "hay nombres de campos secretos en los jsonb/motivo"; else ok "ninguna clave secreta (password_hash/refresh_token/token_recuperacion/newPassword/currentPassword) en los jsonb/motivo"; fi
+CLAVES_SECRETAS=$(psql_q "SELECT count(*) FROM auditoria_cambios a, LATERAL jsonb_object_keys(COALESCE(a.datos_nuevos,'{}'::jsonb) || COALESCE(a.datos_anteriores,'{}'::jsonb)) AS k WHERE a.tabla='usuarios' AND a.registro_id IN ($IDS_PRUEBA) AND k ~* '(pass|hash|token|secret|clave|credencial)';")
+assert_eq "ninguna CLAVE de aspecto secreto (pass/hash/token/secret/clave) en datos_anteriores/datos_nuevos" "$CLAVES_SECRETAS" "0"
+echo "Claves presentes en los jsonb de esta corrida (evidencia):"
+psql_tab "SELECT DISTINCT k AS clave_jsonb FROM auditoria_cambios a, LATERAL jsonb_object_keys(COALESCE(a.datos_nuevos,'{}'::jsonb) || COALESCE(a.datos_anteriores,'{}'::jsonb)) AS k WHERE a.tabla='usuarios' AND a.registro_id IN ($IDS_PRUEBA) ORDER BY 1;"
 if printf '%s' "$TEXTO_AUDIT" | grep -q -F -f "$SECRETS_FILE"; then fallo "una contraseña/token en claro generado por este script aparece en la auditoría"; else ok "ninguna contraseña ni token en claro generado por este script aparece en la auditoría"; fi
 FUGAS_SESION=$(psql_q "SELECT count(*) FROM auditoria WHERE tabla='usuarios_sesiones' AND usuario_id IN ($IDS_PRUEBA) AND cambios::text ~ 'refresh|token|\$2[aby]\$';")
 assert_eq "la tabla auditoria (trigger de sesiones) tampoco filtra tokens" "$FUGAS_SESION" "0"
@@ -488,10 +498,19 @@ fi
 seccion "SANIDAD DE SECRETOS (secrets-hygiene-in-tests, regla 6)"
 # ===========================================================================
 # Lista explícita (el árbol de staging puede tener archivos sucios ajenos a esta tarea).
-ARCHIVOS_TOCADOS="backend/src/utils/clientInfo.js backend/src/services/securityHelpers.js backend/src/services/auth.service.js backend/src/services/user.service.js backend/src/controllers/auth.controller.js backend/src/controllers/user.controller.js backend/src/services/__tests__/auth.service.security.test.js frontend/src/services/api.ts frontend/src/services/authService.ts frontend/src/pages/Configuracion/GestionUsuarios.tsx scripts/tests/test_seguridad_cuentas_auth.sh scripts/tests/frontend-token-refresh.test.mjs"
-echo "Archivos revisados:"; echo "$ARCHIVOS_TOCADOS" | sed 's/^/  /'
-HITS=$(cd "$REPO_ROOT" && for f in $ARCHIVOS_TOCADOS; do [ -f "$f" ] && grep -nE "(password|passwd|secret|token)[A-Za-z_]*[\"']?\s*[:=]\s*[\"'][^\"'\$]{6,}[\"']" "$f" /dev/null | grep -viE "test|process\.env|req\.body|placeholder|type=|useState|label|\bt\(" ; done)
-if [ -z "$HITS" ]; then ok "grep de sanidad: sin literales de contraseña/credencial en los archivos tocados"; else echo "$HITS"; fallo "posibles literales de credencial (revisar manualmente las líneas de arriba)"; fi
+ARCHIVOS_TOCADOS="backend/src/utils/clientInfo.js backend/src/utils/__tests__/clientInfo.test.js backend/src/services/securityHelpers.js backend/src/services/auth.service.js backend/src/services/user.service.js backend/src/controllers/auth.controller.js backend/src/controllers/user.controller.js backend/src/services/__tests__/auth.service.security.test.js backend/src/services/__tests__/passwords.flujos.test.js backend/src/services/__tests__/auditoria.seguridad.test.js backend/src/services/__tests__/helpers/secretos.js backend/src/services/__tests__/helpers/fakeClient.js frontend/src/services/api.ts frontend/src/services/authService.ts frontend/src/utils/bloqueoCuenta.ts frontend/src/pages/Configuracion/GestionUsuarios.tsx scripts/tests/test_seguridad_cuentas_auth.sh scripts/tests/frontend-token-refresh.test.mjs scripts/tests/frontend-bloqueo-cuenta.test.mjs"
+echo "Archivos revisados:"; echo "$ARCHIVOS_TOCADOS" | tr ' ' '\n' | sed 's/^/  /'
+# Patrones (NO se excluyen líneas por contener "test": ahí viven justo los literales que importan):
+#   1) clave de aspecto secreto = literal entre comillas   (password: 'abc', const TOKEN = 'abc', ...)
+#   2) literal pasado a setItem de tokens o a campos de credencial en llamadas
+#   3) hash bcrypt o JWT completos pegados en el código
+PAT_ASIGNACION="(pass(word)?|pwd|secret|token|clave|credencial|hash)[A-Za-z_]*[\"']?[[:space:]]*[:=][[:space:]]*[\"'][^\"'\$]{4,}[\"']"
+PAT_LLAMADA="(setItem\([\"'](auth_token|refresh_token)[\"'],|(password|refreshToken|newPassword|currentPassword)[\"']?[[:space:]]*:)[[:space:]]*[\"'][^\"'\$]{2,}[\"']"
+PAT_LITERAL_FUERTE="\\\$2[aby]\\\$[0-9]{2}\\\$[A-Za-z0-9./]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\."
+HITS=$(cd "$REPO_ROOT" && grep -nE "$PAT_ASIGNACION|$PAT_LLAMADA|$PAT_LITERAL_FUERTE" $ARCHIVOS_TOCADOS 2>/dev/null | grep -vE "process\.env|req\.body|useState|placeholder|type=|toMatch|SELECT|UPDATE|INSERT|PAT_" || true)
+FALTANTES=$(cd "$REPO_ROOT" && for f in $ARCHIVOS_TOCADOS; do [ -f "$f" ] || echo "$f"; done)
+[ -z "$FALTANTES" ] && ok "los $(echo $ARCHIVOS_TOCADOS | wc -w) archivos de la lista existen y fueron escaneados" || fallo "archivos de la lista que no existen (no se escanearon): $FALTANTES"
+if [ -z "$HITS" ]; then ok "grep de sanidad (3 patrones, sin exclusión por 'test'): sin literales de contraseña/credencial/hash/JWT"; else echo "$HITS"; fallo "posibles literales de credencial (revisar manualmente las líneas de arriba)"; fi
 
 echo ""
 echo "===================================================="

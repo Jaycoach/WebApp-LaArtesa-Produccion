@@ -22,13 +22,17 @@ const authService = require('../auth.service');
 const userService = require('../user.service');
 const { registrarEventoSeguridad, EVENTO } = require('../securityHelpers');
 const { fakeClient, sqlDe } = require('./helpers/fakeClient');
+const {
+  passwordPrueba, hashSimulado, tokenPrueba,
+} = require('./helpers/secretos');
 
-const HASH_VIEJO = '$2b$12$hashViejoSimuladoParaLaPrueba00000000000000000000000';
-const HASH_NUEVO = '$2b$12$hashNuevoSimuladoParaLaPrueba00000000000000000000000';
-const PW_ACTUAL = 'contrasena-actual-de-prueba';
-const PW_NUEVA = 'contrasena-nueva-de-prueba';
-const TOKEN_CRUDO = 'token-de-recuperacion-crudo-de-prueba';
-const REFRESH = 'refresh-token-de-prueba';
+// Todo valor secreto se genera en runtime (CLAUDE.md): ningún literal de contraseña/hash/token.
+const HASH_VIEJO = hashSimulado();
+const HASH_NUEVO = hashSimulado();
+const PW_ACTUAL = passwordPrueba();
+const PW_NUEVA = passwordPrueba();
+const TOKEN_CRUDO = tokenPrueba();
+const REFRESH = tokenPrueba();
 
 const INSERT_AUDITORIA = /^INSERT INTO auditoria_cambios/;
 const auditorias = (client) => sqlDe(client, INSERT_AUDITORIA);
@@ -230,7 +234,7 @@ describe('auditoría en cada flujo de seguridad', () => {
     ]);
     pool.getClient.mockResolvedValue(client);
     bcrypt.compare.mockResolvedValue(false);
-    await expect(authService.changePassword(7, 'mal', PW_NUEVA, meta)).rejects.toThrow('Contraseña actual incorrecta');
+    await expect(authService.changePassword(7, passwordPrueba(), PW_NUEVA, meta)).rejects.toThrow('Contraseña actual incorrecta');
     expect(auditorias(client)).toHaveLength(0);
   });
 

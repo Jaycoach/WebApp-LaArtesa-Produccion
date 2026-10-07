@@ -35,6 +35,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { createRequire } from 'node:module';
+import crypto from 'node:crypto';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
@@ -88,6 +89,9 @@ const { apiService } = await import(`file://${outfile}`);
 fs.rmSync(outfile, { force: true });
 
 // --- utilidades de test ---
+// Ningún secreto es literal (CLAUDE.md): los valores falsos también se generan en runtime.
+const aleatorio = () => crypto.randomBytes(12).toString('base64url');
+const RT_SIMULADO = aleatorio();
 let fallos = 0;
 const ok = (m) => console.log(`OK: ${m}`);
 const fallo = (m) => { console.log(`FALLO: ${m}`); fallos += 1; };
@@ -110,9 +114,15 @@ async function loginReal() {
     { headers: { 'X-Real-IP': '198.51.100.77', 'User-Agent': 'frontend-token-refresh-test/1.0' } });
   return r.data.data; // { user, accessToken, refreshToken }
 }
+const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 async function nuevaSesionConAccessVencido() {
-  await new Promise((r) => setTimeout(r, 1100)); // evita colisión de refresh JWT (mismo iat)
+  // El refresh token JWT se firma solo con {id, iat(s)}: dos emisiones del mismo usuario en el
+  // mismo segundo producen el MISMO token y chocan con UNIQUE(usuarios_sesiones.refresh_token)
+  // (bug preexistente del backend, reportado aparte). Se separa login y refresh por >1 s para
+  // que este test mida el interceptor y no esa colisión.
+  await esperar(1100);
   const d = await loginReal();
+  await esperar(1100);
   const vencido = tokenVencido({ id: d.user.id, username: d.user.username, email: d.user.email, rol: d.user.rol });
   store.clear();
   localStorage.setItem('auth_token', vencido);
@@ -151,7 +161,7 @@ check(contar('/auth/refresh') === 1, 'exactamente 1 POST /auth/refresh para las 
 // ============================ F3 ============================
 console.log('\n=== F3: refresh inválido -> limpia sesión, redirige a /login, SIN bucle ===');
 await nuevaSesionConAccessVencido();
-localStorage.setItem('refresh_token', 'refresh-invalido-de-prueba');
+localStorage.setItem('refresh_token', aleatorio());
 reset();
 let r3;
 try { r3 = await apiService.get('/auth/profile'); } catch (e) { r3 = { rejected: true, e }; }
@@ -177,18 +187,18 @@ inst.defaults.adapter = (cfg) => {
   return Promise.reject(err);
 };
 store.clear();
-localStorage.setItem('auth_token', 'x.y.z');
-localStorage.setItem('refresh_token', 'r-simulado');
+localStorage.setItem('auth_token', aleatorio());
+localStorage.setItem('refresh_token', RT_SIMULADO);
 globalThis.window.location.href = '';
-try { await apiService.post('/auth/refresh', { refreshToken: 'r-simulado' }); } catch { /* esperado */ }
+try { await apiService.post('/auth/refresh', { refreshToken: RT_SIMULADO }); } catch { /* esperado */ }
 check(llamadas.filter((u) => u.includes('/auth/refresh')).length === 1, 'F4: un 401 en /auth/refresh NO dispara otra renovación (1 sola llamada)', `F4: /auth/refresh llamado ${llamadas.filter((u) => u.includes('/auth/refresh')).length} veces`);
 
 llamadas.length = 0;
 store.clear();
-localStorage.setItem('auth_token', 'x.y.z');
-localStorage.setItem('refresh_token', 'r-simulado');
+localStorage.setItem('auth_token', aleatorio());
+localStorage.setItem('refresh_token', RT_SIMULADO);
 globalThis.window.location.href = '';
-try { await apiService.post('/auth/login', { username: 'u', password: 'p' }); } catch { /* esperado */ }
+try { await apiService.post('/auth/login', { username: aleatorio(), password: aleatorio() }); } catch { /* esperado */ }
 check(llamadas.filter((u) => u.includes('/auth/refresh')).length === 0, 'F5: un 401 en /auth/login NO dispara renovación', `F5: se llamó /auth/refresh ${llamadas.filter((u) => u.includes('/auth/refresh')).length} veces desde /auth/login`);
 inst.defaults.adapter = adapterOriginal;
 

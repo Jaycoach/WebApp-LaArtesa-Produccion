@@ -21,9 +21,12 @@ const pool = require('../../database/connection');
 const authService = require('../auth.service');
 const userService = require('../user.service');
 const { fakeClient, sqlDe } = require('./helpers/fakeClient');
+const { passwordPrueba, hashSimulado, tokenPrueba } = require('./helpers/secretos');
 
-const HASH_VIEJO = 'hash-viejo-simulado';
-const HASH_NUEVO = 'hash-nuevo-simulado';
+// Todo valor secreto se genera en runtime (CLAUDE.md): ningún literal de contraseña/hash/token.
+const HASH_VIEJO = hashSimulado();
+const HASH_NUEVO = hashSimulado();
+const REFRESH_ACTUAL = tokenPrueba();
 
 /** Comportamiento común a los tres flujos. */
 function esperarComportamientoUnificado(client, userId) {
@@ -65,12 +68,12 @@ describe('punto 2 — flujos de contraseña unificados', () => {
     bcrypt.compare.mockResolvedValueOnce(true).mockResolvedValue(false);
     bcrypt.hash.mockResolvedValue(HASH_NUEVO);
 
-    await authService.changePassword(7, 'actual', 'nueva', { refreshToken: 'refresh-sesion-actual' });
+    await authService.changePassword(7, passwordPrueba(), passwordPrueba(), { refreshToken: REFRESH_ACTUAL });
 
     esperarComportamientoUnificado(client, 7);
     const rev = sqlDe(client, /^UPDATE usuarios_sesiones SET revocado = true/)[0];
     expect(rev.sql).toMatch(/refresh_token <> \$2/);
-    expect(rev.params).toEqual([7, 'refresh-sesion-actual']);
+    expect(rev.params).toEqual([7, REFRESH_ACTUAL]);
   });
 
   test.each([
@@ -83,7 +86,7 @@ describe('punto 2 — flujos de contraseña unificados', () => {
     bcrypt.compare.mockResolvedValueOnce(true).mockResolvedValue(false);
     bcrypt.hash.mockResolvedValue(HASH_NUEVO);
 
-    await authService.changePassword(7, 'actual', 'nueva', ctx);
+    await authService.changePassword(7, passwordPrueba(), passwordPrueba(), ctx);
 
     esperarComportamientoUnificado(client, 7);
     const rev = sqlDe(client, /^UPDATE usuarios_sesiones SET revocado = true/)[0];
@@ -96,7 +99,7 @@ describe('punto 2 — flujos de contraseña unificados', () => {
     pool.getClient.mockResolvedValue(client);
     bcrypt.compare.mockResolvedValue(false);
 
-    await expect(authService.changePassword(7, 'incorrecta', 'nueva', { refreshToken: 'r' }))
+    await expect(authService.changePassword(7, passwordPrueba(), passwordPrueba(), { refreshToken: tokenPrueba() }))
       .rejects.toThrow('Contraseña actual incorrecta');
 
     expect(sqlDe(client, /^INSERT INTO usuarios_historial_passwords/)).toHaveLength(0);
@@ -114,7 +117,7 @@ describe('punto 2 — flujos de contraseña unificados', () => {
     bcrypt.compare.mockResolvedValue(false);
     bcrypt.hash.mockResolvedValue(HASH_NUEVO);
 
-    await authService.resetPassword('token-crudo-simulado', 'nueva');
+    await authService.resetPassword(tokenPrueba(), passwordPrueba());
 
     esperarComportamientoUnificado(client, 9);
     const upd = sqlDe(client, /^UPDATE usuarios SET password_hash/)[0];
@@ -131,7 +134,7 @@ describe('punto 2 — flujos de contraseña unificados', () => {
     pool.getClient.mockResolvedValue(client);
     bcrypt.hash.mockResolvedValue(HASH_NUEVO);
 
-    await userService.resetUserPassword(12, 'clave-temporal');
+    await userService.resetUserPassword(12, passwordPrueba());
 
     esperarComportamientoUnificado(client, 12);
     expect(sqlDe(client, /^UPDATE usuarios SET password_hash/)[0].sql).not.toMatch(/token_recuperacion/);
@@ -141,7 +144,7 @@ describe('punto 2 — flujos de contraseña unificados', () => {
     const client = fakeClient([[/SELECT id, password_hash FROM usuarios/, { rows: [] }]]);
     pool.getClient.mockResolvedValue(client);
 
-    await expect(userService.resetUserPassword(999, 'clave-temporal')).rejects.toThrow('Usuario no encontrado');
+    await expect(userService.resetUserPassword(999, passwordPrueba())).rejects.toThrow('Usuario no encontrado');
 
     expect(client.calls.some((c) => /^UPDATE|^INSERT/.test(c.sql))).toBe(false);
     expect(client.calls.map((c) => c.sql)).toContain('ROLLBACK');
@@ -156,7 +159,7 @@ describe('punto 2 — flujos de contraseña unificados', () => {
     bcrypt.compare.mockResolvedValue(false);
     bcrypt.hash.mockResolvedValue(HASH_NUEVO);
 
-    await authService.setInitialPassword(5, 'nueva');
+    await authService.setInitialPassword(5, passwordPrueba());
 
     expect(sqlDe(client, /^INSERT INTO usuarios_historial_passwords/)).toHaveLength(1);
     expect(sqlDe(client, /^UPDATE usuarios/)[0].sql).toMatch(/debe_cambiar_password = false/);

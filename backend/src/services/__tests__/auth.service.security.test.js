@@ -22,6 +22,7 @@ const logger = require('../../utils/logger');
 const pool = require('../../database/connection');
 const config = require('../../config');
 const authService = require('../auth.service');
+const { passwordPrueba, hashSimulado } = require('./helpers/secretos');
 
 /**
  * Cliente falso: `handlers` es una lista de [regex, respuesta|fn]; la primera
@@ -47,7 +48,7 @@ const usuarioBase = {
   id: 7,
   username: 'usuario.prueba',
   email: 'prueba@example.test',
-  password_hash: 'hash-simulado',
+  password_hash: hashSimulado(),
   nombre_completo: 'Usuario Prueba',
   rol: 'OPERARIO',
   activo: true,
@@ -79,7 +80,7 @@ describe('login — punto 1: reinicio del contador al vencer el bloqueo', () => 
       return false;
     });
 
-    await expect(authService.login({ username: 'usuario.prueba', password: 'x' }))
+    await expect(authService.login({ username: 'usuario.prueba', password: passwordPrueba() }))
       .rejects.toThrow('Credenciales inválidas');
 
     const reinicio = client.calls.findIndex((c) => /SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id = \$1 AND bloqueado_hasta/.test(c.sql));
@@ -98,7 +99,7 @@ describe('login — punto 1: reinicio del contador al vencer el bloqueo', () => 
     ]);
     pool.getClient.mockResolvedValue(client);
 
-    await expect(authService.login({ username: 'usuario.prueba', password: 'x' }))
+    await expect(authService.login({ username: 'usuario.prueba', password: passwordPrueba() }))
       .rejects.toThrow(/^Cuenta bloqueada hasta/);
 
     expect(client.calls.some((c) => /intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id = \$1 AND bloqueado_hasta IS NOT NULL/.test(c.sql))).toBe(false);
@@ -113,7 +114,7 @@ describe('login — punto 1: reinicio del contador al vencer el bloqueo', () => 
     pool.getClient.mockResolvedValue(client);
     bcrypt.compare.mockResolvedValue(false);
 
-    await expect(authService.login({ username: 'usuario.prueba', password: 'x' }))
+    await expect(authService.login({ username: 'usuario.prueba', password: passwordPrueba() }))
       .rejects.toThrow('Credenciales inválidas');
     expect(client.calls.some((c) => /bloqueado_hasta <= NOW\(\)/.test(c.sql) && /^UPDATE/.test(c.sql))).toBe(false);
   });
@@ -123,7 +124,7 @@ describe('login — punto 1: reinicio del contador al vencer el bloqueo', () => 
     pool.getClient.mockResolvedValue(client);
     bcrypt.compare.mockResolvedValue(false);
 
-    await expect(authService.login({ username: 'usuario.prueba', password: 'x' })).rejects.toThrow();
+    await expect(authService.login({ username: 'usuario.prueba', password: passwordPrueba() })).rejects.toThrow();
 
     const upd = client.calls.find((c) => /intentos_fallidos = intentos_fallidos \+ 1/.test(c.sql));
     expect(upd.params).toEqual([7, config.security.maxLoginAttempts, config.security.lockoutDuration]);
@@ -135,7 +136,7 @@ describe('login — punto 1: reinicio del contador al vencer el bloqueo', () => 
 });
 
 describe('login — punto 3: trazabilidad', () => {
-  const PW_SECRETA = 'valor-que-nunca-debe-aparecer-en-logs';
+  const PW_SECRETA = passwordPrueba(); // generada en runtime: no debe aparecer en ningún log
   const meta = { ip: '203.0.113.7', userAgent: 'NavegadorPrueba/9.9' };
 
   beforeEach(() => jest.clearAllMocks());
