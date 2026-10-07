@@ -273,6 +273,14 @@ class UserController {
         });
       }
 
+      // Un admin no se restablece a sí mismo con una clave temporal: usa «Mi contraseña»
+      if (String(id) === String(req.user.id)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Para cambiar tu propia contraseña usa Mi contraseña',
+        });
+      }
+
       const result = await userService.resetUserPassword(id, newPassword, auditoriaCtx(req));
 
       res.json({
