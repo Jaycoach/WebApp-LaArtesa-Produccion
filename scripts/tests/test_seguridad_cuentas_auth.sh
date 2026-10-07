@@ -455,9 +455,10 @@ assert_eq "la tabla auditoria (trigger de sesiones) tampoco filtra tokens" "$FUG
 seccion "PUNTO 6 — renovación automática de token (interceptor REAL de api.ts vs staging)"
 # ===========================================================================
 PW_F=$(gen_valid_password); registrar_secreto "$PW_F"
+PW_F2=$(gen_valid_password); registrar_secreto "$PW_F2"
 crear_usuario OPERARIO "$PW_F"; UF="$NEW_ID"; UF_NAME="$NEW_NAME"
-if (cd "$REPO_ROOT" && API_URL="$API_URL" TEST_USERNAME="$UF_NAME" TEST_PASSWORD="$PW_F" run_node scripts/tests/frontend-token-refresh.test.mjs); then
-  ok "harness del interceptor: TODOS los escenarios F1–F6 pasaron"
+if (cd "$REPO_ROOT" && API_URL="$API_URL" TEST_USERNAME="$UF_NAME" TEST_PASSWORD="$PW_F" NEW_PASSWORD="$PW_F2" run_node scripts/tests/frontend-token-refresh.test.mjs); then
+  ok "harness del interceptor: TODOS los escenarios F0–F7 pasaron"
 else
   fallo "el harness del interceptor (frontend-token-refresh.test.mjs) FALLÓ — ver salida arriba"
 fi
@@ -470,6 +471,100 @@ else
 fi
 
 # ===========================================================================
+seccion "PUNTO 7 — refresh: mismo segundo, simultáneos, jti único, encabezados inválidos"
+# ===========================================================================
+PW_R=$(gen_valid_password); registrar_secreto "$PW_R"
+crear_usuario OPERARIO "$PW_R"; R_ID="$NEW_ID"; R_NAME="$NEW_NAME"
+refresh_con() { # refreshToken ip [ua]  -> HTTP/BODY_JSON
+  REQ_BODY=$(R="$1" jq -n '{refreshToken:env.R}')
+  call POST /auth/refresh "" "$2" "${3:-acceptance-test/1.0}"
+}
+
+echo "-- 7a) login + refresh INMEDIATOS (mismo segundo), 5 rondas sin esperas"
+OK7A=0; DISTINTOS=0
+for i in 1 2 3 4 5; do
+  login "$R_NAME" "$PW_R" 198.51.100.81
+  RT_VIEJO="$REFRESH"
+  refresh_con "$RT_VIEJO" 198.51.100.81
+  RT_NUEVO=$(echo "$BODY_JSON" | jq -r '.data.refreshToken // empty')
+  if [ "$HTTP" = "200" ]; then OK7A=$((OK7A+1)); else echo "ronda $i: HTTP $HTTP :: $(print_safe)"; fi
+  [ -n "$RT_NUEVO" ] && [ "$RT_NUEVO" != "$RT_VIEJO" ] && DISTINTOS=$((DISTINTOS+1))
+done
+echo "Sesiones de la prueba (login y rotación caen en el mismo segundo; evidencia):"
+psql_tab "SELECT id, revocado, to_char(created_at,'HH24:MI:SS') AS segundo FROM usuarios_sesiones WHERE usuario_id=$R_ID ORDER BY id LIMIT 10;"
+assert_eq "5 rondas login->refresh en el mismo segundo => HTTP 200 en todas (antes: 409/23505)" "$OK7A" "5"
+assert_eq "el refresh token rotado es distinto del anterior en las 5 rondas" "$DISTINTOS" "5"
+assert_eq "tras 5 rondas hay 5 sesiones vivas (una por ronda) y las 5 viejas revocadas" "$(sesiones_activas "$R_ID")|$(psql_q "SELECT count(*) FROM usuarios_sesiones WHERE usuario_id=$R_ID AND revocado=true;")" "5|5"
+
+echo ""
+echo "-- 7b) DOS refresh SIMULTÁNEOS con el mismo token: uno gana, el otro falla limpio (5 rondas)"
+ACTIVAS_BASE=$(sesiones_activas "$R_ID")
+GANA_OK=0; PIERDE_OK=0; SESION_OK=0; ESPERADO=$ACTIVAS_BASE
+for i in 1 2 3 4 5; do
+  login "$R_NAME" "$PW_R" 198.51.100.82
+  RT="$REFRESH"; ESPERADO=$((ESPERADO+1))
+  REQ_ESTE=$(R="$RT" jq -n '{refreshToken:env.R}')
+  rm -f "/tmp/par1_$$" "/tmp/par2_$$" "/tmp/par1b_$$" "/tmp/par2b_$$"
+  ( printf '%s' "$REQ_ESTE" | curl -s -o "/tmp/par1b_$$" -w '%{http_code}' -X POST "$API_URL/auth/refresh" -H 'Content-Type: application/json' -H 'X-Real-IP: 198.51.100.82' --data-binary @- > "/tmp/par1_$$" ) &
+  ( printf '%s' "$REQ_ESTE" | curl -s -o "/tmp/par2b_$$" -w '%{http_code}' -X POST "$API_URL/auth/refresh" -H 'Content-Type: application/json' -H 'X-Real-IP: 198.51.100.82' --data-binary @- > "/tmp/par2_$$" ) &
+  wait
+  C1=$(cat "/tmp/par1_$$"); C2=$(cat "/tmp/par2_$$")
+  if { [ "$C1" = "200" ] && [ "$C2" = "400" ]; } || { [ "$C1" = "400" ] && [ "$C2" = "200" ]; }; then GANA_OK=$((GANA_OK+1)); else echo "ronda $i: códigos $C1 / $C2 (se esperaba un 200 y un 400)"; fi
+  if [ "$C1" = "200" ]; then GANADOR="/tmp/par1b_$$"; PERDEDOR="/tmp/par2b_$$"; else GANADOR="/tmp/par2b_$$"; PERDEDOR="/tmp/par1b_$$"; fi
+  [ "$(jq -r '.message // empty' "$PERDEDOR" 2>/dev/null)" = "Token inválido o revocado" ] && PIERDE_OK=$((PIERDE_OK+1))
+  # la sesión del usuario NO quedó rota: el token del ganador sigue sirviendo y no hay sesiones de más ni de menos
+  GRT=$(jq -r '.data.refreshToken // empty' "$GANADOR" 2>/dev/null)
+  refresh_con "$GRT" 198.51.100.82
+  if [ "$HTTP" = "200" ] && [ "$(sesiones_activas "$R_ID")" = "$ESPERADO" ]; then SESION_OK=$((SESION_OK+1)); else echo "ronda $i: el token del ganador dio HTTP $HTTP y hay $(sesiones_activas "$R_ID") sesiones vivas (esperadas $ESPERADO)"; fi
+done
+rm -f /tmp/par1_$$ /tmp/par2_$$ /tmp/par1b_$$ /tmp/par2b_$$
+assert_eq "en las 5 rondas hubo exactamente un 200 y un 400 (nunca dos 200, nunca un 500)" "$GANA_OK" "5"
+assert_eq "el perdedor recibió el mensaje original 'Token inválido o revocado' en las 5 rondas" "$PIERDE_OK" "5"
+assert_eq "tras cada ronda el token del ganador sigue vigente y el conteo de sesiones vivas es el esperado" "$SESION_OK" "5"
+echo "Sesiones vivas del usuario tras las rondas (evidencia):"; psql_tab "SELECT count(*) FILTER (WHERE NOT revocado) AS vivas, count(*) FILTER (WHERE revocado) AS revocadas FROM usuarios_sesiones WHERE usuario_id=$R_ID;"
+
+echo ""
+echo "-- 7c) jti único en access y refresh"
+nuevo_login "$R_NAME" "$PW_R" 198.51.100.83; A1="$ACCESS"; B1="$REFRESH"
+login "$R_NAME" "$PW_R" 198.51.100.83;       A2="$ACCESS"; B2="$REFRESH"
+jti_de() { printf '%s' "$1" | run_node -e "let t='';process.stdin.on('data',d=>t+=d).on('end',()=>{try{console.log(JSON.parse(Buffer.from(t.split('.')[1],'base64url')).jti||'')}catch(e){console.log('')}})"; }
+JA1=$(jti_de "$A1"); JA2=$(jti_de "$A2"); JB1=$(jti_de "$B1"); JB2=$(jti_de "$B2")
+[ -n "$JA1" ] && [ -n "$JB1" ] && ok "access y refresh llevan jti (longitud ${#JA1} y ${#JB1})" || fallo "falta el claim jti"
+[ "$JB1" != "$JB2" ] && [ "$B1" != "$B2" ] && ok "dos logins consecutivos del mismo usuario dan refresh tokens y jti distintos" || fallo "dos logins seguidos dieron el mismo refresh token"
+
+echo ""
+echo "-- 7d) encabezados inválidos NUNCA rompen un login, un refresh ni un cambio de contraseña (6e)"
+PW_G=$(gen_valid_password); registrar_secreto "$PW_G"
+crear_usuario OPERARIO "$PW_G"; G_ID="$NEW_ID"; G_NAME="$NEW_NAME"
+IP_BASURA="no-es-ip'; DROP TABLE usuarios;--"
+IP_ENORME=$(head -c 12000 /dev/zero | tr '\0' 'x')
+UA_ENORME=$(head -c 8000 /dev/zero | tr '\0' 'A')
+login "$G_NAME" "$PW_G" "$IP_BASURA" "$UA_ENORME"
+assert_eq "login con X-Real-IP basura y User-Agent de 8000 caracteres => HTTP" "$HTTP" "200"
+GA="$ACCESS"; GR="$REFRESH"
+echo "Última sesión (evidencia): ip y largo del user_agent guardados"
+psql_tab "SELECT id, ip_address, length(user_agent) AS largo_ua FROM usuarios_sesiones WHERE usuario_id=$G_ID ORDER BY id DESC LIMIT 1;"
+# Un X-Real-IP inválido se DESCARTA y se usa el siguiente origen del orden (req.ip; al probar directo
+# contra :3000 es 127.0.0.1). NULL solo queda si ningún origen es válido (cubierto en jest).
+assert_eq "X-Real-IP basura NO se guarda: se descarta y se usa el siguiente origen válido (req.ip)" "$(psql_q "SELECT host(ip_address) FROM usuarios_sesiones WHERE usuario_id=$G_ID ORDER BY id DESC LIMIT 1;")" "127.0.0.1"
+assert_eq "user_agent truncado a 512" "$(psql_q "SELECT length(user_agent) FROM usuarios_sesiones WHERE usuario_id=$G_ID ORDER BY id DESC LIMIT 1;")" "512"
+nuevo_login "$G_NAME" "$PW_G" "$IP_ENORME" "acceptance-test/1.0"
+assert_eq "login con X-Real-IP de 12000 caracteres => HTTP" "$HTTP" "200"
+assert_eq "X-Real-IP de 12000 caracteres se descarta (se usa req.ip)" "$(psql_q "SELECT host(ip_address) FROM usuarios_sesiones WHERE usuario_id=$G_ID ORDER BY id DESC LIMIT 1;")" "127.0.0.1"
+GA="$ACCESS"; GR="$REFRESH"
+refresh_con "$GR" "$IP_BASURA" "$UA_ENORME"
+assert_eq "refresh con encabezados basura => HTTP" "$HTTP" "200"
+GA=$(echo "$BODY_JSON" | jq -r '.data.accessToken // empty'); GR=$(echo "$BODY_JSON" | jq -r '.data.refreshToken // empty')
+NEW_G=$(gen_valid_password); registrar_secreto "$NEW_G"
+REQ_BODY=$(C="$PW_G" N="$NEW_G" R="$GR" jq -n '{currentPassword:env.C,newPassword:env.N,refreshToken:env.R}')
+call POST /auth/change-password "$GA" "$IP_BASURA" "$UA_ENORME"
+assert_eq "cambio de contraseña con encabezados basura => HTTP" "$HTTP" "200"
+echo "Auditoría del cambio con IP inválida (evidencia):"
+psql_tab "SELECT id, registro_id AS objetivo, ip_address, length(user_agent) AS largo_ua, left(motivo,40) AS motivo FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id=$G_ID ORDER BY id;"
+assert_eq "la auditoría del cambio se registró aun con encabezados basura (IP válida de respaldo, UA a 512)" "$(psql_q "SELECT count(*) FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id=$G_ID AND motivo LIKE 'CAMBIO_PASSWORD%' AND host(ip_address)='127.0.0.1' AND length(user_agent)=512;")" "1"
+login "$G_NAME" "$NEW_G" 198.51.100.84; assert_eq "el usuario entra con la contraseña nueva" "$HTTP" "200"
+
+# ===========================================================================
 seccion "REGRESIÓN COMPLETA (qa-agent: no solo lo nuevo)"
 # ===========================================================================
 echo "-- jest (backend)"
@@ -480,6 +575,10 @@ echo "$JEST_OUT" | grep -E '^(Tests|Test Suites):'
 if [ "$SKIP_REGRESION" = "1" ]; then
   echo "SKIP_REGRESION=1: se omiten los scripts de regresión previos (solo para depurar este script)."
 else
+  SQL_ADMINS_REALES="SELECT id, username, rol, activo FROM usuarios WHERE rol='ADMIN' AND username !~ '^test_' AND username !~ '_DEACTIVATED$' ORDER BY id"
+  echo "AVISO: user_hierarchy_and_full_regression.sh desactiva BREVEMENTE a los admins REALES de staging y los restaura (trap)."
+  echo "Admins reales ANTES de la regresión:"; psql_tab "$SQL_ADMINS_REALES"
+  ADMINS_ANTES=$(psql_q "SELECT string_agg(id||':'||activo::text, ',' ORDER BY id) FROM usuarios WHERE rol='ADMIN' AND username !~ '^test_' AND username !~ '_DEACTIVATED$'")
   for s in test_error_desconocido_cambio_password.sh fix-audit-session-trigger.sh user_hierarchy_and_full_regression.sh test_session_replaced_guard.sh test_rate_limit_diferenciado.sh; do
     echo ""; echo "-- $s"
     if [ -f "$REPO_ROOT/scripts/tests/$s" ]; then
@@ -492,17 +591,22 @@ else
       fallo "no existe $s"
     fi
   done
+  echo ""; echo "Admins reales DESPUÉS de la regresión (SELECT de confirmación):"; psql_tab "$SQL_ADMINS_REALES"
+  ADMINS_DESPUES=$(psql_q "SELECT string_agg(id||':'||activo::text, ',' ORDER BY id) FROM usuarios WHERE rol='ADMIN' AND username !~ '^test_' AND username !~ '_DEACTIVATED$'")
+  assert_eq "admins reales: mismo estado activo antes y después de la regresión" "$ADMINS_DESPUES" "$ADMINS_ANTES"
 fi
 
 # ===========================================================================
 seccion "SANIDAD DE SECRETOS (secrets-hygiene-in-tests, regla 6)"
 # ===========================================================================
 # Lista explícita (el árbol de staging puede tener archivos sucios ajenos a esta tarea).
-ARCHIVOS_TOCADOS="backend/src/utils/clientInfo.js backend/src/utils/__tests__/clientInfo.test.js backend/src/services/securityHelpers.js backend/src/services/auth.service.js backend/src/services/user.service.js backend/src/controllers/auth.controller.js backend/src/controllers/user.controller.js backend/src/services/__tests__/auth.service.security.test.js backend/src/services/__tests__/passwords.flujos.test.js backend/src/services/__tests__/auditoria.seguridad.test.js backend/src/services/__tests__/helpers/secretos.js backend/src/services/__tests__/helpers/fakeClient.js frontend/src/services/api.ts frontend/src/services/authService.ts frontend/src/utils/bloqueoCuenta.ts frontend/src/pages/Configuracion/GestionUsuarios.tsx scripts/tests/test_seguridad_cuentas_auth.sh scripts/tests/frontend-token-refresh.test.mjs scripts/tests/frontend-bloqueo-cuenta.test.mjs"
+ARCHIVOS_TOCADOS="backend/src/utils/clientInfo.js backend/src/utils/__tests__/clientInfo.test.js backend/src/services/securityHelpers.js backend/src/services/auth.service.js backend/src/services/user.service.js backend/src/controllers/auth.controller.js backend/src/controllers/user.controller.js backend/src/services/__tests__/auth.service.security.test.js backend/src/services/__tests__/passwords.flujos.test.js backend/src/services/__tests__/auditoria.seguridad.test.js backend/src/services/__tests__/helpers/secretos.js backend/src/services/__tests__/helpers/fakeClient.js backend/src/services/__tests__/refresh.transaccional.test.js backend/src/utils/jwt.js frontend/src/services/api.ts frontend/src/services/authService.ts frontend/src/utils/bloqueoCuenta.ts frontend/src/pages/Configuracion/GestionUsuarios.tsx scripts/tests/test_seguridad_cuentas_auth.sh scripts/tests/frontend-token-refresh.test.mjs scripts/tests/frontend-bloqueo-cuenta.test.mjs"
 echo "Archivos revisados:"; echo "$ARCHIVOS_TOCADOS" | tr ' ' '\n' | sed 's/^/  /'
 # Patrones (NO se excluyen líneas por contener "test": ahí viven justo los literales que importan):
-#   1) clave de aspecto secreto = literal entre comillas   (password: 'abc', const TOKEN = 'abc', ...)
+#   1) identificador de aspecto secreto asignado a un literal entre comillas (propiedad u
+#      objeto, constante, variable)
 #   2) literal pasado a setItem de tokens o a campos de credencial en llamadas
+#      (la línea de comentario NO lleva ejemplos literales: el propio patrón los detectaría)
 #   3) hash bcrypt o JWT completos pegados en el código
 PAT_ASIGNACION="(pass(word)?|pwd|secret|token|clave|credencial|hash)[A-Za-z_]*[\"']?[[:space:]]*[:=][[:space:]]*[\"'][^\"'\$]{4,}[\"']"
 PAT_LLAMADA="(setItem\([\"'](auth_token|refresh_token)[\"'],|(password|refreshToken|newPassword|currentPassword)[\"']?[[:space:]]*:)[[:space:]]*[\"'][^\"'\$]{2,}[\"']"

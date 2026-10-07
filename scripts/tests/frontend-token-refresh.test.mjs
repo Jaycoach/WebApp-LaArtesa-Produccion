@@ -21,9 +21,14 @@
  *   F5  /auth/login que responde 401 NO dispara renovación (adapter simulado).
  *   F6  carrera entre pestañas: otra pestaña ya rotó el token -> se
  *       reintenta con el token nuevo SIN llamar a /auth/refresh.
+ *   F0  COLISIÓN EXPLÍCITA (punto 7): login y refresh en el MISMO segundo, 5 veces
+ *       seguidas, sin esperas -> todas las renovaciones tienen éxito (antes: 409/23505).
+ *   F7  cambio de contraseña real (authService.changePassword con el refresh_token
+ *       de localStorage): la sesión desde la que se cambia se CONSERVA y la de otra
+ *       estación se revoca (el usuario que cambia su clave no queda expulsado).
  *
  * Credenciales: llegan por variables de entorno (TEST_USERNAME /
- * TEST_PASSWORD), nunca como argumento ni como literal. Los JWT vencidos se
+ * TEST_PASSWORD / NEW_PASSWORD), nunca como argumento ni como literal. Los JWT vencidos se
  * firman en runtime con el secreto del .env; nada de eso se imprime.
  *
  * Uso (EN STAGING, desde la raíz del repo):
@@ -42,9 +47,10 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const API_URL = process.env.API_URL || 'http://localhost:3000/api';
 const TEST_USERNAME = process.env.TEST_USERNAME;
 const TEST_PASSWORD = process.env.TEST_PASSWORD;
+const NEW_PASSWORD = process.env.NEW_PASSWORD;
 
-if (!TEST_USERNAME || !TEST_PASSWORD) {
-  console.error('FALLO: faltan TEST_USERNAME / TEST_PASSWORD en el entorno');
+if (!TEST_USERNAME || !TEST_PASSWORD || !NEW_PASSWORD) {
+  console.error('FALLO: faltan TEST_USERNAME / TEST_PASSWORD / NEW_PASSWORD en el entorno');
   process.exit(1);
 }
 
@@ -87,6 +93,16 @@ buildSync({
 });
 const { apiService } = await import(`file://${outfile}`);
 fs.rmSync(outfile, { force: true });
+// authService real (misma clase que usa la pantalla de cambio de contraseña)
+const outAuth = path.join(os.tmpdir(), `authService.refresh.${Date.now()}.cjs`);
+buildSync({
+  entryPoints: [path.join(REPO_ROOT, 'frontend/src/services/authService.ts')],
+  bundle: true, platform: 'node', format: 'cjs', outfile: outAuth, logLevel: 'silent',
+  alias: { '@': path.join(REPO_ROOT, 'frontend/src') },
+  define: { 'import.meta.env.VITE_API_URL': JSON.stringify(API_URL) },
+});
+const { authService } = await import(`file://${outAuth}`);
+fs.rmSync(outAuth, { force: true });
 
 // --- utilidades de test ---
 // Ningún secreto es literal (CLAUDE.md): los valores falsos también se generan en runtime.
@@ -116,13 +132,10 @@ async function loginReal() {
 }
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 async function nuevaSesionConAccessVencido() {
-  // El refresh token JWT se firma solo con {id, iat(s)}: dos emisiones del mismo usuario en el
-  // mismo segundo producen el MISMO token y chocan con UNIQUE(usuarios_sesiones.refresh_token)
-  // (bug preexistente del backend, reportado aparte). Se separa login y refresh por >1 s para
-  // que este test mida el interceptor y no esa colisión.
-  await esperar(1100);
+  // SIN esperas a propósito: login y refresh caen en el mismo segundo. Antes del punto 7 esto
+  // producía el mismo refresh token (iat en segundos) y un 409 (23505); con el jti único debe
+  // funcionar siempre.
   const d = await loginReal();
-  await esperar(1100);
   const vencido = tokenVencido({ id: d.user.id, username: d.user.username, email: d.user.email, rol: d.user.rol });
   store.clear();
   localStorage.setItem('auth_token', vencido);
@@ -221,6 +234,39 @@ try { r6 = await apiService.get('/auth/profile'); } catch (e) { r6 = { error: e 
 console.log(`peticiones: ${peticiones.map((p) => `${p.method} ${p.url}`).join(' | ')}`);
 check(r6 && r6.success === true, 'F6: la petición terminó con éxito usando el token que dejó la otra pestaña', `F6: no tuvo éxito: ${JSON.stringify(r6?.error?.message || r6)}`);
 check(contar('/auth/refresh') === 0, 'F6: NO se llamó a /auth/refresh (evita rotar dos veces el mismo refresh token)', `F6: se llamó /auth/refresh ${contar('/auth/refresh')} veces`);
+
+// ============================ F0 ============================
+console.log('\n=== F0: colisión explícita — login + refresh en el MISMO segundo, 5 rondas sin esperas ===');
+let rondasOk = 0;
+for (let i = 0; i < 5; i += 1) {
+  await nuevaSesionConAccessVencido();
+  reset();
+  let r;
+  try { r = await apiService.get('/auth/profile'); } catch (e) { r = { error: e }; }
+  if (r && r.success === true && contar('/auth/refresh') === 1) rondasOk += 1;
+  else console.log(`  ronda ${i + 1}: ${JSON.stringify(r?.error?.message || r)} (refresh=${contar('/auth/refresh')})`);
+}
+check(rondasOk === 5, 'F0: las 5 rondas login->refresh inmediato tuvieron éxito (sin 409/23505)', `F0: solo ${rondasOk}/5 rondas tuvieron éxito`);
+
+// ============================ F7 ============================
+console.log('\n=== F7: cambio de contraseña real: se conserva la sesión actual, se revoca la de otra estación ===');
+const axiosReal = requireFromFrontend('axios');
+const refrescarCon = async (rt) => {
+  try { const r = await axiosReal.post(`${API_URL}/auth/refresh`, { refreshToken: rt }); return r.status; }
+  catch (e) { return e.response ? e.response.status : 0; }
+};
+const dActual = await loginReal();      // la estación que cambia la clave
+const dOtra = await loginReal();        // otra estación con sesión abierta
+store.clear();
+localStorage.setItem('auth_token', dActual.accessToken);
+localStorage.setItem('refresh_token', dActual.refreshToken); // tal como lo deja authService.login
+let cambioOk = true;
+try { await authService.changePassword(TEST_PASSWORD, NEW_PASSWORD); } catch (e) { cambioOk = false; console.log(`  error: ${e.message}`); }
+check(cambioOk, 'F7: authService.changePassword terminó con éxito', 'F7: authService.changePassword falló');
+const stOtra = await refrescarCon(dOtra.refreshToken);
+check(stOtra === 400, `F7: la sesión de la OTRA estación quedó revocada (refresh => HTTP ${stOtra})`, `F7: la otra estación NO quedó revocada (HTTP ${stOtra}, se esperaba 400)`);
+const stActual = await refrescarCon(dActual.refreshToken);
+check(stActual === 200, `F7: la sesión que cambió la clave SIGUE viva (refresh => HTTP ${stActual}): no queda expulsada`, `F7: la sesión que cambió la clave quedó revocada (HTTP ${stActual}, se esperaba 200)`);
 
 console.log('');
 if (fallos === 0) {
