@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useAuthStore } from '@/store';
 import { debeTratarseComoSesionReemplazada } from '@/utils/sessionReplacedGuard';
+import { guardarAvisoSesion } from '@/utils/avisoSesion';
 
 /**
  * Detecta cuando OTRA pestaña del mismo navegador sobrescribe auth_token en
@@ -35,6 +36,8 @@ export const useSessionReplacedGuard = () => {
 
       if (!reemplazada) return;
 
+      // Mismo aviso persistente que el cierre por el backend (motivo propio: otro usuario en este navegador)
+      guardarAvisoSesion({ motivo: 'OTRA_PESTANA', username: user?.username });
       logout();
       window.location.href = '/login?session_replaced=1';
     };

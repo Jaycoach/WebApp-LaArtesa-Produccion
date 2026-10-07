@@ -1,10 +1,31 @@
 import React, { useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { authService } from '@/services/authService';
+import { AvisoInformativo } from '@/components/common';
+
+/** Por qué se le exige crear una contraseña nueva (viene del login: ALTA | TEMPORAL | VENCIMIENTO). */
+const MOTIVOS_CAMBIO: Record<string, { titulo: string; texto: string; subtitulo: string }> = {
+  TEMPORAL: {
+    titulo: 'Contraseña temporal',
+    texto: 'Tu contraseña es temporal: crea una nueva para continuar.',
+    subtitulo: 'Elige una contraseña nueva',
+  },
+  VENCIMIENTO: {
+    titulo: 'Contraseña vencida',
+    texto: 'Tu contraseña venció (cada 3 meses se debe cambiar): crea una nueva para continuar.',
+    subtitulo: 'Elige una contraseña nueva',
+  },
+  ALTA: {
+    titulo: '¡Bienvenido a Orbit!',
+    texto: 'Tu cuenta está lista. Crea tu contraseña personal para comenzar a usar el sistema.',
+    subtitulo: 'Establece tu contraseña para comenzar',
+  },
+};
 
 export const SetPassword: React.FC = () => {
   const [searchParams] = useSearchParams();
   const nombre = searchParams.get('nombre') || 'Usuario';
+  const motivo = MOTIVOS_CAMBIO[searchParams.get('motivo') || ''] || MOTIVOS_CAMBIO.ALTA;
   const navigate = useNavigate();
 
   const [password, setPassword] = useState('');
@@ -43,10 +64,11 @@ export const SetPassword: React.FC = () => {
         <div className="flex justify-center">
           <img src="/Orbit_LogoVertical.jpeg" alt="Orbit Producción Artesa" className="h-32 w-auto" />
         </div>
-        <div className="bg-white rounded-xl shadow p-8 space-y-5">
+        <AvisoInformativo titulo={motivo.titulo}>{motivo.texto}</AvisoInformativo>
+        <div className="bg-white rounded-xl shadow p-6 sm:p-8 space-y-5">
           <div className="text-center">
             <h2 className="text-xl font-bold text-gray-900">Hola, {nombre} 👋</h2>
-            <p className="text-sm text-gray-500 mt-1">Establece tu contraseña para comenzar</p>
+            <p className="text-sm text-gray-500 mt-1">{motivo.subtitulo}</p>
           </div>
           <div className="space-y-4">
             <div>

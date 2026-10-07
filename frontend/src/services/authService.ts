@@ -21,6 +21,8 @@ export interface LoginResponse {
     nombre_completo: string;
     rol: string;
     debe_cambiar_password?: boolean;
+    /** Por qué debe cambiarla: ALTA | TEMPORAL | VENCIMIENTO (null si no debe cambiarla) */
+    motivo_cambio_password?: string | null;
   };
   accessToken: string;
   refreshToken: string;
@@ -41,7 +43,7 @@ class AuthService {
   /**
    * Iniciar sesión
    */
-  async login(credentials: LoginRequest): Promise<{ user: Usuario; token: string; refreshToken: string; debeCambiarPassword: boolean }> {
+  async login(credentials: LoginRequest): Promise<{ user: Usuario; token: string; refreshToken: string; debeCambiarPassword: boolean; motivoCambioPassword: string | null }> {
     try {
       const response = await apiService.post<LoginResponse>(
         API_CONFIG.ENDPOINTS.AUTH.LOGIN,
@@ -74,6 +76,7 @@ class AuthService {
         token: accessToken,
         refreshToken,
         debeCambiarPassword: !!backendUser.debe_cambiar_password,
+        motivoCambioPassword: backendUser.motivo_cambio_password ?? null,
       };
     } catch (error: any) {
       console.error('Error en login:', error);

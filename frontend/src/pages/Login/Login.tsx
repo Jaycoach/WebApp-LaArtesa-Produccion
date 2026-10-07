@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '@/store';
-import { Button, Alert } from '@/components/common';
+import { Button, Alert, AvisoSesionCerrada } from '@/components/common';
 import { authService } from '@/services/authService';
-import { consumirAvisoSesionReemplazada } from '@/utils/sesionReemplazada';
+import { descartarAvisoSesion, leerAvisoSesion, type AvisoSesion } from '@/utils/avisoSesion';
 
 type Paso = 'login' | 'solicitar-email' | 'email-enviado';
 
@@ -11,25 +11,29 @@ export const Login: React.FC = () => {
   const navigate = useNavigate();
   const login = useAuthStore((state) => state.login);
 
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [username, setUsername] = useState(searchParams.get('username') || '');
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
-  const [sessionReplacedNotice, setSessionReplacedNotice] = useState(
-    searchParams.get('session_replaced') === '1'
-      ? 'Tu sesión se cerró porque se inició sesión con otro usuario en este navegador. Vuelve a iniciar sesión.'
-      : ''
+  // Aviso de sesión cerrada: persistente. Se LEE sin borrarlo (sobrevive a cualquier recarga, incluida la
+  // del aviso de nueva versión) y solo se elimina con «Entendido» o al iniciar sesión con éxito.
+  // /login?session_replaced=1 (guarda de otra pestaña) es el respaldo si no hubiera aviso guardado.
+  const [aviso, setAviso] = useState<AvisoSesion | null>(
+    () => leerAvisoSesion() ?? (searchParams.get('session_replaced') === '1' ? { motivo: 'OTRA_PESTANA' } : null)
   );
   const [isLoading, setIsLoading] = useState(false);
   const [paso, setPaso] = useState<Paso>('login');
 
-  // Sesión única: si el interceptor cerró la sesión por SESSION_REPLACED, el aviso queda en
-  // sessionStorage; se lee y se BORRA aquí (se ve una sola vez, también con la recarga a /login).
-  useEffect(() => {
-    const aviso = consumirAvisoSesionReemplazada();
-    if (aviso) setSessionReplacedNotice(aviso);
-  }, []);
+  const entendido = () => {
+    descartarAvisoSesion();
+    setAviso(null);
+    if (searchParams.get('session_replaced')) {
+      const resto = new URLSearchParams(searchParams);
+      resto.delete('session_replaced');
+      setSearchParams(resto, { replace: true });
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,9 +41,10 @@ export const Login: React.FC = () => {
     setIsLoading(true);
     try {
       const result = await authService.login({ username, password });
+      descartarAvisoSesion(); // inicio de sesión exitoso: el aviso de sesión cerrada ya cumplió su función
       if (result.debeCambiarPassword) {
         localStorage.setItem('auth_token', result.token);
-        navigate(`/set-password?nombre=${encodeURIComponent(result.user.nombre)}&username=${encodeURIComponent(result.user.username)}`);
+        navigate(`/set-password?nombre=${encodeURIComponent(result.user.nombre)}&username=${encodeURIComponent(result.user.username)}&motivo=${encodeURIComponent(result.motivoCambioPassword || 'ALTA')}`);
       } else {
         login(result.user, result.token);
         navigate('/');
@@ -82,12 +87,14 @@ export const Login: React.FC = () => {
           </p>
         </div>
 
+        {/* Aviso de sesión cerrada (persistente hasta «Entendido» o inicio de sesión) */}
+        {paso === 'login' && aviso && (
+          <AvisoSesionCerrada aviso={aviso} onEntendido={entendido} />
+        )}
+
         {/* PASO 1: Login normal */}
         {paso === 'login' && (
           <form className="mt-8 space-y-6" onSubmit={handleLogin}>
-            {sessionReplacedNotice && !error && (
-              <Alert variant="warning">{sessionReplacedNotice}</Alert>
-            )}
             {error && <Alert variant="error">{error}</Alert>}
             <div className="rounded-md shadow-sm -space-y-px">
               <div>

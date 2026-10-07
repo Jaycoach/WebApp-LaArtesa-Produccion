@@ -5,6 +5,7 @@ import { apiService } from '@/services/api';
 import { authService } from '@/services/authService';
 import { API_CONFIG } from '@/config/api.config';
 import { cuentaBloqueada, detalleBloqueo, textoBloqueo } from '@/utils/bloqueoCuenta';
+import { ModalRestablecerPassword } from './ModalRestablecerPassword';
 
 interface Usuario {
   id: number;
@@ -72,6 +73,9 @@ export const GestionUsuarios: React.FC = () => {
     : ROLES_DISPONIBLES.filter((r) => r.value !== 'admin');
 
   const [desbloqueando, setDesbloqueando] = useState<number | null>(null);
+  // Restablecer contraseña (solo ADMIN, nunca sobre su propia fila): usuario al que se le asigna la clave temporal
+  const [reseteando, setReseteando] = useState<Usuario | null>(null);
+  const puedeRestablecer = (target: Usuario) => esAdminReal && String(target.id) !== String(usuario?.id);
 
   const [pendientes, setPendientes] = useState<Usuario[]>([]);
   const [todos, setTodos] = useState<Usuario[]>([]);
@@ -370,16 +374,19 @@ export const GestionUsuarios: React.FC = () => {
           >
             Mi perfil
           </button>
-          <button
-            onClick={() => setTab('password')}
-            className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
-              tab === 'password'
-                ? 'border-primary-600 text-primary-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            Mi contraseña
-          </button>
+          {/* Solo ADMIN cambia su contraseña por iniciativa propia; el resto solo en el cambio obligatorio */}
+          {esAdminReal && (
+            <button
+              onClick={() => setTab('password')}
+              className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+                tab === 'password'
+                  ? 'border-primary-600 text-primary-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Mi contraseña
+            </button>
+          )}
           {esAdminOSupervisor && (
             <button
               onClick={() => setTab('crear')}
@@ -447,9 +454,9 @@ export const GestionUsuarios: React.FC = () => {
         <Card>
           <div className="divide-y divide-gray-100">
             {todos.map((u) => (
-              <div key={u.id} className="flex items-center justify-between py-4 px-2">
+              <div key={u.id} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between py-4 px-2">
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="font-medium text-gray-900">{u.nombre_completo}</span>
                     {rolBadge(u.rol)}
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
@@ -478,11 +485,16 @@ export const GestionUsuarios: React.FC = () => {
                   <p className="text-sm text-gray-500">@{u.username} · {u.email}</p>
                 </div>
                 {esAdminOSupervisor && puedeModificar(u) && (
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <Button variant="outline" size="sm"
                       onClick={() => abrirEdicion(u)}>
                       Editar usuario
                     </Button>
+                    {puedeRestablecer(u) && (
+                      <Button variant="outline" size="sm" onClick={() => setReseteando(u)}>
+                        Restablecer contraseña
+                      </Button>
+                    )}
                     {estaBloqueado(u) && (
                       <Button variant="secondary" size="sm" isLoading={desbloqueando === u.id}
                         onClick={() => desbloquear(u.id)}>
@@ -617,7 +629,7 @@ export const GestionUsuarios: React.FC = () => {
       )}
 
       {/* Tab: Mi contraseña */}
-      {tab === 'password' && (
+      {tab === 'password' && esAdminReal && (
         <Card>
           <h3 className="text-lg font-semibold text-gray-900 mb-1">Cambiar contraseña</h3>
           <p className="text-sm text-gray-500 mb-6">
@@ -664,6 +676,19 @@ export const GestionUsuarios: React.FC = () => {
           </div>
         </Card>
       )}
+
+      {/* Modal restablecer contraseña (clave temporal) */}
+      <ModalRestablecerPassword
+        usuario={reseteando}
+        onClose={() => setReseteando(null)}
+        onHecho={async () => {
+          setReseteando(null);
+          setError('');
+          setSuccess('Contraseña temporal asignada. Entrégala al usuario de forma segura; deberá cambiarla en su primer ingreso. Todas sus sesiones se cerraron.');
+          await cargarTodos();
+          limpiarMensajes();
+        }}
+      />
 
       {/* Modal edición de usuario */}
       {editando && (

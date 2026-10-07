@@ -9,7 +9,8 @@ import axios, {
 } from 'axios';
 import { API_CONFIG, HTTP_STATUS, MESSAGES } from '../config/api.config';
 import { useAuthStore } from '../store/useAuthStore';
-import { esSesionReemplazada, marcarAvisoSesionReemplazada } from '../utils/sesionReemplazada';
+import { esSesionReemplazada } from '../utils/sesionReemplazada';
+import { guardarAvisoSesion, motivoDesdeRespuesta, type AvisoSesion } from '../utils/avisoSesion';
 import { ApiResponse } from '../types/api';
 
 /** Marcas internas para controlar la renovación automática del token. */
@@ -166,11 +167,26 @@ class ApiService {
     }
   }
 
-  /** Cierra la sesión local por completo y manda a /login (sin recargar si ya está ahí). */
-  private cerrarSesionYRedirigir(): void {
-    useAuthStore.getState().logout(); // limpia auth_token, refresh_token y el store persistido
-    if (window.location.pathname !== '/login') {
-      window.location.href = '/login';
+  /**
+   * Cierra la sesión local por completo y manda a /login con UNA sola navegación (recarga dura).
+   *
+   * - El aviso (motivo + usuario) se guarda en sessionStorage ANTES de limpiar nada: el usuario se lee
+   *   del store mientras todavía existe.
+   * - Se limpia el almacenamiento persistido (auth_token, refresh_token, auth-storage) pero NO el estado
+   *   de React: si el store pasara a isAuthenticated=false, el <Navigate> de las rutas protegidas haría
+   *   una segunda navegación (SPA) compitiendo con esta. La recarga descarta ese estado de todos modos.
+   * - Sin aviso (401 que no es SESSION_REPLACED) y ya en /login no hace nada más.
+   */
+  private cerrarSesionYRedirigir(aviso?: Pick<AvisoSesion, 'motivo'>): void {
+    if (aviso) {
+      const username = useAuthStore.getState().user?.username;
+      guardarAvisoSesion(username ? { motivo: aviso.motivo, username } : { motivo: aviso.motivo });
+    }
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('refresh_token');
+    localStorage.removeItem('auth-storage'); // persistencia de zustand (useAuthStore)
+    if (aviso || window.location.pathname !== '/login') {
+      window.location.replace('/login');
     }
   }
 
@@ -194,9 +210,9 @@ class ApiService {
       case HTTP_STATUS.UNAUTHORIZED:
         // Sesión expirada (y la renovación no fue posible o no aplica) - redirigir a login
         console.error('Unauthorized - redirecting to login');
-        // Si fue por sesión única, se deja el aviso (sessionStorage) para mostrarlo una vez en /login
-        if (esSesionReemplazada(data)) marcarAvisoSesionReemplazada();
-        this.cerrarSesionYRedirigir();
+        // Si fue por sesión única, el aviso (con su motivo) queda en sessionStorage hasta que el usuario
+        // lo cierre o inicie sesión: sobrevive a cualquier recarga de /login
+        this.cerrarSesionYRedirigir(esSesionReemplazada(data) ? { motivo: motivoDesdeRespuesta(data) } : undefined);
         return Promise.reject({
           success: false,
           message: MESSAGES.ERROR.UNAUTHORIZED,
