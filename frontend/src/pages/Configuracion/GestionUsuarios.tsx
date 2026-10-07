@@ -374,19 +374,16 @@ export const GestionUsuarios: React.FC = () => {
           >
             Mi perfil
           </button>
-          {/* Solo ADMIN cambia su contraseña por iniciativa propia; el resto solo en el cambio obligatorio */}
-          {esAdminReal && (
-            <button
-              onClick={() => setTab('password')}
-              className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
-                tab === 'password'
-                  ? 'border-primary-600 text-primary-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              Mi contraseña
-            </button>
-          )}
+          <button
+            onClick={() => setTab('password')}
+            className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+              tab === 'password'
+                ? 'border-primary-600 text-primary-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Mi contraseña
+          </button>
           {esAdminOSupervisor && (
             <button
               onClick={() => setTab('crear')}
@@ -629,7 +626,7 @@ export const GestionUsuarios: React.FC = () => {
       )}
 
       {/* Tab: Mi contraseña */}
-      {tab === 'password' && esAdminReal && (
+      {tab === 'password' && (
         <Card>
           <h3 className="text-lg font-semibold text-gray-900 mb-1">Cambiar contraseña</h3>
           <p className="text-sm text-gray-500 mb-6">

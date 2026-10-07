@@ -7,7 +7,6 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/auth.controller');
 const { verifyToken } = require('../middleware/auth');
-const { checkRole } = require('../middleware/roleCheck');
 const { auth: authLimiter } = require('../middleware/rateLimiter');
 const {
   registerValidation,
@@ -387,9 +386,7 @@ router.post('/reset-password', resetPasswordValidation, authController.resetPass
  *       401:
  *         description: No autorizado
  */
-// Solo ADMIN cambia su contraseña por iniciativa propia. El cambio OBLIGATORIO de los demás roles (alta,
-// clave temporal de un admin, vencimiento de 3 meses) va por /set-initial-password, que no depende del rol.
-router.post('/change-password', verifyToken, checkRole(['admin']), changePasswordValidation, authController.changePassword);
+router.post('/change-password', verifyToken, changePasswordValidation, authController.changePassword);
 router.post('/set-initial-password', verifyToken, authController.setInitialPassword);
 
 /**
