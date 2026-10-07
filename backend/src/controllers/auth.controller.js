@@ -359,7 +359,7 @@ class AuthController {
         });
       }
 
-      const result = await authService.setInitialPassword(userId, newPassword);
+      const result = await authService.setInitialPassword(userId, newPassword, getRequestMeta(req));
       res.json({
         success: true,
         message: result.message,

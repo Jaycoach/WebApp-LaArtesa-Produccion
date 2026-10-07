@@ -150,9 +150,15 @@ describe('punto 2 — flujos de contraseña unificados', () => {
     expect(client.calls.map((c) => c.sql)).toContain('ROLLBACK');
   });
 
-  test('setInitialPassword sigue funcionando con los helpers movidos y NO revoca sesiones (fuera de alcance)', async () => {
+  test.each([
+    ['vencimiento', { password_expirada: true, cambio_posterior_alta: true }, 'CAMBIO_OBLIGATORIO_VENCIMIENTO'],
+    ['clave temporal de un admin', { password_expirada: false, cambio_posterior_alta: true }, 'CAMBIO_OBLIGATORIO_TEMPORAL'],
+    ['alta', { password_expirada: false, cambio_posterior_alta: false }, 'CAMBIO_OBLIGATORIO_ALTA'],
+  ])('setInitialPassword (%s): historial, debe_cambiar_password=false, sesiones revocadas y auditoría %s', async (_caso, banderas, evento) => {
     const client = fakeClient([
-      [/SELECT id, debe_cambiar_password, password_hash FROM usuarios/, { rows: [{ id: 5, debe_cambiar_password: true, password_hash: HASH_VIEJO }] }],
+      [/FROM usuarios WHERE id = \$1 FOR UPDATE/, { rows: [{
+        id: 5, username: 'u5', nombre_completo: 'Cinco', debe_cambiar_password: true, password_hash: HASH_VIEJO, ...banderas,
+      }] }],
       [/FROM usuarios_historial_passwords/, { rows: [] }],
     ]);
     pool.getClient.mockResolvedValue(client);
@@ -162,7 +168,16 @@ describe('punto 2 — flujos de contraseña unificados', () => {
     await authService.setInitialPassword(5, passwordPrueba());
 
     expect(sqlDe(client, /^INSERT INTO usuarios_historial_passwords/)).toHaveLength(1);
-    expect(sqlDe(client, /^UPDATE usuarios/)[0].sql).toMatch(/debe_cambiar_password = false/);
-    expect(sqlDe(client, /^UPDATE usuarios_sesiones/)).toHaveLength(0);
+    const upd = sqlDe(client, /^UPDATE usuarios SET password_hash/);
+    expect(upd).toHaveLength(1);
+    expect(upd[0].sql).toMatch(/debe_cambiar_password = false/);
+    expect(upd[0].sql).toMatch(/ultimo_cambio_password = NOW\(\)/);
+    expect(sqlDe(client, /^UPDATE usuarios_sesiones SET revocado = true/)).toHaveLength(1);
+    const auditoria = sqlDe(client, /^INSERT INTO auditoria_cambios/);
+    expect(auditoria).toHaveLength(1);
+    expect(JSON.parse(auditoria[0].params[1]).evento).toBe(evento);
+    expect(auditoria[0].params[7]).toMatch(new RegExp(`^${evento}: `));
+    expect(JSON.stringify(auditoria[0].params)).not.toContain(HASH_VIEJO);
+    expect(JSON.stringify(auditoria[0].params)).not.toContain(HASH_NUEVO);
   });
 });

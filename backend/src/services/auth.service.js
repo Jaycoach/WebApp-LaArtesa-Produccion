@@ -15,6 +15,7 @@ const {
   guardarPasswordEnHistorial,
   aplicarNuevaPassword,
   registrarEventoSeguridad,
+  motivoCambioObligatorio,
   EVENTO,
 } = require('./securityHelpers');
 
@@ -225,6 +226,7 @@ class AuthService {
                 email_verificado, intentos_fallidos, bloqueado_hasta,
                 debe_cambiar_password,
                 (ultimo_cambio_password < NOW() - INTERVAL '3 months') AS password_expirada,
+                (ultimo_cambio_password > fecha_creacion + INTERVAL '1 minute') AS cambio_posterior_alta,
                 (bloqueado_hasta IS NOT NULL AND bloqueado_hasta <= NOW()) AS bloqueo_vencido
          FROM usuarios
          WHERE username = $1 OR email = $1`,
@@ -349,6 +351,13 @@ class AuthService {
           nombre_completo: user.nombre_completo,
           rol: user.rol,
           debe_cambiar_password: debeCambiarPassword,
+          // Por qué debe cambiarla (ALTA | TEMPORAL | VENCIMIENTO): la pantalla de cambio lo explica
+          motivo_cambio_password: debeCambiarPassword
+            ? motivoCambioObligatorio({
+              passwordExpirada: user.password_expirada,
+              cambioPosteriorAlta: user.cambio_posterior_alta,
+            })
+            : null,
         },
         ...tokens,
       };
@@ -686,13 +695,16 @@ class AuthService {
   /**
    * Establecer contraseña inicial (usuario recién verificado, sin requerir contraseña actual)
    */
-  async setInitialPassword(userId, newPassword) {
+  async setInitialPassword(userId, newPassword, ctx = {}) {
     const client = await pool.getClient();
     try {
       await client.query('BEGIN');
 
       const result = await client.query(
-        'SELECT id, debe_cambiar_password, password_hash FROM usuarios WHERE id = $1',
+        `SELECT id, username, nombre_completo, debe_cambiar_password, password_hash,
+                (ultimo_cambio_password < NOW() - INTERVAL '3 months') AS password_expirada,
+                (ultimo_cambio_password > fecha_creacion + INTERVAL '1 minute') AS cambio_posterior_alta
+         FROM usuarios WHERE id = $1 FOR UPDATE`,
         [userId],
       );
 
@@ -705,6 +717,10 @@ class AuthService {
       }
 
       const currentHash = result.rows[0].password_hash;
+      const motivo = motivoCambioObligatorio({
+        passwordExpirada: result.rows[0].password_expirada,
+        cambioPosteriorAlta: result.rows[0].cambio_posterior_alta,
+      });
 
       // No permitir reutilizar una de las últimas 3 contraseñas
       if (await passwordFueUsadaAntes(client, userId, newPassword, currentHash)) {
@@ -713,18 +729,29 @@ class AuthService {
 
       const hashedPassword = await bcrypt.hash(newPassword, 12);
 
-      // Guardar la contraseña que se reemplaza en el historial
-      await guardarPasswordEnHistorial(client, userId, currentHash);
+      // Mismo comportamiento que los demás cambios de clave: historial, ultimo_cambio_password
+      // (reinicia el conteo de 3 meses), contador/bloqueo en cero y sesiones revocadas (la sesión de
+      // cambio —token de alta o de clave temporal— termina y la persona entra con su clave nueva),
+      // además de dejar de exigirle el cambio.
+      const { sesionesRevocadas } = await aplicarNuevaPassword(client, {
+        userId,
+        nuevoHash: hashedPassword,
+        hashAnterior: currentHash,
+        debeCambiarPassword: false,
+      });
 
-      await client.query(
-        `UPDATE usuarios
-         SET password_hash = $1,
-             debe_cambiar_password = false,
-             ultimo_cambio_password = NOW(),
-             fecha_actualizacion = NOW()
-         WHERE id = $2`,
-        [hashedPassword, userId],
-      );
+      // El evento distingue alta, clave temporal de un admin y vencimiento (sin secretos)
+      await registrarEventoSeguridad(client, {
+        codigo: EVENTO[`CAMBIO_OBLIGATORIO_${motivo}`],
+        descripcion: `el usuario completó el cambio de contraseña obligatorio (${motivo.toLowerCase()}; sesiones revocadas: ${sesionesRevocadas})`,
+        usuarioObjetivoId: userId,
+        actor: { id: userId, nombre: result.rows[0].nombre_completo || result.rows[0].username },
+        camposModificados: ['password_hash', 'ultimo_cambio_password', 'debe_cambiar_password'],
+        detalles: { motivo, sesiones_revocadas: sesionesRevocadas },
+        ip: ctx.ip || null,
+        userAgent: ctx.userAgent || null,
+        transaccional: true,
+      });
 
       await client.query('COMMIT');
       logger.info(`Contraseña inicial establecida para usuario ID ${userId}`);

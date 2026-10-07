@@ -90,6 +90,9 @@ async function revocarSesionesUsuario(client, userId, conservarRefreshToken = nu
  * Opciones:
  *   limpiarTokenRecuperacion  — true en el reset por token (lo consume).
  *   conservarRefreshToken     — sesión a conservar (solo cambio propio).
+ *   debeCambiarPassword       — true/false fija debe_cambiar_password (true = clave TEMPORAL que
+ *                               asigna un admin; false = el usuario completó el cambio obligatorio);
+ *                               undefined lo deja como está.
  *
  * Devuelve { sesionesRevocadas, sesionConservada }; `sesionConservada` es true solo si el
  * refresh token indicado corresponde a una sesión vigente de ese usuario que quedó viva
@@ -97,6 +100,7 @@ async function revocarSesionesUsuario(client, userId, conservarRefreshToken = nu
  */
 async function aplicarNuevaPassword(client, {
   userId, nuevoHash, hashAnterior, limpiarTokenRecuperacion = false, conservarRefreshToken = null,
+  debeCambiarPassword,
 }) {
   await guardarPasswordEnHistorial(client, userId, hashAnterior);
 
@@ -108,7 +112,8 @@ async function aplicarNuevaPassword(client, {
          intentos_fallidos = 0,
          bloqueado_hasta = NULL${limpiarTokenRecuperacion ? `,
          token_recuperacion = NULL,
-         token_recuperacion_expira = NULL` : ''}
+         token_recuperacion_expira = NULL` : ''}${typeof debeCambiarPassword === 'boolean' ? `,
+         debe_cambiar_password = ${debeCambiarPassword ? 'true' : 'false'}` : ''}
      WHERE id = $2`,
     [nuevoHash, userId],
   );
@@ -128,6 +133,31 @@ async function aplicarNuevaPassword(client, {
 }
 
 // ---------------------------------------------------------------------------
+// Cambio de contraseña obligatorio: por qué se le exige a este usuario
+// ---------------------------------------------------------------------------
+
+const MOTIVO_CAMBIO = {
+  ALTA: 'ALTA',
+  TEMPORAL: 'TEMPORAL',
+  VENCIMIENTO: 'VENCIMIENTO',
+};
+
+/**
+ * Motivo del cambio obligatorio, deducido de datos que ya existen (sin columna nueva ni lectura de la
+ * auditoría, que es best-effort):
+ *   VENCIMIENTO — la contraseña tiene más de 3 meses (el login marca debe_cambiar_password).
+ *   TEMPORAL    — no venció, pero la clave se cambió DESPUÉS del alta de la cuenta y aun así debe cambiarse:
+ *                 solo un reset de admin hace eso.
+ *   ALTA        — la clave es la del alta (ultimo_cambio_password ≈ fecha_creacion).
+ * `passwordExpirada` y `cambioPosteriorAlta` salen del mismo SELECT que lee al usuario.
+ */
+function motivoCambioObligatorio({ passwordExpirada, cambioPosteriorAlta }) {
+  if (passwordExpirada) return MOTIVO_CAMBIO.VENCIMIENTO;
+  if (cambioPosteriorAlta) return MOTIVO_CAMBIO.TEMPORAL;
+  return MOTIVO_CAMBIO.ALTA;
+}
+
+// ---------------------------------------------------------------------------
 // Auditoría de eventos de seguridad (auditoria_cambios)
 // ---------------------------------------------------------------------------
 // Se insertan desde la capa de servicio y NO con un trigger sobre `usuarios`:
@@ -140,6 +170,9 @@ const EVENTO = {
   CAMBIO_PASSWORD: 'CAMBIO_PASSWORD',
   RESET_PASSWORD_TOKEN: 'RESET_PASSWORD_TOKEN',
   RESET_PASSWORD_ADMIN: 'RESET_PASSWORD_ADMIN',
+  CAMBIO_OBLIGATORIO_ALTA: 'CAMBIO_OBLIGATORIO_ALTA',
+  CAMBIO_OBLIGATORIO_TEMPORAL: 'CAMBIO_OBLIGATORIO_TEMPORAL',
+  CAMBIO_OBLIGATORIO_VENCIMIENTO: 'CAMBIO_OBLIGATORIO_VENCIMIENTO',
   BLOQUEO_CUENTA_INTENTOS: 'BLOQUEO_CUENTA_INTENTOS',
   DESBLOQUEO_MANUAL: 'DESBLOQUEO_MANUAL',
   SESION_REEMPLAZADA: 'SESION_REEMPLAZADA',
@@ -222,4 +255,6 @@ module.exports = {
   revocarSesionesUsuario,
   aplicarNuevaPassword,
   registrarEventoSeguridad,
+  MOTIVO_CAMBIO,
+  motivoCambioObligatorio,
 };

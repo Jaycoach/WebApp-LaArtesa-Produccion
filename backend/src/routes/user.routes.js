@@ -505,7 +505,7 @@ router.post('/:id/deactivate', checkRole(['admin', 'supervisor']), requireCanMod
  * /api/users/{id}/reset-password:
  *   post:
  *     summary: Resetear contraseña de usuario
- *     description: Admin puede resetear la contraseña de cualquier usuario
+ *     description: Solo un admin puede restablecer la contraseña de un usuario. Queda como TEMPORAL (debe_cambiar_password) y se cierran todas sus sesiones
  *     tags:
  *       - Users
  *     security:
@@ -550,7 +550,7 @@ router.post('/:id/deactivate', checkRole(['admin', 'supervisor']), requireCanMod
  *       401:
  *         description: No autorizado
  */
-router.post('/:id/reset-password', checkRole(['admin', 'supervisor']), requireCanModifyTarget, resetPasswordValidation, userController.resetUserPassword);
+router.post('/:id/reset-password', checkRole(['admin']), requireCanModifyTarget, resetPasswordValidation, userController.resetUserPassword);
 
 /**
  * @swagger

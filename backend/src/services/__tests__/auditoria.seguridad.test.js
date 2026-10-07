@@ -289,7 +289,7 @@ describe('auditoría en cada flujo de seguridad', () => {
 
     const [ins] = auditorias(client);
     expect(ins.params[0]).toBe(12);
-    expect(JSON.parse(ins.params[1])).toEqual({ evento: 'RESET_PASSWORD_ADMIN', sesiones_revocadas: 1 });
+    expect(JSON.parse(ins.params[1])).toEqual({ evento: 'RESET_PASSWORD_ADMIN', temporal: true, sesiones_revocadas: 1 });
     expect(ins.params[3]).toBe(2);
     expect(ins.params[4]).toBe('Admin Prueba');
     expect(ins.params[7]).toMatch(/^RESET_PASSWORD_ADMIN: /);

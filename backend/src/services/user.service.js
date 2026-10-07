@@ -443,19 +443,22 @@ class UserService {
       // todas las sesiones revocadas (mismo comportamiento que los otros flujos).
       // El reset por admin NO bloquea la reutilización de claves anteriores: el
       // admin define una clave temporal, pero sí queda el hash anterior en el historial.
+      // La clave que define el admin es TEMPORAL: debe_cambiar_password = true obliga al usuario a
+      // crear la suya en su primer ingreso.
       const { sesionesRevocadas } = await aplicarNuevaPassword(client, {
         userId,
         nuevoHash: hashedPassword,
         hashAnterior: userExists.rows[0].password_hash,
+        debeCambiarPassword: true,
       });
 
       await registrarEventoSeguridad(client, {
         codigo: EVENTO.RESET_PASSWORD_ADMIN,
-        descripcion: `contraseña restablecida por un administrador (sesiones revocadas: ${sesionesRevocadas})`,
+        descripcion: `contraseña restablecida por un administrador; quedó temporal, el usuario deberá cambiarla en su primer ingreso (sesiones revocadas: ${sesionesRevocadas})`,
         usuarioObjetivoId: userId,
         actor,
-        camposModificados: ['password_hash', 'ultimo_cambio_password', 'intentos_fallidos', 'bloqueado_hasta'],
-        detalles: { sesiones_revocadas: sesionesRevocadas },
+        camposModificados: ['password_hash', 'ultimo_cambio_password', 'intentos_fallidos', 'bloqueado_hasta', 'debe_cambiar_password'],
+        detalles: { temporal: true, sesiones_revocadas: sesionesRevocadas },
         ip,
         userAgent,
         transaccional: true,
@@ -465,7 +468,7 @@ class UserService {
 
       logger.info(`Contraseña reseteada para usuario ID ${userId} por admin`);
 
-      return { message: 'Contraseña reseteada exitosamente' };
+      return { message: 'Contraseña temporal asignada. El usuario deberá cambiarla en su primer ingreso.' };
     } catch (error) {
       await client.query('ROLLBACK');
       logger.error('Error al resetear contraseña:', error);
