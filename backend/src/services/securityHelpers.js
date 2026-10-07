@@ -148,7 +148,7 @@ const MOTIVO_CAMBIO = {
  *   VENCIMIENTO — la contraseña tiene más de 3 meses (el login marca debe_cambiar_password).
  *   TEMPORAL    — no venció, pero la clave se cambió DESPUÉS del alta de la cuenta y aun así debe cambiarse:
  *                 solo un reset de admin hace eso.
- *   ALTA        — la clave es la del alta (ultimo_cambio_password ≈ fecha_creacion).
+ *   ALTA        — la clave es la del alta (ultimo_cambio_password = fecha_creacion: el INSERT les da el mismo timestamp).
  * `passwordExpirada` y `cambioPosteriorAlta` salen del mismo SELECT que lee al usuario.
  */
 function motivoCambioObligatorio({ passwordExpirada, cambioPosteriorAlta }) {

@@ -226,7 +226,7 @@ class AuthService {
                 email_verificado, intentos_fallidos, bloqueado_hasta,
                 debe_cambiar_password,
                 (ultimo_cambio_password < NOW() - INTERVAL '3 months') AS password_expirada,
-                (ultimo_cambio_password > fecha_creacion + INTERVAL '1 minute') AS cambio_posterior_alta,
+                (ultimo_cambio_password > fecha_creacion + INTERVAL '1 second') AS cambio_posterior_alta,
                 (bloqueado_hasta IS NOT NULL AND bloqueado_hasta <= NOW()) AS bloqueo_vencido
          FROM usuarios
          WHERE username = $1 OR email = $1`,
@@ -703,7 +703,7 @@ class AuthService {
       const result = await client.query(
         `SELECT id, username, nombre_completo, debe_cambiar_password, password_hash,
                 (ultimo_cambio_password < NOW() - INTERVAL '3 months') AS password_expirada,
-                (ultimo_cambio_password > fecha_creacion + INTERVAL '1 minute') AS cambio_posterior_alta
+                (ultimo_cambio_password > fecha_creacion + INTERVAL '1 second') AS cambio_posterior_alta
          FROM usuarios WHERE id = $1 FOR UPDATE`,
         [userId],
       );
