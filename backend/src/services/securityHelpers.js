@@ -142,6 +142,7 @@ const EVENTO = {
   RESET_PASSWORD_ADMIN: 'RESET_PASSWORD_ADMIN',
   BLOQUEO_CUENTA_INTENTOS: 'BLOQUEO_CUENTA_INTENTOS',
   DESBLOQUEO_MANUAL: 'DESBLOQUEO_MANUAL',
+  SESION_REEMPLAZADA: 'SESION_REEMPLAZADA',
 };
 
 // Claves que jamás deben llegar a un jsonb de auditoría (defensa en profundidad:

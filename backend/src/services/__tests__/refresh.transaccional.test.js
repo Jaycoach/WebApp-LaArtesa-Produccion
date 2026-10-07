@@ -97,7 +97,7 @@ describe('refreshToken() transaccional', () => {
     const client = fakeClient([SESION_VIGENTE, USUARIO_ACTIVO, [INSERT_SESION, () => {
       intento += 1;
       if (intento === 1) throw Object.assign(new Error('invalid input syntax for type inet'), { code: '22P02' });
-      return { rows: [], rowCount: 1 };
+      return { rows: [{ id: 2001 }], rowCount: 1 };
     }]]);
     pool.getClient.mockResolvedValue(client);
 
@@ -156,7 +156,7 @@ describe('login nunca falla por IP/UA inválidos (punto 6e)', () => {
       [INSERT_SESION, () => {
         intento += 1;
         if (intento === 1) throw Object.assign(new Error('invalid input syntax for type inet'), { code: '22P02' });
-        return { rows: [], rowCount: 1 };
+        return { rows: [{ id: 2001 }], rowCount: 1 };
       }],
     ]);
     pool.getClient.mockResolvedValue(client);

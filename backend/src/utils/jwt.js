@@ -8,35 +8,44 @@ const config = require('../config');
 const logger = require('./logger');
 
 /**
- * Generar access y refresh tokens
+ * Refresh token. jwtid (claim jti) único por emisión: sin él dos tokens del mismo usuario
+ * emitidos en el mismo segundo (iat tiene resolución de 1 s) salen idénticos y el refresh
+ * token choca con UNIQUE(usuarios_sesiones.refresh_token) (error 23505).
  */
-const generateTokens = (user) => {
+const generarRefreshToken = (user) => jwt.sign(
+  { id: user.id },
+  config.jwt.refreshSecret,
+  { expiresIn: config.jwt.refreshExpiresIn, jwtid: crypto.randomUUID() },
+);
+
+/**
+ * Access token. `sessionId` (claim sid) es el id de la fila de usuarios_sesiones a la que
+ * pertenece; el middleware de auth lo usa para rechazar al instante un access token cuya
+ * sesión fue reemplazada o revocada. Sin sessionId el token no lleva sid (comportamiento
+ * anterior: vale hasta que expire).
+ */
+const generarAccessToken = (user, sessionId) => jwt.sign(
+  {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    rol: user.rol,
+    ...(sessionId !== undefined && sessionId !== null ? { sid: sessionId } : {}),
+  },
+  config.jwt.secret,
+  { expiresIn: config.jwt.expiresIn, jwtid: crypto.randomUUID() },
+);
+
+/**
+ * Generar access y refresh tokens. El flujo de sesiones (auth.service) usa
+ * generarRefreshToken + generarAccessToken por separado porque el sid solo se conoce
+ * después de insertar la sesión.
+ */
+const generateTokens = (user, sessionId) => {
   try {
-    const payload = {
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      rol: user.rol,
-    };
-
-    // jwtid (claim jti) único por emisión: sin él dos tokens del mismo usuario emitidos en el
-    // mismo segundo (iat tiene resolución de 1 s) salen idénticos y el refresh token choca con
-    // UNIQUE(usuarios_sesiones.refresh_token) (error 23505).
-    const accessToken = jwt.sign(
-      payload,
-      config.jwt.secret,
-      { expiresIn: config.jwt.expiresIn, jwtid: crypto.randomUUID() },
-    );
-
-    const refreshToken = jwt.sign(
-      { id: user.id },
-      config.jwt.refreshSecret,
-      { expiresIn: config.jwt.refreshExpiresIn, jwtid: crypto.randomUUID() },
-    );
-
     return {
-      accessToken,
-      refreshToken,
+      accessToken: generarAccessToken(user, sessionId),
+      refreshToken: generarRefreshToken(user),
       expiresIn: config.jwt.expiresIn,
     };
   } catch (error) {
@@ -85,6 +94,8 @@ const verifyRefreshToken = (token) => {
 const decodeToken = (token) => jwt.decode(token);
 
 module.exports = {
+  generarRefreshToken,
+  generarAccessToken,
   generateTokens,
   verifyAccessToken,
   verifyRefreshToken,

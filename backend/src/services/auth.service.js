@@ -8,7 +8,7 @@ const crypto = require('crypto');
 const pool = require('../database/connection');
 const config = require('../config');
 const logger = require('../utils/logger');
-const { generateTokens, verifyRefreshToken } = require('../utils/jwt');
+const { generarRefreshToken, generarAccessToken, verifyRefreshToken } = require('../utils/jwt');
 const emailService = require('./email.service');
 const {
   passwordFueUsadaAntes,
@@ -25,23 +25,94 @@ const {
  * haga fallar un login o un refresh. Una colisión real (23505) no se reintenta.
  * `transaccional`: dentro de BEGIN/COMMIT; el primer intento va en un SAVEPOINT para que su error
  * no aborte la transacción.
+ * Devuelve el id de la fila insertada (será el claim `sid` del access token).
  */
 async function insertarSesion(client, {
   userId, refreshToken, ip = null, userAgent = null,
 }, transaccional = false) {
   const conMeta = `INSERT INTO usuarios_sesiones (usuario_id, refresh_token, expires_at, ip_address, user_agent)
-         VALUES ($1, $2, NOW() + INTERVAL '7 days', $3, $4)`;
+         VALUES ($1, $2, NOW() + INTERVAL '7 days', $3, $4)
+         RETURNING id`;
   const sinMeta = `INSERT INTO usuarios_sesiones (usuario_id, refresh_token, expires_at)
-         VALUES ($1, $2, NOW() + INTERVAL '7 days')`;
+         VALUES ($1, $2, NOW() + INTERVAL '7 days')
+         RETURNING id`;
+  let resultado;
   try {
     if (transaccional) await client.query('SAVEPOINT sesion_meta');
-    await client.query(conMeta, [userId, refreshToken, ip, userAgent]);
+    resultado = await client.query(conMeta, [userId, refreshToken, ip, userAgent]);
     if (transaccional) await client.query('RELEASE SAVEPOINT sesion_meta');
   } catch (error) {
     if (transaccional) await client.query('ROLLBACK TO SAVEPOINT sesion_meta');
     if (error.code === '23505') throw error;
     logger.warn(`No se pudo guardar IP/navegador de la sesión del usuario ${userId} (${error.message}); se guarda sin ellos`);
-    await client.query(sinMeta, [userId, refreshToken]);
+    resultado = await client.query(sinMeta, [userId, refreshToken]);
+  }
+  const sesionId = resultado.rows && resultado.rows[0] && resultado.rows[0].id;
+  if (!sesionId) throw new Error('No se pudo registrar la sesión');
+  return sesionId;
+}
+
+// Máximo de sesiones desplazadas que se detallan en la auditoría (el resto solo se cuenta)
+const MAX_DESPLAZADAS_AUDITADAS = 20;
+
+/**
+ * Abre la sesión de un login exitoso (sesión única por usuario).
+ *
+ * Una sola transacción: bloquea la fila del usuario (dos logins simultáneos del mismo usuario se
+ * serializan y la última en entrar deja EXACTAMENTE una sesión viva), revoca todas sus demás
+ * sesiones vigentes (salvo que el interruptor de emergencia SINGLE_SESSION_PER_USER=false lo
+ * desactive), inserta la nueva y firma el access token con su sid. Si algo falla: ROLLBACK y la
+ * sesión previa sigue viva. La auditoría SESION_REEMPLAZADA va en SAVEPOINT: nunca revierte el login.
+ * NO se usa en /auth/refresh (la rotación reemplaza una sesión por otra sin tocar las demás).
+ */
+async function abrirSesionLogin(client, user, { ip = null, userAgent = null } = {}) {
+  await client.query('BEGIN');
+  try {
+    await client.query('SELECT id FROM usuarios WHERE id = $1 FOR UPDATE', [user.id]);
+
+    let desplazadas = [];
+    if (config.security.singleSessionPerUser) {
+      const revocadas = await client.query(
+        `UPDATE usuarios_sesiones SET revocado = true
+         WHERE usuario_id = $1 AND revocado = false
+         RETURNING host(ip_address) AS ip, user_agent`,
+        [user.id],
+      );
+      desplazadas = revocadas.rows || [];
+    }
+
+    const refreshToken = generarRefreshToken(user);
+    const sesionId = await insertarSesion(client, {
+      userId: user.id, refreshToken, ip, userAgent,
+    }, true);
+    const accessToken = generarAccessToken(user, sesionId);
+
+    if (desplazadas.length > 0) {
+      const recorta = (ua) => (ua ? String(ua).slice(0, 150) : null);
+      await registrarEventoSeguridad(client, {
+        codigo: EVENTO.SESION_REEMPLAZADA,
+        descripcion: `${desplazadas.length} sesión(es) cerrada(s) por un nuevo inicio de sesión`,
+        usuarioObjetivoId: user.id,
+        actor: { id: user.id, nombre: user.nombre_completo || user.username },
+        camposModificados: ['usuarios_sesiones.revocado'],
+        detalles: {
+          sesiones_cerradas: desplazadas.length,
+          desplazadas: desplazadas.slice(0, MAX_DESPLAZADAS_AUDITADAS)
+            .map((s) => ({ ip: s.ip || null, navegador: recorta(s.user_agent) })),
+          desplazadas_omitidas: Math.max(0, desplazadas.length - MAX_DESPLAZADAS_AUDITADAS),
+          nuevo_login: { ip: ip || null, navegador: recorta(userAgent) },
+        },
+        ip,
+        userAgent,
+        transaccional: true,
+      });
+    }
+
+    await client.query('COMMIT');
+    return { accessToken, refreshToken, expiresIn: config.jwt.expiresIn };
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch (e) { /* conexión ya caída */ }
+    throw error;
   }
 }
 
@@ -265,13 +336,8 @@ class AuthService {
         logger.info(`Contraseña vencida (>3 meses) para usuario ${username}, forzando cambio`);
       }
 
-      // Generar tokens
-      const tokens = generateTokens(user);
-
-      // Guardar refresh token (con IP y navegador de origen, para trazabilidad)
-      await insertarSesion(client, {
-        userId: user.id, refreshToken: tokens.refreshToken, ip, userAgent,
-      });
+      // Abrir la sesión (sesión única: cierra las demás) y generar los tokens
+      const tokens = await abrirSesionLogin(client, user, { ip, userAgent });
 
       logger.info(`Usuario ${username} inició sesión`);
 
@@ -348,13 +414,19 @@ class AuthService {
 
       const user = userResult.rows[0];
 
-      // Generar nuevos tokens
-      const tokens = generateTokens(user);
+      // Generar nuevos tokens. La rotación NO revoca las demás sesiones del usuario (solo
+      // reemplaza la presentada); el access nuevo lleva el sid de la fila nueva.
+      const nuevoRefresh = generarRefreshToken(user);
 
       // 1) Guardar la sesión nueva (conserva la trazabilidad de IP y navegador)
-      await insertarSesion(client, {
-        userId: user.id, refreshToken: tokens.refreshToken, ip, userAgent,
+      const sesionId = await insertarSesion(client, {
+        userId: user.id, refreshToken: nuevoRefresh, ip, userAgent,
       }, true);
+      const tokens = {
+        accessToken: generarAccessToken(user, sesionId),
+        refreshToken: nuevoRefresh,
+        expiresIn: config.jwt.expiresIn,
+      };
 
       // 2) Solo entonces revocar la anterior
       await client.query(

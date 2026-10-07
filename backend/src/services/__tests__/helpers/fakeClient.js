@@ -7,6 +7,7 @@
  */
 function fakeClient(handlers = []) {
   const calls = [];
+  let siguienteSesionId = 1000;
   return {
     calls,
     release: jest.fn(),
@@ -14,6 +15,11 @@ function fakeClient(handlers = []) {
       calls.push({ sql: String(sql).replace(/\s+/g, ' ').trim(), params });
       for (const [re, res] of handlers) {
         if (re.test(sql)) return typeof res === 'function' ? res(sql, params) : res;
+      }
+      // Respuesta por defecto del INSERT de sesión (RETURNING id), salvo que un handler la defina
+      if (/^\s*INSERT INTO usuarios_sesiones/.test(sql)) {
+        siguienteSesionId += 1;
+        return { rows: [{ id: siguienteSesionId }], rowCount: 1 };
       }
       return { rows: [], rowCount: 0 };
     }),

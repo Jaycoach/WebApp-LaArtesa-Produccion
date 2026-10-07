@@ -8,6 +8,10 @@ const logger = require('../utils/logger');
 const { AppError } = require('./errorHandler');
 const db = require('../database/connection');
 
+const CODIGO_SESION_REEMPLAZADA = 'SESSION_REPLACED';
+const MENSAJE_SESION_REEMPLAZADA = 'Su sesión fue cerrada porque se inició sesión en otro dispositivo o navegador.';
+const RUTA_SET_PASSWORD = /\/auth\/set-initial-password\/?(\?|$)/;
+
 /**
  * Extraer token del header Authorization o cookies
  */
@@ -32,12 +36,22 @@ const verifyToken = async (req, res, next) => {
     // 2. Verificar token
     const decoded = jwt.verify(token, config.jwt.secret);
 
-    // 3. Verificar que el usuario aún exista en BD
+    // Un sid (id de sesión) presente pero inválido solo puede venir de un token manipulado
+    const tieneSid = decoded.sid !== undefined && decoded.sid !== null;
+    if (tieneSid && !(Number.isInteger(decoded.sid) && decoded.sid > 0)) {
+      throw new AppError(MENSAJE_SESION_REEMPLAZADA, 401, CODIGO_SESION_REEMPLAZADA);
+    }
+
+    // 3. Verificar que el usuario aún exista en BD. En la MISMA consulta (subconsulta por clave
+    //    primaria de usuarios_sesiones, sin ida y vuelta extra) se comprueba, si el token trae
+    //    sid, que esa sesión sea del usuario y no esté revocada.
     const result = await db.query(
-      `SELECT id, uuid, username, email, nombre_completo, rol, activo, bloqueado_hasta, ultimo_cambio_password
+      `SELECT id, uuid, username, email, nombre_completo, rol, activo, bloqueado_hasta, ultimo_cambio_password,
+              (SELECT s.revocado = false AND s.usuario_id = usuarios.id
+                 FROM usuarios_sesiones s WHERE s.id = $2::integer) AS sesion_vigente
        FROM usuarios 
        WHERE id = $1`,
-      [decoded.id],
+      [decoded.id, tieneSid ? decoded.sid : null],
     );
 
     if (!result.rows.length) {
@@ -65,6 +79,18 @@ const verifyToken = async (req, res, next) => {
         ip: req.ip,
       });
       throw new AppError('Usuario bloqueado temporalmente.', 403);
+    }
+
+    // 5b. Sesión reemplazada, revocada o inexistente (sesión única, logout, cambio de contraseña,
+    //     desactivación) y access tokens SIN sid (emitidos antes de la sesión única: ya no valen,
+    //     todos inician sesión una vez tras el despliegue). Va ANTES del chequeo de cambio de
+    //     contraseña para que las demás estaciones reciban el code SESSION_REPLACED. Los demás 401
+    //     conservan su mensaje y code.
+    //     Única excepción: el token corto (15 min) que emite la verificación de correo, acotado con
+    //     scp='set-password', solo vale en /auth/set-initial-password (alta de usuarios nuevos).
+    const esTokenSetPassword = decoded.scp === 'set-password' && RUTA_SET_PASSWORD.test(req.originalUrl || '');
+    if (!esTokenSetPassword && (!tieneSid || user.sesion_vigente !== true)) {
+      throw new AppError(MENSAJE_SESION_REEMPLAZADA, 401, CODIGO_SESION_REEMPLAZADA);
     }
 
     // 6. Verificar cambio de contraseña post-emisión del token
@@ -144,13 +170,15 @@ const optionalAuth = async (req, res, next) => {
     const decoded = jwt.verify(token, config.jwt.secret);
 
     const result = await db.query(
-      `SELECT id, uuid, username, email, nombre_completo, rol, activo
+      `SELECT id, uuid, username, email, nombre_completo, rol, activo,
+              (SELECT s.revocado = false AND s.usuario_id = usuarios.id
+                 FROM usuarios_sesiones s WHERE s.id = $2::integer) AS sesion_vigente
        FROM usuarios 
        WHERE id = $1 AND activo = true`,
-      [decoded.id],
+      [decoded.id, Number.isInteger(decoded.sid) ? decoded.sid : null],
     );
 
-    if (result.rows.length > 0) {
+    if (result.rows.length > 0 && Number.isInteger(decoded.sid) && result.rows[0].sesion_vigente === true) {
       const user = result.rows[0];
       req.user = {
         id: user.id,

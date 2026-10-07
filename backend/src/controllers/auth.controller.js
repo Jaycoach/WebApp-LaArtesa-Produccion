@@ -601,7 +601,8 @@ class AuthController {
       // Emitir accessToken para que el frontend pueda llamar set-initial-password
       const jwt = require('jsonwebtoken');
       const accessToken = jwt.sign(
-        { id: user.id, username: user.username, email: user.email, rol: user.rol },
+        // scp: este token NO tiene sesión (sid); el middleware solo lo acepta en /auth/set-initial-password
+        { id: user.id, username: user.username, email: user.email, rol: user.rol, scp: 'set-password' },
         process.env.JWT_SECRET,
         { expiresIn: '15m' }, // token corto — solo para set-password
       );

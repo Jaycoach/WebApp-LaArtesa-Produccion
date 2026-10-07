@@ -23,26 +23,7 @@ const pool = require('../../database/connection');
 const config = require('../../config');
 const authService = require('../auth.service');
 const { passwordPrueba, hashSimulado } = require('./helpers/secretos');
-
-/**
- * Cliente falso: `handlers` es una lista de [regex, respuesta|fn]; la primera
- * que coincida con el SQL responde. Registra todas las llamadas en `calls`.
- */
-function fakeClient(handlers) {
-  const calls = [];
-  const client = {
-    calls,
-    release: jest.fn(),
-    query: jest.fn(async (sql, params) => {
-      calls.push({ sql: String(sql).replace(/\s+/g, ' ').trim(), params });
-      for (const [re, res] of handlers) {
-        if (re.test(sql)) return typeof res === 'function' ? res(sql, params) : res;
-      }
-      return { rows: [], rowCount: 0 };
-    }),
-  };
-  return client;
-}
+const { fakeClient } = require('./helpers/fakeClient');
 
 const usuarioBase = {
   id: 7,
