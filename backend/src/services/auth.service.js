@@ -6,6 +6,7 @@
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const pool = require('../database/connection');
+const config = require('../config');
 const logger = require('../utils/logger');
 const { generateTokens, verifyRefreshToken } = require('../utils/jwt');
 const emailService = require('./email.service');
@@ -143,7 +144,8 @@ class AuthService {
         `SELECT id, username, email, password_hash, nombre_completo, rol, activo,
                 email_verificado, intentos_fallidos, bloqueado_hasta,
                 debe_cambiar_password,
-                (ultimo_cambio_password < NOW() - INTERVAL '3 months') AS password_expirada
+                (ultimo_cambio_password < NOW() - INTERVAL '3 months') AS password_expirada,
+                (bloqueado_hasta IS NOT NULL AND bloqueado_hasta <= NOW()) AS bloqueo_vencido
          FROM usuarios
          WHERE username = $1 OR email = $1`,
         [username],
@@ -154,6 +156,23 @@ class AuthService {
       }
 
       const user = result.rows[0];
+
+      // Si el bloqueo ya venció, el contador de intentos parte de cero: sin esto
+      // intentos_fallidos arrastra el valor del bloqueo anterior (>= umbral) y un
+      // solo error nuevo reactiva otro bloqueo completo.
+      if (user.bloqueo_vencido) {
+        await client.query(
+          `UPDATE usuarios
+           SET intentos_fallidos = 0,
+               bloqueado_hasta = NULL
+           WHERE id = $1
+             AND bloqueado_hasta IS NOT NULL
+             AND bloqueado_hasta <= NOW()`,
+          [user.id],
+        );
+        user.intentos_fallidos = 0;
+        user.bloqueado_hasta = null;
+      }
 
       // Verificar si está bloqueado
       if (user.bloqueado_hasta && new Date(user.bloqueado_hasta) > new Date()) {
@@ -181,11 +200,11 @@ class AuthService {
           `UPDATE usuarios 
            SET intentos_fallidos = intentos_fallidos + 1,
                bloqueado_hasta = CASE 
-                 WHEN intentos_fallidos >= 4 THEN NOW() + INTERVAL '30 minutes'
+                 WHEN intentos_fallidos + 1 >= $2 THEN NOW() + make_interval(mins => $3)
                  ELSE bloqueado_hasta
                END
            WHERE id = $1`,
-          [user.id],
+          [user.id, config.security.maxLoginAttempts, config.security.lockoutDuration],
         );
 
         throw new Error('Credenciales inválidas');
