@@ -60,7 +60,7 @@ function crearUsuarios() {
   const payload = JSON.stringify(Object.values(U).map(({ username, password, rol, debe }) => ({ username, password, rol, debe })));
   const prog = `
 const bcrypt=require('bcrypt');const db=require('./src/database/connection');
-let t='';process.stdin.on('data',d=>t+=d).on('end',async()=>{
+let t='';process.stdin.on('data',d=>t+=d).on('end',async()=>{ await db.connect();
  const us=JSON.parse(t);const ids={};
  for(const u of us){const h=await bcrypt.hash(u.password,12);
   const r=await db.query("INSERT INTO usuarios (username,email,password_hash,nombre_completo,rol,activo,email_verificado,intentos_fallidos,debe_cambiar_password) VALUES ($1,$2,$3,$4,$5,true,true,0,$6) RETURNING id",[u.username,u.username+'@artesa-staging-test.com',h,'Prueba UI '+u.rol,u.rol,u.debe]);ids[u.username]=r.rows[0].id;}
@@ -86,6 +86,10 @@ async function apiResetPassword(adminToken, targetKey, nueva) {
   return r.status;
 }
 const revocarSesiones = (k) => sql(`UPDATE usuarios_sesiones SET revocado=true WHERE usuario_id=${U[k].id} AND revocado=false;`);
+// La redirección a /login aborta la carga de la pantalla (net::ERR_ABORTED): se espera por la ruta, no por el 'load'.
+const irAPantallaApi = (page) => page.goto(PAGINA_API, { waitUntil: 'commit' }).catch(() => {});
+const esperarLogin = (page) => page.waitForFunction(() => location.pathname === '/login', null, { timeout: 20000 });
+const PAGINA_API = `${UI}/configuracion/usuarios`;
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- utilidades de UI ----------
@@ -102,8 +106,17 @@ async function foto(page, nombre) {
   }
   await page.setViewportSize(VIEWPORTS.escritorio);
 }
+let paginaActual = null;
 function vigilar(page) {
-  const est = { refresh: 0, navegaciones: [], consola: [] };
+  paginaActual = page;
+  const est = { refresh: 0, navegaciones: [], cargas: 0, consola: [] };
+  page.on('load', () => { est.cargas += 1; });
+  page.context().addInitScript(() => {
+    for (const k of ['pushState', 'replaceState']) {
+      const o = history[k];
+      history[k] = function (...a) { try { const l = JSON.parse(sessionStorage.getItem('__hist') || '[]'); l.push(`${k}:${a[2]}`); sessionStorage.setItem('__hist', JSON.stringify(l)); } catch (e) { /* ignorar */ } return o.apply(this, a); };
+    }
+  });
   page.on('request', (r) => { if (/\/auth\/refresh/.test(r.url())) est.refresh += 1; });
   page.on('framenavigated', (f) => { if (f === page.mainFrame()) est.navegaciones.push(new URL(f.url()).pathname + new URL(f.url()).search); });
   page.on('console', (m) => { if (m.type() === 'error') est.consola.push(m.text().slice(0, 120)); });
@@ -135,13 +148,14 @@ try {
     await loginUI(page, 'ope1'); await page.waitForURL(`${UI}/`, { timeout: 15000 });
     ok('ope1 inició sesión en la UI (dashboard)');
     await apiLogin('ope1', '198.51.100.78'); // "otro equipo"
-    est.navegaciones.length = 0; est.refresh = 0;
-    await page.reload();
-    await page.waitForURL(/\/login/, { timeout: 15000 });
+    est.navegaciones.length = 0; est.refresh = 0; est.cargas = 0;
+    // pantalla que usa el cliente axios (el dashboard usa fetch directo y no pasa por el interceptor)
+    await irAPantallaApi(page); await esperarLogin(page);
     await page.getByText('Tu sesión se cerró').waitFor({ timeout: 10000 });
     await page.waitForTimeout(1500); // margen para detectar una segunda navegación
-    console.log(`  navegaciones tras la recarga: ${JSON.stringify(est.navegaciones)}  /auth/refresh: ${est.refresh}`);
-    check(est.navegaciones.filter((n) => n.startsWith('/login')).length === 1, 'UNA sola navegación a /login');
+    const hist1 = await page.evaluate(() => sessionStorage.getItem('__hist'));
+    console.log(`  cargas duras: ${est.cargas}  llamadas a la History API en /login: ${hist1}  /auth/refresh: ${est.refresh}`);
+    check(est.cargas === 2 && !(hist1 || '').includes('/login'), 'UNA sola navegación a /login: 1 recarga dura y 0 navegaciones SPA (<Navigate>/pushState/replaceState) hacia /login');
     check(est.refresh === 0, '0 llamadas a /auth/refresh');
     const t = await textoAviso(page);
     console.log(`  aviso: ${JSON.stringify(t)}`);
@@ -167,7 +181,7 @@ try {
     await esperar(1200);
     const temporal = nuevaClave();
     check((await apiResetPassword(adm.token, 'ope2', temporal)) === 200, 'el admin restablece la clave de ope2 (API)');
-    await page.reload(); await page.waitForURL(/\/login/, { timeout: 15000 });
+    await irAPantallaApi(page); await esperarLogin(page);
     await page.getByText('Tu sesión se cerró').waitFor({ timeout: 10000 });
     const t = await textoAviso(page);
     check(t.includes('fue cambiada') && t.includes(`«${U.ope2.username}»`) && t.includes('pídela al administrador'), 'texto CAMBIO_PASSWORD con el usuario');
@@ -184,7 +198,7 @@ try {
     const nueva = nuevaClave();
     await page.fill('input[placeholder="Mínimo 8 caracteres"]', nueva); await page.fill('input[placeholder="Repite la contraseña"]', nueva);
     await page.getByRole('button', { name: 'Establecer contraseña' }).click();
-    await page.waitForURL(/\/login/, { timeout: 15000 });
+    await esperarLogin(page);
     await page.fill('#username', U.ope2.username); await page.fill('#password', nueva); await page.click('button[type=submit]');
     await page.waitForURL(`${UI}/`, { timeout: 15000 });
     ok('tras el cambio obligatorio entra normal con la clave nueva (dashboard)');
@@ -197,13 +211,15 @@ try {
     const ctx = await browser.newContext({ viewport: VIEWPORTS.escritorio });
     const page = await ctx.newPage(); const est = vigilar(page);
     await loginUI(page, 'ope3'); await page.waitForURL(`${UI}/`, { timeout: 15000 });
-    revocarSesiones('ope3'); est.navegaciones.length = 0;
-    await page.reload(); await page.waitForURL(/\/login/, { timeout: 15000 });
+    revocarSesiones('ope3'); est.navegaciones.length = 0; est.cargas = 0;
+    await irAPantallaApi(page); await esperarLogin(page);
     await page.getByText('Vuelve a iniciar sesión').waitFor({ timeout: 10000 });
     const t = await textoAviso(page);
     console.log(`  aviso: ${JSON.stringify(t)}`);
     check(t.includes('Por seguridad, tu sesión se cerró. Ingresa de nuevo con tu usuario y contraseña.') && !t.includes('Alguien'), 'texto SESION_CERRADA (no dice que alguien más entró)');
-    check(est.navegaciones.filter((n) => n.startsWith('/login')).length === 1, 'UNA sola navegación a /login');
+    const hist3 = await page.evaluate(() => sessionStorage.getItem('__hist'));
+    console.log(`  cargas duras: ${est.cargas}  llamadas a la History API: ${hist3}`);
+    check(est.cargas === 2 && !(hist3 || '').includes('/login'), 'UNA sola navegación a /login (1 recarga dura, 0 SPA)');
     await foto(page, 's3-aviso-sesion-cerrada');
     await ctx.close();
   }
@@ -234,7 +250,7 @@ try {
     await loginUI(page, 'adm'); await page.waitForURL(`${UI}/`, { timeout: 15000 });
     await page.goto(`${UI}/configuracion/usuarios`);
     await page.getByRole('button', { name: 'Todos los usuarios' }).click();
-    const fila = (k) => page.locator('div.py-4').filter({ hasText: `@${U[k].username}` }).first();
+    const fila = (k) => page.locator('div.divide-y > div').filter({ hasText: `@${U[k].username}` }).first();
     await fila('tgt').waitFor({ timeout: 15000 });
     check((await fila('adm').getByRole('button', { name: 'Restablecer contraseña' }).count()) === 0, 'NO hay botón en la fila del propio admin');
     check((await fila('tgt').getByRole('button', { name: 'Restablecer contraseña' }).count()) === 1, 'sí hay botón en la fila de otro usuario');
@@ -261,7 +277,7 @@ try {
     await loginUI(p2, 'sup'); await p2.waitForURL(`${UI}/`, { timeout: 15000 });
     await p2.goto(`${UI}/configuracion/usuarios`);
     await p2.getByRole('button', { name: 'Todos los usuarios' }).click();
-    await p2.locator('div.py-4').filter({ hasText: `@${U.tgt.username}` }).first().waitFor({ timeout: 15000 });
+    await p2.locator('div.divide-y > div').filter({ hasText: `@${U.tgt.username}` }).first().waitFor({ timeout: 15000 });
     check((await p2.getByRole('button', { name: 'Restablecer contraseña' }).count()) === 0, 'SUPERVISOR no ve «Restablecer contraseña»');
     check((await p2.getByRole('button', { name: 'Mi contraseña' }).count()) === 0, 'SUPERVISOR no ve la pestaña «Mi contraseña»');
     await foto(p2, 's5-lista-usuarios-supervisor');
@@ -294,26 +310,29 @@ try {
     const ctx = await browser.newContext({ viewport: VIEWPORTS.movil390 });
     const page = await ctx.newPage(); const est = vigilar(page);
     await loginUI(page, 'ver'); await page.waitForURL(`${UI}/`, { timeout: 15000 });
-    ok('usuario en el dashboard con sesión válida (versión base cargada)');
+    await page.goto(PAGINA_API); await page.getByText('Gestión de Usuarios').waitFor({ timeout: 15000 });
+    ok('usuario en una pantalla con sesión válida (versión base cargada)');
     versionTocada = true;
     bump('uitest1'); ok('staging: APP_VERSION cambiada a uitest1 (simula el deploy)');
     await page.getByText('Hay una nueva versión disponible').waitFor({ timeout: 40000 });
     ok('aparece el aviso de nueva versión');
     await foto(page, 's7-1-banner-version');
     revocarSesiones('ver'); ok('las sesiones del usuario quedan cerradas (como los tokens viejos tras el deploy)');
-    est.navegaciones.length = 0; est.refresh = 0;
+    est.navegaciones.length = 0; est.refresh = 0; est.cargas = 0;
+    await page.evaluate(() => sessionStorage.removeItem('__hist'));
     await page.getByRole('button', { name: 'Actualizar ahora' }).click(); // recarga por versión
-    await page.waitForURL(/\/login/, { timeout: 20000 });
+    await esperarLogin(page);
     await page.getByText('Vuelve a iniciar sesión').waitFor({ timeout: 10000 });
-    console.log(`  navegaciones tras «Actualizar ahora»: ${JSON.stringify(est.navegaciones)}  /auth/refresh: ${est.refresh}`);
+    const histV = await page.evaluate(() => sessionStorage.getItem('__hist'));
+    console.log(`  tras «Actualizar ahora»: cargas duras=${est.cargas}  History API=${histV}  /auth/refresh=${est.refresh}`);
     check(est.refresh === 0, 'sin llamadas a /auth/refresh');
-    check(est.navegaciones.filter((n) => n === '/login').length === 1, 'recarga por versión -> 401 -> UNA navegación a /login');
+    check(est.cargas === 2 && !(histV || '').includes('/login'), 'recarga por versión (carga 1) -> 401 -> UNA navegación a /login (carga 2), sin navegaciones SPA');
     check((await textoAviso(page)).includes('Por seguridad, tu sesión se cerró'), 'el usuario termina en /login con el aviso SESION_CERRADA');
     check((await banner(page)) === 0, 'el banner de versión ya no está (la versión nueva es la base)');
     await foto(page, 's7-2-login-aviso-sesion-tras-recarga-por-version');
-    const n0 = est.navegaciones.length;
+    const n0 = est.cargas;
     await page.waitForTimeout(35000); // más de dos ciclos de polling (15 s): sin bucles
-    check(est.navegaciones.length === n0 && page.url().includes('/login'), 'sin bucles de recarga en 35 s (2 ciclos de polling)');
+    check(est.cargas === n0 && page.url().includes('/login'), 'sin bucles de recarga en 35 s (2 ciclos de polling): 0 cargas nuevas');
     check((await textoAviso(page)).includes('Por seguridad'), 'el aviso de sesión sigue visible tras el polling de versión');
     // segundo cambio de versión estando YA en /login con el aviso: ambos conviven y ninguno borra al otro
     bump('uitest2');
@@ -330,6 +349,12 @@ try {
   }
 } catch (e) {
   fallo(`excepción en el escenario: ${String(e.message || e).slice(0, 300)}`);
+  if (paginaActual) {
+    try {
+      console.log(`  [diagnóstico] url=${paginaActual.url()} texto=${JSON.stringify((await paginaActual.locator('body').innerText()).slice(0, 300))}`);
+      await paginaActual.screenshot({ path: path.join(OUT, 'diagnostico-fallo.png') });
+    } catch { /* la página ya se cerró */ }
+  }
 } finally {
   await browser.close();
   if (versionTocada) {

@@ -338,7 +338,7 @@ export const GestionUsuarios: React.FC = () => {
 
       {/* Tabs */}
       <div className="border-b border-gray-200">
-        <nav className="-mb-px flex space-x-6">
+        <nav className="-mb-px flex space-x-6 overflow-x-auto whitespace-nowrap">
           <button
             onClick={() => setTab('pendientes')}
             className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
