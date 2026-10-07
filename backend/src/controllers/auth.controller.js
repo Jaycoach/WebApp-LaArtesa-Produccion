@@ -5,6 +5,7 @@
 
 const authService = require('../services/auth.service');
 const logger = require('../utils/logger');
+const { getRequestMeta } = require('../utils/clientInfo');
 
 class AuthController {
   /**
@@ -63,7 +64,7 @@ class AuthController {
     try {
       const { username, password } = req.body;
 
-      const result = await authService.login({ username, password });
+      const result = await authService.login({ username, password }, getRequestMeta(req));
 
       res.json({
         success: true,
@@ -117,7 +118,7 @@ class AuthController {
         });
       }
 
-      const tokens = await authService.refreshToken(refreshToken);
+      const tokens = await authService.refreshToken(refreshToken, getRequestMeta(req));
 
       res.json({
         success: true,

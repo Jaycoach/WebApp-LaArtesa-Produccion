@@ -12,6 +12,20 @@ const { generateTokens, verifyRefreshToken } = require('../utils/jwt');
 const emailService = require('./email.service');
 
 /**
+ * Registra un intento de login fallido con lo necesario para investigarlo:
+ * username intentado, IP real, navegador y motivo. NUNCA recibe ni registra la
+ * contraseña. Username y user-agent los escribe quien ataca: se limpian de
+ * caracteres de control y se serializan entre comillas para que no puedan
+ * falsear líneas del log.
+ */
+function registrarFalloLogin(username, motivo, meta = {}) {
+  const limpiar = (valor, max) => String(valor ?? '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, max);
+  const user = JSON.stringify(limpiar(username, 100));
+  const ua = JSON.stringify(limpiar(meta.userAgent, 150) || 'desconocido');
+  logger.warn(`Login fallido username=${user} ip=${meta.ip || 'desconocida'} motivo=${motivo} ua=${ua}`);
+}
+
+/**
  * Verifica si newPassword coincide con la contraseña actual o con alguna
  * de las últimas 2 guardadas en el historial (ventana de "últimas 3").
  */
@@ -133,8 +147,9 @@ class AuthService {
   /**
    * Login de usuario
    */
-  async login(credentials) {
+  async login(credentials, meta = {}) {
     const { username, password } = credentials;
+    const { ip = null, userAgent = null } = meta;
 
     const client = await pool.getClient();
 
@@ -152,6 +167,7 @@ class AuthService {
       );
 
       if (result.rows.length === 0) {
+        registrarFalloLogin(username, 'usuario_inexistente', meta);
         throw new Error('Credenciales inválidas');
       }
 
@@ -176,16 +192,19 @@ class AuthService {
 
       // Verificar si está bloqueado
       if (user.bloqueado_hasta && new Date(user.bloqueado_hasta) > new Date()) {
+        registrarFalloLogin(username, 'cuenta_bloqueada', meta);
         throw new Error(`Cuenta bloqueada hasta ${user.bloqueado_hasta}`);
       }
 
       // Verificar si está activo
       if (!user.activo) {
+        registrarFalloLogin(username, 'cuenta_desactivada', meta);
         throw new Error('Cuenta desactivada');
       }
 
       // Verificar email verificado
       if (!user.email_verificado) {
+        registrarFalloLogin(username, 'email_no_verificado', meta);
         const err = new Error('Debes verificar tu correo antes de iniciar sesión');
         err.code = 'EMAIL_NOT_VERIFIED';
         throw err;
@@ -207,6 +226,7 @@ class AuthService {
           [user.id, config.security.maxLoginAttempts, config.security.lockoutDuration],
         );
 
+        registrarFalloLogin(username, 'password_incorrecta', meta);
         throw new Error('Credenciales inválidas');
       }
 
@@ -236,11 +256,11 @@ class AuthService {
       // Generar tokens
       const tokens = generateTokens(user);
 
-      // Guardar refresh token
+      // Guardar refresh token (con IP y navegador de origen, para trazabilidad)
       await client.query(
-        `INSERT INTO usuarios_sesiones (usuario_id, refresh_token, expires_at)
-         VALUES ($1, $2, NOW() + INTERVAL '7 days')`,
-        [user.id, tokens.refreshToken],
+        `INSERT INTO usuarios_sesiones (usuario_id, refresh_token, expires_at, ip_address, user_agent)
+         VALUES ($1, $2, NOW() + INTERVAL '7 days', $3, $4)`,
+        [user.id, tokens.refreshToken, ip, userAgent],
       );
 
       logger.info(`Usuario ${username} inició sesión`);
@@ -267,7 +287,8 @@ class AuthService {
   /**
    * Refrescar access token
    */
-  async refreshToken(refreshToken) {
+  async refreshToken(refreshToken, meta = {}) {
+    const { ip = null, userAgent = null } = meta;
     const client = await pool.getClient();
 
     try {
@@ -317,11 +338,11 @@ class AuthService {
         [refreshToken],
       );
 
-      // Guardar nuevo refresh token
+      // Guardar nuevo refresh token (conserva la trazabilidad de IP y navegador)
       await client.query(
-        `INSERT INTO usuarios_sesiones (usuario_id, refresh_token, expires_at)
-         VALUES ($1, $2, NOW() + INTERVAL '7 days')`,
-        [user.id, tokens.refreshToken],
+        `INSERT INTO usuarios_sesiones (usuario_id, refresh_token, expires_at, ip_address, user_agent)
+         VALUES ($1, $2, NOW() + INTERVAL '7 days', $3, $4)`,
+        [user.id, tokens.refreshToken, ip, userAgent],
       );
 
       logger.info(`Token refrescado para usuario ${user.username}`);
