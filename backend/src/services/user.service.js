@@ -6,6 +6,7 @@
 const bcrypt = require('bcrypt');
 const pool = require('../database/connection');
 const logger = require('../utils/logger');
+const { aplicarNuevaPassword } = require('./securityHelpers');
 
 /**
  * Bloquea una operación que dejaría al sistema sin ningún admin activo.
@@ -424,9 +425,9 @@ class UserService {
     try {
       await client.query('BEGIN');
 
-      // Verificar que el usuario existe
+      // Verificar que el usuario existe (y leer el hash que se va a reemplazar)
       const userExists = await client.query(
-        'SELECT id FROM usuarios WHERE id = $1',
+        'SELECT id, password_hash FROM usuarios WHERE id = $1',
         [userId],
       );
 
@@ -437,25 +438,15 @@ class UserService {
       // Hash de la nueva contraseña
       const hashedPassword = await bcrypt.hash(newPassword, 12);
 
-      // Actualizar contraseña
-      await client.query(
-        'UPDATE usuarios SET password_hash = $1, fecha_actualizacion = NOW() WHERE id = $2',
-        [hashedPassword, userId],
-      );
-
-      // Revocar todas las sesiones
-      await client.query(
-        'UPDATE usuarios_sesiones SET revocado = true WHERE usuario_id = $1',
-        [userId],
-      );
-
-      // Resetear intentos fallidos
-      await client.query(
-        `UPDATE usuarios 
-         SET intentos_fallidos = 0, bloqueado_hasta = NULL 
-         WHERE id = $1`,
-        [userId],
-      );
+      // Historial, hash nuevo, ultimo_cambio_password, contador/bloqueo en cero y
+      // todas las sesiones revocadas (mismo comportamiento que los otros flujos).
+      // El reset por admin NO bloquea la reutilización de claves anteriores: el
+      // admin define una clave temporal, pero sí queda el hash anterior en el historial.
+      await aplicarNuevaPassword(client, {
+        userId,
+        nuevoHash: hashedPassword,
+        hashAnterior: userExists.rows[0].password_hash,
+      });
 
       await client.query('COMMIT');
 

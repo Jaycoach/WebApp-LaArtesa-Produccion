@@ -307,7 +307,11 @@ class AuthController {
         });
       }
 
-      const result = await authService.changePassword(userId, currentPassword, newPassword);
+      // refreshToken (opcional): permite conservar la sesión desde la que se cambia
+      const result = await authService.changePassword(userId, currentPassword, newPassword, {
+        refreshToken: req.body.refreshToken,
+        ...getRequestMeta(req),
+      });
 
       res.json({
         success: true,

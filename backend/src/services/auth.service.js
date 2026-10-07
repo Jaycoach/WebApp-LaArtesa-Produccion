@@ -10,6 +10,11 @@ const config = require('../config');
 const logger = require('../utils/logger');
 const { generateTokens, verifyRefreshToken } = require('../utils/jwt');
 const emailService = require('./email.service');
+const {
+  passwordFueUsadaAntes,
+  guardarPasswordEnHistorial,
+  aplicarNuevaPassword,
+} = require('./securityHelpers');
 
 /**
  * Registra un intento de login fallido con lo necesario para investigarlo:
@@ -23,48 +28,6 @@ function registrarFalloLogin(username, motivo, meta = {}) {
   const user = JSON.stringify(limpiar(username, 100));
   const ua = JSON.stringify(limpiar(meta.userAgent, 150) || 'desconocido');
   logger.warn(`Login fallido username=${user} ip=${meta.ip || 'desconocida'} motivo=${motivo} ua=${ua}`);
-}
-
-/**
- * Verifica si newPassword coincide con la contraseña actual o con alguna
- * de las últimas 2 guardadas en el historial (ventana de "últimas 3").
- */
-async function passwordFueUsadaAntes(client, userId, newPassword, currentHash) {
-  if (await bcrypt.compare(newPassword, currentHash)) return true;
-  const { rows } = await client.query(
-    `SELECT password_hash FROM usuarios_historial_passwords
-     WHERE usuario_id = $1
-     ORDER BY fecha_creacion DESC
-     LIMIT 2`,
-    [userId],
-  );
-  for (const row of rows) {
-    if (await bcrypt.compare(newPassword, row.password_hash)) return true;
-  }
-  return false;
-}
-
-/**
- * Guarda el hash que se está reemplazando en el historial y poda a las
- * 2 filas más recientes por usuario.
- */
-async function guardarPasswordEnHistorial(client, userId, oldHash) {
-  await client.query(
-    `INSERT INTO usuarios_historial_passwords (usuario_id, password_hash)
-     VALUES ($1, $2)`,
-    [userId, oldHash],
-  );
-  await client.query(
-    `DELETE FROM usuarios_historial_passwords
-     WHERE usuario_id = $1
-     AND id NOT IN (
-       SELECT id FROM usuarios_historial_passwords
-       WHERE usuario_id = $1
-       ORDER BY fecha_creacion DESC
-       LIMIT 2
-     )`,
-    [userId],
-  );
 }
 
 class AuthService {
@@ -469,26 +432,14 @@ class AuthService {
       // Hash de la nueva contraseña
       const hashedPassword = await bcrypt.hash(newPassword, 12);
 
-      // Guardar la contraseña que se reemplaza en el historial
-      await guardarPasswordEnHistorial(client, user.id, user.password_hash);
-
-      // Actualizar contraseña y limpiar token
-      await client.query(
-        `UPDATE usuarios 
-         SET password_hash = $1,
-             token_recuperacion = NULL,
-             token_recuperacion_expira = NULL,
-             ultimo_cambio_password = NOW(),
-             fecha_actualizacion = NOW()
-         WHERE id = $2`,
-        [hashedPassword, user.id],
-      );
-
-      // Revocar todas las sesiones activas
-      await client.query(
-        'UPDATE usuarios_sesiones SET revocado = true WHERE usuario_id = $1',
-        [user.id],
-      );
+      // Historial, hash nuevo, contador/bloqueo en cero, token consumido y
+      // todas las sesiones revocadas (mismo comportamiento que los otros flujos)
+      await aplicarNuevaPassword(client, {
+        userId: user.id,
+        nuevoHash: hashedPassword,
+        hashAnterior: user.password_hash,
+        limpiarTokenRecuperacion: true,
+      });
 
       await client.query('COMMIT');
 
@@ -506,8 +457,19 @@ class AuthService {
 
   /**
    * Cambiar contraseña (estando autenticado)
+   *
+   * Sesiones: al cambiar la contraseña se revocan los refresh tokens de TODAS las
+   * demás sesiones del usuario (otras estaciones/navegadores con la clave vieja).
+   * La sesión desde la que se cambia solo se conserva si es identificable: el
+   * access token (JWT) no lleva id de sesión, así que el cliente debe enviar su
+   * propio refresh token en `ctx.refreshToken`. Si no lo envía, o no corresponde
+   * a una sesión vigente de este usuario, se revocan todas y esa persona deberá
+   * iniciar sesión de nuevo cuando venza su access token (24 h).
+   * Nota: un access token ya emitido sigue siendo válido hasta que expire; la
+   * revocación corta la capacidad de RENOVARLO, no invalida JWTs en vuelo.
    */
-  async changePassword(userId, currentPassword, newPassword) {
+  async changePassword(userId, currentPassword, newPassword, ctx = {}) {
+    const { refreshToken: refreshTokenActual = null } = ctx;
     const client = await pool.getClient();
 
     try {
@@ -540,14 +502,14 @@ class AuthService {
       // Hash de la nueva contraseña
       const hashedPassword = await bcrypt.hash(newPassword, 12);
 
-      // Guardar la contraseña que se reemplaza en el historial
-      await guardarPasswordEnHistorial(client, userId, user.password_hash);
-
-      // Actualizar contraseña
-      await client.query(
-        'UPDATE usuarios SET password_hash = $1, fecha_actualizacion = NOW() WHERE id = $2',
-        [hashedPassword, userId],
-      );
+      // Historial, hash nuevo, contador/bloqueo en cero y sesiones revocadas
+      // (salvo la actual si es identificable) — igual que los otros flujos
+      await aplicarNuevaPassword(client, {
+        userId,
+        nuevoHash: hashedPassword,
+        hashAnterior: user.password_hash,
+        conservarRefreshToken: refreshTokenActual,
+      });
 
       await client.query('COMMIT');
 

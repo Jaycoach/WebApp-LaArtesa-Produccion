@@ -271,9 +271,12 @@ class AuthService {
    */
   async changePassword(currentPassword: string, newPassword: string): Promise<void> {
     try {
+      // Se envía el refresh token de ESTA sesión para que el backend la conserve
+      // y revoque solo las demás (otras estaciones con la clave anterior).
+      const refreshToken = localStorage.getItem('refresh_token') || undefined;
       const response = await apiService.post<{ message: string }>(
         '/auth/change-password',
-        { currentPassword, newPassword }
+        { currentPassword, newPassword, refreshToken }
       );
       if (!response.success) {
         throw new Error(response.message || 'Error al cambiar la contraseña');
