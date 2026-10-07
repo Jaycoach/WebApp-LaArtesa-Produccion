@@ -259,7 +259,7 @@ class AuthController {
         });
       }
 
-      const result = await authService.resetPassword(resetToken, newPassword);
+      const result = await authService.resetPassword(resetToken, newPassword, getRequestMeta(req));
 
       res.json({
         success: true,

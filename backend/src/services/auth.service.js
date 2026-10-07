@@ -14,6 +14,8 @@ const {
   passwordFueUsadaAntes,
   guardarPasswordEnHistorial,
   aplicarNuevaPassword,
+  registrarEventoSeguridad,
+  EVENTO,
 } = require('./securityHelpers');
 
 /**
@@ -178,18 +180,36 @@ class AuthService {
 
       if (!isValidPassword) {
         // Incrementar intentos fallidos
-        await client.query(
+        const fallo = await client.query(
           `UPDATE usuarios 
            SET intentos_fallidos = intentos_fallidos + 1,
                bloqueado_hasta = CASE 
                  WHEN intentos_fallidos + 1 >= $2 THEN NOW() + make_interval(mins => $3)
                  ELSE bloqueado_hasta
                END
-           WHERE id = $1`,
+           WHERE id = $1
+           RETURNING intentos_fallidos, bloqueado_hasta`,
           [user.id, config.security.maxLoginAttempts, config.security.lockoutDuration],
         );
 
         registrarFalloLogin(username, 'password_incorrecta', meta);
+
+        const estado = fallo.rows && fallo.rows[0];
+        if (estado && estado.bloqueado_hasta && estado.intentos_fallidos >= config.security.maxLoginAttempts) {
+          await registrarEventoSeguridad(client, {
+            codigo: EVENTO.BLOQUEO_CUENTA_INTENTOS,
+            descripcion: `cuenta bloqueada ${config.security.lockoutDuration} min tras ${estado.intentos_fallidos} intentos fallidos de login`,
+            usuarioObjetivoId: user.id,
+            camposModificados: ['intentos_fallidos', 'bloqueado_hasta'],
+            detalles: {
+              username: user.username,
+              intentos_fallidos: estado.intentos_fallidos,
+              duracion_minutos: config.security.lockoutDuration,
+            },
+            ip,
+            userAgent,
+          });
+        }
         throw new Error('Credenciales inválidas');
       }
 
@@ -399,7 +419,7 @@ class AuthService {
   /**
    * Resetear contraseña con token
    */
-  async resetPassword(resetToken, newPassword) {
+  async resetPassword(resetToken, newPassword, meta = {}) {
     const client = await pool.getClient();
 
     try {
@@ -410,7 +430,7 @@ class AuthService {
 
       // Buscar usuario con el token válido
       const result = await client.query(
-        `SELECT id, email, password_hash
+        `SELECT id, email, username, nombre_completo, password_hash
          FROM usuarios
          WHERE token_recuperacion = $1
          AND token_recuperacion_expira > NOW()
@@ -434,11 +454,23 @@ class AuthService {
 
       // Historial, hash nuevo, contador/bloqueo en cero, token consumido y
       // todas las sesiones revocadas (mismo comportamiento que los otros flujos)
-      await aplicarNuevaPassword(client, {
+      const { sesionesRevocadas } = await aplicarNuevaPassword(client, {
         userId: user.id,
         nuevoHash: hashedPassword,
         hashAnterior: user.password_hash,
         limpiarTokenRecuperacion: true,
+      });
+
+      await registrarEventoSeguridad(client, {
+        codigo: EVENTO.RESET_PASSWORD_TOKEN,
+        descripcion: `contraseña restablecida con token de recuperación (sesiones revocadas: ${sesionesRevocadas})`,
+        usuarioObjetivoId: user.id,
+        actor: { id: user.id, nombre: user.nombre_completo || user.username },
+        camposModificados: ['password_hash', 'ultimo_cambio_password', 'intentos_fallidos', 'bloqueado_hasta'],
+        detalles: { via: 'token_recuperacion', sesiones_revocadas: sesionesRevocadas },
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+        transaccional: true,
       });
 
       await client.query('COMMIT');
@@ -469,7 +501,7 @@ class AuthService {
    * revocación corta la capacidad de RENOVARLO, no invalida JWTs en vuelo.
    */
   async changePassword(userId, currentPassword, newPassword, ctx = {}) {
-    const { refreshToken: refreshTokenActual = null } = ctx;
+    const { refreshToken: refreshTokenActual = null, ip = null, userAgent = null } = ctx;
     const client = await pool.getClient();
 
     try {
@@ -477,7 +509,7 @@ class AuthService {
 
       // Obtener contraseña actual
       const result = await client.query(
-        'SELECT password_hash FROM usuarios WHERE id = $1',
+        'SELECT username, nombre_completo, password_hash FROM usuarios WHERE id = $1',
         [userId],
       );
 
@@ -504,11 +536,23 @@ class AuthService {
 
       // Historial, hash nuevo, contador/bloqueo en cero y sesiones revocadas
       // (salvo la actual si es identificable) — igual que los otros flujos
-      await aplicarNuevaPassword(client, {
+      const { sesionesRevocadas } = await aplicarNuevaPassword(client, {
         userId,
         nuevoHash: hashedPassword,
         hashAnterior: user.password_hash,
         conservarRefreshToken: refreshTokenActual,
+      });
+
+      await registrarEventoSeguridad(client, {
+        codigo: EVENTO.CAMBIO_PASSWORD,
+        descripcion: `el usuario cambió su contraseña (sesiones revocadas: ${sesionesRevocadas})`,
+        usuarioObjetivoId: userId,
+        actor: { id: userId, nombre: user.nombre_completo || user.username },
+        camposModificados: ['password_hash', 'ultimo_cambio_password', 'intentos_fallidos', 'bloqueado_hasta'],
+        detalles: { sesiones_revocadas: sesionesRevocadas, sesion_actual_conservada: Boolean(refreshTokenActual) },
+        ip,
+        userAgent,
+        transaccional: true,
       });
 
       await client.query('COMMIT');

@@ -45,10 +45,16 @@ function esperarComportamientoUnificado(client, userId) {
 }
 
 describe('punto 2 — flujos de contraseña unificados', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    // clearAllMocks no vacía la cola de mockResolvedValueOnce: un test que falle antes
+    // de consumirla contaminaría a los siguientes.
+    bcrypt.compare.mockReset();
+    bcrypt.hash.mockReset();
+  });
 
   const clienteCambioPropio = () => fakeClient([
-    [/SELECT password_hash FROM usuarios WHERE id = \$1/, { rows: [{ password_hash: HASH_VIEJO }] }],
+    [/SELECT username, nombre_completo, password_hash FROM usuarios WHERE id = \$1/, { rows: [{ username: 'u7', nombre_completo: 'Usuario Siete', password_hash: HASH_VIEJO }] }],
     [/FROM usuarios_historial_passwords/, { rows: [] }],
     [/^UPDATE usuarios_sesiones/, { rowCount: 2, rows: [] }],
   ]);

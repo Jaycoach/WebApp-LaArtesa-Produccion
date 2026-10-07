@@ -6,7 +6,7 @@
 const bcrypt = require('bcrypt');
 const pool = require('../database/connection');
 const logger = require('../utils/logger');
-const { aplicarNuevaPassword } = require('./securityHelpers');
+const { aplicarNuevaPassword, registrarEventoSeguridad, EVENTO } = require('./securityHelpers');
 
 /**
  * Bloquea una operación que dejaría al sistema sin ningún admin activo.
@@ -419,7 +419,8 @@ class UserService {
   /**
    * Resetear contraseña de usuario (por admin)
    */
-  async resetUserPassword(userId, newPassword) {
+  async resetUserPassword(userId, newPassword, ctx = {}) {
+    const { actor = null, ip = null, userAgent = null } = ctx;
     const client = await pool.getClient();
 
     try {
@@ -442,10 +443,22 @@ class UserService {
       // todas las sesiones revocadas (mismo comportamiento que los otros flujos).
       // El reset por admin NO bloquea la reutilización de claves anteriores: el
       // admin define una clave temporal, pero sí queda el hash anterior en el historial.
-      await aplicarNuevaPassword(client, {
+      const { sesionesRevocadas } = await aplicarNuevaPassword(client, {
         userId,
         nuevoHash: hashedPassword,
         hashAnterior: userExists.rows[0].password_hash,
+      });
+
+      await registrarEventoSeguridad(client, {
+        codigo: EVENTO.RESET_PASSWORD_ADMIN,
+        descripcion: `contraseña restablecida por un administrador (sesiones revocadas: ${sesionesRevocadas})`,
+        usuarioObjetivoId: userId,
+        actor,
+        camposModificados: ['password_hash', 'ultimo_cambio_password', 'intentos_fallidos', 'bloqueado_hasta'],
+        detalles: { sesiones_revocadas: sesionesRevocadas },
+        ip,
+        userAgent,
+        transaccional: true,
       });
 
       await client.query('COMMIT');
@@ -465,17 +478,24 @@ class UserService {
   /**
    * Desbloquear usuario
    */
-  async unlockUser(userId) {
+  async unlockUser(userId, ctx = {}) {
+    const { actor = null, ip = null, userAgent = null } = ctx;
     const client = await pool.getClient();
 
     try {
+      // El UPDATE lee el estado previo (FOR UPDATE) para poder auditar qué se desbloqueó.
       const result = await client.query(
-        `UPDATE usuarios 
-         SET intentos_fallidos = 0, 
+        `UPDATE usuarios u
+         SET intentos_fallidos = 0,
              bloqueado_hasta = NULL,
              fecha_actualizacion = NOW()
-         WHERE id = $1
-         RETURNING id, username, bloqueado_hasta`,
+         FROM (
+           SELECT id, intentos_fallidos, (bloqueado_hasta IS NOT NULL AND bloqueado_hasta > NOW()) AS estaba_bloqueado
+           FROM usuarios WHERE id = $1 FOR UPDATE
+         ) prev
+         WHERE u.id = prev.id
+         RETURNING u.id, u.username, u.bloqueado_hasta,
+                   prev.intentos_fallidos AS intentos_previos, prev.estaba_bloqueado`,
         [userId],
       );
 
@@ -483,9 +503,22 @@ class UserService {
         throw new Error('Usuario no encontrado');
       }
 
+      const { intentos_previos: intentosPrevios, estaba_bloqueado: estabaBloqueado, ...usuario } = result.rows[0];
+
+      await registrarEventoSeguridad(client, {
+        codigo: EVENTO.DESBLOQUEO_MANUAL,
+        descripcion: `cuenta desbloqueada manualmente (intentos previos: ${intentosPrevios}, estaba bloqueada: ${estabaBloqueado ? 'sí' : 'no'})`,
+        usuarioObjetivoId: userId,
+        actor,
+        camposModificados: ['intentos_fallidos', 'bloqueado_hasta'],
+        detalles: { username: usuario.username, intentos_previos: intentosPrevios, estaba_bloqueado: Boolean(estabaBloqueado) },
+        ip,
+        userAgent,
+      });
+
       logger.info(`Usuario desbloqueado: ID ${userId}`);
 
-      return result.rows[0];
+      return usuario;
     } catch (error) {
       logger.error('Error al desbloquear usuario:', error);
       throw error;

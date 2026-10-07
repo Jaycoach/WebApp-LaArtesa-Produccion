@@ -5,6 +5,15 @@
 
 const userService = require('../services/user.service');
 const logger = require('../utils/logger');
+const { getRequestMeta } = require('../utils/clientInfo');
+
+/** Quién ejecuta la acción (admin/supervisor) y desde dónde, para la auditoría de seguridad. */
+function auditoriaCtx(req) {
+  return {
+    actor: { id: req.user.id, nombre: req.user.nombre_completo || req.user.username },
+    ...getRequestMeta(req),
+  };
+}
 
 class UserController {
   /**
@@ -264,7 +273,7 @@ class UserController {
         });
       }
 
-      const result = await userService.resetUserPassword(id, newPassword);
+      const result = await userService.resetUserPassword(id, newPassword, auditoriaCtx(req));
 
       res.json({
         success: true,
@@ -292,7 +301,7 @@ class UserController {
     try {
       const { id } = req.params;
 
-      const user = await userService.unlockUser(id);
+      const user = await userService.unlockUser(id, auditoriaCtx(req));
 
       res.json({
         success: true,
