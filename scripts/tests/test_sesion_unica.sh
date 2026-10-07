@@ -362,11 +362,33 @@ PLAN=$(psql_q "EXPLAIN (ANALYZE, BUFFERS, SUMMARY) $Q_NUEVA")
 echo "$PLAN" | sed 's/^/  /'
 echo "$PLAN" | grep -q "usuarios_sesiones_pkey" && ok "la subconsulta usa la clave primaria (usuarios_sesiones_pkey), no un barrido" || fallo "la subconsulta NO usa usuarios_sesiones_pkey"
 echo "Plan de la consulta ANTERIOR:"; psql_q "EXPLAIN (ANALYZE, BUFFERS, SUMMARY) $Q_VIEJA" | sed 's/^/  /'
-bench() { # consulta -> ms totales de 3000 ejecuciones (lado servidor, sin red)
-  psql_q "EXPLAIN (ANALYZE, SUMMARY) SELECT count(*) FROM generate_series(1,3000) g, LATERAL ($1 AND g > 0 ) q" | grep -E "Execution Time" | sed -E 's/.*Execution Time: ([0-9.]+) ms.*/\1/'
-}
-MS_N=$(bench "$Q_NUEVA"); MS_V=$(bench "$Q_VIEJA")
-echo "3000 ejecuciones: consulta nueva ${MS_N} ms · anterior ${MS_V} ms  (diferencia por ejecución: $(awk -v a="$MS_N" -v b="$MS_V" 'BEGIN{printf "%.4f", (a-b)/3000}') ms)"
+# Benchmark: 3000 ejecuciones REALES de cada consulta (EXECUTE dentro de un bucle PL/pgSQL; cada vuelta es una
+# ejecución completa, sin que el planner pueda agruparlas). Mide solo el lado servidor (sin red).
+SQL_BENCH=$(mktemp)
+cat > "$SQL_BENCH" <<'EOSQL'
+DO $bench$
+DECLARE i int; r record; t0 timestamptz; ms_n numeric; ms_v numeric;
+BEGIN
+  t0 := clock_timestamp();
+  FOR i IN 1..3000 LOOP
+    EXECUTE 'SELECT id, uuid, username, email, nombre_completo, rol, activo, bloqueado_hasta, ultimo_cambio_password, (SELECT s.revocado = false AND s.usuario_id = usuarios.id FROM usuarios_sesiones s WHERE s.id = $2::integer) AS sesion_vigente FROM usuarios WHERE id = $1' INTO r USING __UID__, __SID__;
+  END LOOP;
+  ms_n := extract(epoch FROM clock_timestamp() - t0) * 1000;
+  t0 := clock_timestamp();
+  FOR i IN 1..3000 LOOP
+    EXECUTE 'SELECT id, uuid, username, email, nombre_completo, rol, activo, bloqueado_hasta, ultimo_cambio_password FROM usuarios WHERE id = $1' INTO r USING __UID__;
+  END LOOP;
+  ms_v := extract(epoch FROM clock_timestamp() - t0) * 1000;
+  RAISE NOTICE 'BENCH nueva_ms=% anterior_ms=%', round(ms_n, 2), round(ms_v, 2);
+END
+$bench$;
+EOSQL
+sed -i "s/__UID__/$U7/g; s/__SID__/$SID_BENCH/g" "$SQL_BENCH"
+SALIDA_B=$(PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -X -f "$SQL_BENCH" 2>&1 | grep 'BENCH')
+rm -f "$SQL_BENCH"
+MS_N=$(echo "$SALIDA_B" | sed -E 's/.*nueva_ms=([0-9.]+).*/\1/'); MS_V=$(echo "$SALIDA_B" | sed -E 's/.*anterior_ms=([0-9.]+).*/\1/')
+echo "3000 ejecuciones reales de cada consulta: nueva ${MS_N} ms (=$(awk -v a="$MS_N" 'BEGIN{printf "%.4f", a/3000}') ms c/u) · anterior ${MS_V} ms (=$(awk -v b="$MS_V" 'BEGIN{printf "%.4f", b/3000}') ms c/u) · diferencia $(awk -v a="$MS_N" -v b="$MS_V" 'BEGIN{printf "%.4f", (a-b)/3000}') ms por petición"
+awk -v a="$MS_N" 'BEGIN{exit !(a > 100)}' && ok "el benchmark ejecutó de verdad 3000 consultas (>100 ms en total; antes de esta corrección medía ~1 ms por un artefacto del planner)" || fallo "el benchmark es sospechosamente rápido (${MS_N} ms): no se puede confiar en la medición"
 awk -v a="$MS_N" -v b="$MS_V" 'BEGIN{exit !((a-b)/3000 < 0.1)}' && ok "la subconsulta añade < 0,1 ms por petición (a 1 petición/15 s del checklist de Pesaje es despreciable)" || fallo "la subconsulta añade >= 0,1 ms por petición"
 
 # ===========================================================================
