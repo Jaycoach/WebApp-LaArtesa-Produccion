@@ -1,0 +1,504 @@
+#!/bin/bash
+# ============================================================================
+# test_seguridad_cuentas_auth.sh
+# Script de aceptación — bloqueo de cuentas, cambio/reset de contraseña,
+# trazabilidad de login, auditoría de seguridad y renovación de token.
+#
+# Origen: incidente del usuario compartido "pesaje" (6-oct-2026). Puntos:
+#   1. contador de intentos se reinicia al vencer el bloqueo
+#   2. changePassword / reset por token / reset admin: mismo comportamiento
+#   3. login: ip_address + user_agent en usuarios_sesiones; log de fallos
+#      con username + IP + motivo (sin contraseña)
+#   4. auditoría en auditoria_cambios SIN hashes ni tokens
+#   5. pantalla de usuarios (la parte API; la parte visual se verifica en
+#      navegador real, ver reporte)
+#   6. renovación automática de token (interceptor real, harness .mjs)
+#
+# Manejo de credenciales (CLAUDE.md / skill secrets-hygiene-in-tests):
+#   - ninguna contraseña es literal: se generan en runtime leyendo las reglas
+#     REALES de backend/src/validators/auth.validator.js
+#   - los cuerpos HTTP se arman por entorno/stdin, nunca como argumento
+#   - la salida se filtra con jq (solo success/message/errors)
+#   - los hashes bcrypt solo viven en variables de shell; jamás se imprimen
+#
+# Ejecutar EN STAGING, desde la raíz del repo (~/LaArtesa), con el backend
+# YA corriendo el código bajo prueba:
+#   bash scripts/tests/test_seguridad_cuentas_auth.sh
+#
+# Requiere: psql, curl, jq, node, openssl/tr/fold/shuf. Crea y desactiva sus
+# propios usuarios de prueba (no productivos). No toca producción.
+# ============================================================================
+
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ENV_FILE="$REPO_ROOT/backend/.env"
+VALIDATOR_FILE="$REPO_ROOT/backend/src/validators/auth.validator.js"
+API_URL="${API_URL:-http://localhost:3000/api}"
+LOG_FILE="$REPO_ROOT/backend/logs/combined-$(date -u +%F).log"
+SKIP_REGRESION="${SKIP_REGRESION:-0}"
+
+FALLOS=0
+fallo() { echo "FALLO: $1"; FALLOS=$((FALLOS+1)); }
+ok()    { echo "OK: $1"; }
+seccion() { echo ""; echo "===================================================="; echo "$1"; echo "===================================================="; }
+assert_eq() { # nombre actual esperado
+  if [ "$2" = "$3" ]; then ok "$1 (= '$3')"; else fallo "$1: obtuvo '$2', esperaba '$3'"; fi
+}
+
+[ -f "$ENV_FILE" ] || { echo "FALLO: no se encontró $ENV_FILE"; exit 1; }
+[ -f "$VALIDATOR_FILE" ] || { echo "FALLO: no se encontró $VALIDATOR_FILE"; exit 1; }
+
+DB_HOST=$(grep -E '^DB_HOST='     "$ENV_FILE" | cut -d= -f2-)
+DB_PORT=$(grep -E '^DB_PORT='     "$ENV_FILE" | cut -d= -f2-)
+DB_NAME=$(grep -E '^DB_NAME='     "$ENV_FILE" | cut -d= -f2-)
+DB_USER=$(grep -E '^DB_USER='     "$ENV_FILE" | cut -d= -f2-)
+DB_PASSWORD=$(grep -E '^DB_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)
+
+# Salvaguarda: este script SOLO corre contra staging.
+if echo "$DB_NAME" | grep -qi 'prod' && ! echo "$DB_NAME" | grep -qi 'staging'; then
+  echo "FALLO: DB_NAME='$DB_NAME' parece producción. Este script es solo para staging."; exit 1
+fi
+
+psql_q() { PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -q -t -A -F'|' -c "$1"; }
+psql_tab() { PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -X -P pager=off -c "$1"; }
+psql_file() { PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -q -t -A -f "$1"; }
+
+run_node() {
+  if command -v node > /dev/null 2>&1; then node "$@"; else
+    bash -c 'source ~/.nvm/nvm.sh 2>/dev/null; node "$@"' _ "$@"
+  fi
+}
+
+# ---- reglas reales del validador (no se asume nada) ----
+RULES=$(run_node -e "
+const fs = require('fs');
+const src = fs.readFileSync(process.argv[1], 'utf8');
+const idx = src.indexOf('changePasswordValidation');
+const block = src.slice(idx, idx + 800);
+const minM = block.match(/isLength\(\{\s*min:\s*(\d+)/);
+const specM = block.match(/\(\?=\.\*\[([^\]]+)\]\)\[A-Za-z/);
+if (!minM || !specM) { console.error('NO_MATCH'); process.exit(1); }
+console.log(minM[1] + '|' + specM[1]);
+" "$VALIDATOR_FILE")
+[ -n "$RULES" ] || { echo "FALLO: no se pudieron extraer las reglas del validador"; exit 1; }
+IFS='|' read -r MIN_LEN SPECIAL_CHARS <<< "$RULES"
+
+rand_chars() { tr -dc "$2" < /dev/urandom | head -c "$1"; }
+gen_valid_password() {
+  local upper lower digit special n idx
+  upper=$(rand_chars 3 'A-Z'); lower=$(rand_chars 4 'a-z'); digit=$(rand_chars 3 '0-9')
+  n=${#SPECIAL_CHARS}; idx=$((RANDOM % n)); special="${SPECIAL_CHARS:$idx:1}"
+  echo "${upper}${lower}${digit}${special}" | fold -w1 | shuf | tr -d '\n'
+}
+gen_password_generica() { rand_chars 16 'A-Za-z0-9'; }
+
+hash_password() { # $1 = password, por stdin (no queda en `ps`)
+  (cd "$REPO_ROOT/backend" && printf '%s' "$1" | run_node -e "
+let pw = '';
+process.stdin.on('data', d => pw += d);
+process.stdin.on('end', () => { require('bcrypt').hash(pw, 12).then(h => console.log(h)); });
+")
+}
+
+# ---- registro de contraseñas generadas, para el escaneo de fugas (sección D) ----
+SECRETS_FILE=$(mktemp)
+registrar_secreto() { printf '%s\n' "$1" >> "$SECRETS_FILE"; }
+
+TEST_USER_IDS=()
+RESP_FILE=$(mktemp)
+cleanup() {
+  for id in "${TEST_USER_IDS[@]:-}"; do
+    [ -z "$id" ] && continue
+    psql_q "UPDATE usuarios SET activo=false, intentos_fallidos=0, bloqueado_hasta=NULL, username=username || '_DEACTIVATED' WHERE id=$id AND username NOT LIKE '%_DEACTIVATED';" > /dev/null 2>&1
+  done
+  echo "[cleanup] usuarios de prueba desactivados: ${TEST_USER_IDS[*]:-ninguno}"
+  rm -f "$RESP_FILE" "$SECRETS_FILE"
+}
+trap cleanup EXIT
+
+NEW_ID=""; NEW_NAME=""
+crear_usuario() { # $1=rol $2=password -> setea NEW_ID / NEW_NAME (NO usar en subshell: registra para limpieza)
+  local rol="$1" pw="$2" hash uname tmp id
+  hash=$(hash_password "$pw")
+  uname="test_seg_${rol,,}_$$_${RANDOM}"
+  tmp=$(mktemp)
+  cat > "$tmp" <<EOF
+INSERT INTO usuarios (username, email, password_hash, nombre_completo, rol, activo, email_verificado, intentos_fallidos, bloqueado_hasta, debe_cambiar_password)
+VALUES ('$uname', '$uname@artesa-staging-test.com', '$hash', 'Usuario Prueba Seguridad $rol', '$rol', true, true, 0, NULL, false)
+RETURNING id;
+EOF
+  id=$(psql_file "$tmp"); rm -f "$tmp"
+  TEST_USER_IDS+=("$id")
+  NEW_ID="$id"; NEW_NAME="$uname"
+}
+
+# ---- HTTP ----
+HTTP=""; BODY_JSON=""
+call() { # METHOD PATH [TOKEN] [IP] [UA]  (cuerpo en $REQ_BODY, por stdin hacia curl)
+  local m="$1" p="$2" tok="${3:-}" ip="${4:-198.51.100.1}" ua="${5:-acceptance-test/1.0}"
+  local args=(-s -o "$RESP_FILE" -w '%{http_code}' -X "$m" "$API_URL$p" -H 'Content-Type: application/json' -H "X-Real-IP: $ip" -H "User-Agent: $ua")
+  [ -n "$tok" ] && args+=(-H "Authorization: Bearer $tok")
+  HTTP=$(printf '%s' "${REQ_BODY:-}" | curl "${args[@]}" --data-binary @-)
+  BODY_JSON=$(cat "$RESP_FILE")
+  REQ_BODY=""
+}
+msg() { echo "$BODY_JSON" | jq -r '.message // empty' 2>/dev/null; }
+print_safe() { echo "$BODY_JSON" | jq -c '{success, message} + (if .errors then {errors: (.errors | map({field, message}))} else {} end)' 2>/dev/null || echo "<no-JSON omitido>"; }
+
+login() { # username password ip [ua] -> deja HTTP, ACCESS, REFRESH
+  REQ_BODY=$(U="$1" P="$2" jq -n '{username:env.U,password:env.P}')
+  call POST /auth/login "" "${3:-198.51.100.1}" "${4:-acceptance-test/1.0}"
+  ACCESS=$(echo "$BODY_JSON" | jq -r '.data.accessToken // empty' 2>/dev/null)
+  REFRESH=$(echo "$BODY_JSON" | jq -r '.data.refreshToken // empty' 2>/dev/null)
+}
+nuevo_login() { sleep 1.1; login "$@"; } # evita colisión de refresh JWT (mismo iat) al loguear seguido
+
+estado() { # id -> intentos|bloqueado(Y/N)|ultimo_cambio epoch
+  psql_q "SELECT intentos_fallidos, (bloqueado_hasta IS NOT NULL AND bloqueado_hasta > NOW()), COALESCE(bloqueado_hasta IS NULL,false), EXTRACT(EPOCH FROM ultimo_cambio_password)::bigint FROM usuarios WHERE id=$1;"
+}
+intentos() { psql_q "SELECT intentos_fallidos FROM usuarios WHERE id=$1;"; }
+bloqueado_null() { psql_q "SELECT bloqueado_hasta IS NULL FROM usuarios WHERE id=$1;"; }
+sesiones_activas() { psql_q "SELECT count(*) FROM usuarios_sesiones WHERE usuario_id=$1 AND revocado=false;"; }
+sesiones_total() { psql_q "SELECT count(*) FROM usuarios_sesiones WHERE usuario_id=$1;"; }
+historial_count() { psql_q "SELECT count(*) FROM usuarios_historial_passwords WHERE usuario_id=$1;"; }
+audit_count() { # usuario_id motivo_prefijo
+  psql_q "SELECT count(*) FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id=$1 AND motivo LIKE '$2%';"
+}
+
+echo "===================================================="
+echo "PRECHECK: backend alcanzable y reglas del validador"
+echo "===================================================="
+HC=$(curl -s -o /dev/null -w '%{http_code}' "${API_URL%/api}/health" 2>/dev/null || echo 000)
+[ "$HC" = "200" ] && ok "backend responde en $API_URL (health=$HC)" || { fallo "backend NO responde (health=$HC) en $API_URL"; exit 1; }
+ok "reglas leídas del validador real: longitud mínima=$MIN_LEN, especiales='$SPECIAL_CHARS'"
+CFG=$(cd "$REPO_ROOT/backend" && run_node -e "const c=require('./src/config'); console.log(c.security.maxLoginAttempts+'|'+c.security.lockoutDuration)")
+assert_eq "config efectiva maxLoginAttempts|lockoutDuration(min) (valores efectivos NO cambian)" "$CFG" "5|30"
+
+# ---------------------------------------------------------------------------
+# Usuarios de prueba
+# ---------------------------------------------------------------------------
+PW_U1=$(gen_valid_password); registrar_secreto "$PW_U1"
+crear_usuario OPERARIO "$PW_U1"; U1="$NEW_ID"; U1_NAME="$NEW_NAME"
+PW_ADM=$(gen_valid_password); registrar_secreto "$PW_ADM"
+crear_usuario ADMIN "$PW_ADM"; ADM="$NEW_ID"; ADM_NAME="$NEW_NAME"
+ok "usuarios de prueba creados: U1=$U1 ($U1_NAME), ADMIN=$ADM ($ADM_NAME)"
+
+# ===========================================================================
+seccion "PUNTO 1 — el contador se reinicia al vencer el bloqueo"
+# ===========================================================================
+echo "-- 1a) 5 contraseñas incorrectas => bloqueado"
+for i in 1 2 3 4 5; do
+  W=$(gen_password_generica)
+  login "$U1_NAME" "$W" 203.0.113.11
+  [ "$HTTP" = "400" ] && [ "$(msg)" = "Credenciales inválidas" ] || fallo "intento $i: HTTP $HTTP :: $(print_safe)"
+done
+assert_eq "intentos_fallidos tras 5 fallos" "$(intentos "$U1")" "5"
+assert_eq "bloqueado_hasta en el futuro (bloqueado)" "$(psql_q "SELECT bloqueado_hasta > NOW() FROM usuarios WHERE id=$U1;")" "t"
+MIN_BLOQ=$(psql_q "SELECT round(EXTRACT(EPOCH FROM (bloqueado_hasta - NOW()))/60) FROM usuarios WHERE id=$U1;")
+assert_eq "duración del bloqueo efectiva (min, sin cambios)" "$MIN_BLOQ" "30"
+login "$U1_NAME" "$PW_U1" 203.0.113.11
+echo "login correcto estando bloqueado => HTTP $HTTP :: $(print_safe)"
+if [ "$HTTP" = "400" ] && [[ "$(msg)" == "Cuenta bloqueada hasta"* ]]; then ok "login bloqueado sigue rechazado con el mensaje original"; else fallo "esperaba 400 'Cuenta bloqueada hasta…'"; fi
+assert_eq "intentos_fallidos NO crece mientras está bloqueado" "$(intentos "$U1")" "5"
+
+echo ""
+echo "-- 1b) bloqueo vencido + contador en 5: UN fallo => intentos=1 y SIN bloqueo"
+echo "SELECT previo al UPDATE controlado:"
+psql_tab "SELECT id, intentos_fallidos, bloqueado_hasta > NOW() AS bloqueado FROM usuarios WHERE id=$U1;"
+psql_q "UPDATE usuarios SET bloqueado_hasta = NOW() - INTERVAL '1 minute', intentos_fallidos = 5 WHERE id=$U1;" > /dev/null
+echo "Estado tras el UPDATE controlado (bloqueo vencido, intentos=5):"
+psql_tab "SELECT id, intentos_fallidos, bloqueado_hasta > NOW() AS bloqueado FROM usuarios WHERE id=$U1;"
+login "$U1_NAME" "$(gen_password_generica)" 203.0.113.12
+echo "un solo fallo => HTTP $HTTP :: $(print_safe)"
+echo "Estado tras UN fallo:"
+psql_tab "SELECT id, intentos_fallidos, bloqueado_hasta IS NULL AS sin_bloqueo FROM usuarios WHERE id=$U1;"
+assert_eq "intentos_fallidos tras 1 fallo post-vencimiento" "$(intentos "$U1")" "1"
+assert_eq "bloqueado_hasta es NULL (sin re-bloqueo)" "$(bloqueado_null "$U1")" "t"
+assert_eq "el mensaje visible sigue siendo el de siempre" "$(msg)" "Credenciales inválidas"
+
+echo ""
+echo "-- 1c) login correcto deja el contador en 0"
+login "$U1_NAME" "$(gen_password_generica)" 203.0.113.12  # intentos=2
+assert_eq "intentos_fallidos antes del login correcto" "$(intentos "$U1")" "2"
+login "$U1_NAME" "$PW_U1" 203.0.113.12
+assert_eq "login correcto => HTTP" "$HTTP" "200"
+assert_eq "intentos_fallidos tras login correcto" "$(intentos "$U1")" "0"
+
+echo ""
+echo "-- 1d) bloqueo vencido + contraseña CORRECTA => entra y queda en 0/NULL"
+psql_q "UPDATE usuarios SET bloqueado_hasta = NOW() - INTERVAL '1 minute', intentos_fallidos = 9 WHERE id=$U1;" > /dev/null
+nuevo_login "$U1_NAME" "$PW_U1" 203.0.113.12
+assert_eq "login correcto con bloqueo vencido y 9 intentos acumulados => HTTP" "$HTTP" "200"
+assert_eq "intentos_fallidos" "$(intentos "$U1")" "0"
+assert_eq "bloqueado_hasta NULL" "$(bloqueado_null "$U1")" "t"
+
+echo ""
+echo "-- 1e) umbral sin cambios: 4 fallos NO bloquean, el 5º sí (sin bloqueo previo)"
+for i in 1 2 3 4; do login "$U1_NAME" "$(gen_password_generica)" 203.0.113.13; done
+assert_eq "intentos tras 4 fallos" "$(intentos "$U1")" "4"
+assert_eq "NO bloqueado tras 4 fallos" "$(psql_q "SELECT bloqueado_hasta IS NULL FROM usuarios WHERE id=$U1;")" "t"
+login "$U1_NAME" "$(gen_password_generica)" 203.0.113.13
+assert_eq "bloqueado tras el 5º fallo" "$(psql_q "SELECT bloqueado_hasta > NOW() FROM usuarios WHERE id=$U1;")" "t"
+
+# ===========================================================================
+seccion "PUNTO 3 — trazabilidad de login (sesión con IP/UA, log de fallos)"
+# ===========================================================================
+psql_q "UPDATE usuarios SET bloqueado_hasta=NULL, intentos_fallidos=0 WHERE id=$U1;" > /dev/null
+UA_TEST="acceptance-test/1.0 (seguridad; $$)"
+nuevo_login "$U1_NAME" "$PW_U1" 198.51.100.23 "$UA_TEST"
+assert_eq "login exitoso => HTTP" "$HTTP" "200"
+echo "Última fila de usuarios_sesiones del usuario (evidencia, sin refresh_token):"
+psql_tab "SELECT id, usuario_id, ip_address, user_agent, revocado, created_at FROM usuarios_sesiones WHERE usuario_id=$U1 ORDER BY id DESC LIMIT 1;"
+assert_eq "ip_address poblada (login)" "$(psql_q "SELECT host(ip_address) FROM usuarios_sesiones WHERE usuario_id=$U1 ORDER BY id DESC LIMIT 1;")" "198.51.100.23"
+assert_eq "user_agent poblado (login)" "$(psql_q "SELECT user_agent FROM usuarios_sesiones WHERE usuario_id=$U1 ORDER BY id DESC LIMIT 1;")" "$UA_TEST"
+
+sleep 1.1
+REQ_BODY=$(R="$REFRESH" jq -n '{refreshToken:env.R}')
+call POST /auth/refresh "" 198.51.100.24 "$UA_TEST"
+assert_eq "refresh => HTTP" "$HTTP" "200"
+assert_eq "ip_address poblada en la sesión rotada por /auth/refresh" "$(psql_q "SELECT host(ip_address) FROM usuarios_sesiones WHERE usuario_id=$U1 ORDER BY id DESC LIMIT 1;")" "198.51.100.24"
+
+echo ""
+echo "-- 3b) log de fallos: username + IP + motivo, sin contraseña"
+NOEXISTE="noexiste_$$_${RANDOM}"
+PW_LOG=$(gen_password_generica); registrar_secreto "$PW_LOG"
+login "$NOEXISTE" "$PW_LOG" 198.51.100.31
+assert_eq "usuario inexistente => mensaje visible sin cambios" "$(msg)" "Credenciales inválidas"
+login "$U1_NAME" "$PW_LOG" 198.51.100.32
+psql_q "UPDATE usuarios SET bloqueado_hasta = NOW() + INTERVAL '10 minutes', intentos_fallidos = 5 WHERE id=$U1;" > /dev/null
+login "$U1_NAME" "$PW_U1" 198.51.100.33
+sleep 2
+log_linea() { tail -n 5000 "$LOG_FILE" 2>/dev/null | grep -F -- "$1" | grep -F -- "$2" | grep -F -- "$3" | head -1; }
+echo "Líneas de log de fallos de login (evidencia):"
+for caso in "$NOEXISTE|198.51.100.31|usuario_inexistente" "$U1_NAME|198.51.100.32|password_incorrecta" "$U1_NAME|198.51.100.33|cuenta_bloqueada"; do
+  IFS='|' read -r un ip mo <<< "$caso"
+  L=$(log_linea "username=\"$un\"" "ip=$ip" "motivo=$mo")
+  if [ -n "$L" ]; then ok "log con username, IP y motivo=$mo"; echo "    ${L:0:220}"; else fallo "NO hay línea de log para username=$un ip=$ip motivo=$mo"; fi
+done
+if [ -f "$LOG_FILE" ]; then
+  FUGAS=$(grep -c -F -f "$SECRETS_FILE" "$LOG_FILE" 2>/dev/null || true)
+  assert_eq "ninguna contraseña generada por este script aparece en el log de hoy" "${FUGAS:-0}" "0"
+else
+  fallo "no existe $LOG_FILE"
+fi
+psql_q "UPDATE usuarios SET bloqueado_hasta=NULL, intentos_fallidos=0 WHERE id=$U1;" > /dev/null
+
+# ===========================================================================
+seccion "PUNTO 2 — changePassword / reset por token / reset admin: comportamiento unificado"
+# ===========================================================================
+# Prepara un usuario con 3 sesiones y estado "sucio" (intentos + bloqueo vencido)
+preparar_usuario_con_sesiones() { # rol pw -> setea P_ID P_NAME P_PW S1_ACCESS S1_REFRESH
+  P_PW="$2"; registrar_secreto "$P_PW"
+  crear_usuario "$1" "$P_PW"; P_ID="$NEW_ID"; P_NAME="$NEW_NAME"
+  nuevo_login "$P_NAME" "$P_PW" 198.51.100.41; S1_ACCESS="$ACCESS"; S1_REFRESH="$REFRESH"
+  nuevo_login "$P_NAME" "$P_PW" 198.51.100.42
+  nuevo_login "$P_NAME" "$P_PW" 198.51.100.43
+}
+
+echo "-- 2a) changePassword CON refreshToken de la sesión actual => se conserva esa sesión, el resto se revoca"
+preparar_usuario_con_sesiones OPERARIO "$(gen_valid_password)"; C1="$P_ID"; C1_NAME="$P_NAME"; C1_PW="$P_PW"
+psql_q "UPDATE usuarios SET intentos_fallidos=5, bloqueado_hasta = NOW() - INTERVAL '1 minute', ultimo_cambio_password = NOW() - INTERVAL '1 day' WHERE id=$C1;" > /dev/null
+HASH_ANTES=$(psql_q "SELECT password_hash FROM usuarios WHERE id=$C1;")
+CAMBIO_ANTES=$(psql_q "SELECT EXTRACT(EPOCH FROM ultimo_cambio_password)::bigint FROM usuarios WHERE id=$C1;")
+echo "ANTES:"; psql_tab "SELECT id, intentos_fallidos, bloqueado_hasta IS NULL AS sin_bloqueo, ultimo_cambio_password, (SELECT count(*) FROM usuarios_sesiones s WHERE s.usuario_id=u.id AND NOT s.revocado) AS sesiones_activas, (SELECT count(*) FROM usuarios_historial_passwords h WHERE h.usuario_id=u.id) AS historial FROM usuarios u WHERE id=$C1;"
+NEW_C1=$(gen_valid_password); registrar_secreto "$NEW_C1"
+REQ_BODY=$(C="$C1_PW" N="$NEW_C1" R="$S1_REFRESH" jq -n '{currentPassword:env.C,newPassword:env.N,refreshToken:env.R}')
+call POST /auth/change-password "$S1_ACCESS" 198.51.100.41 "$UA_TEST"
+echo "change-password => HTTP $HTTP :: $(print_safe)"
+assert_eq "HTTP change-password" "$HTTP" "200"
+echo "DESPUÉS:"; psql_tab "SELECT id, intentos_fallidos, bloqueado_hasta IS NULL AS sin_bloqueo, ultimo_cambio_password, (SELECT count(*) FROM usuarios_sesiones s WHERE s.usuario_id=u.id AND NOT s.revocado) AS sesiones_activas, (SELECT count(*) FROM usuarios_historial_passwords h WHERE h.usuario_id=u.id) AS historial FROM usuarios u WHERE id=$C1;"
+assert_eq "intentos_fallidos" "$(intentos "$C1")" "0"
+assert_eq "bloqueado_hasta NULL" "$(bloqueado_null "$C1")" "t"
+CAMBIO_DESP=$(psql_q "SELECT EXTRACT(EPOCH FROM ultimo_cambio_password)::bigint FROM usuarios WHERE id=$C1;")
+[ "$CAMBIO_DESP" -gt "$CAMBIO_ANTES" ] && ok "ultimo_cambio_password actualizado" || fallo "ultimo_cambio_password NO se actualizó"
+assert_eq "sesiones activas (solo la actual)" "$(sesiones_activas "$C1")" "1"
+assert_eq "la sesión conservada ES la del refreshToken enviado" "$(psql_q "SELECT count(*) FROM usuarios_sesiones WHERE usuario_id=$C1 AND revocado=false AND refresh_token='$S1_REFRESH';")" "1"
+assert_eq "historial: 1 fila" "$(historial_count "$C1")" "1"
+assert_eq "el historial guarda el hash ANTERIOR (comparación en SQL, sin imprimir)" "$(psql_q "SELECT count(*) FROM usuarios_historial_passwords WHERE usuario_id=$C1 AND password_hash='$HASH_ANTES';")" "1"
+nuevo_login "$C1_NAME" "$NEW_C1" 198.51.100.44; assert_eq "login con la contraseña NUEVA" "$HTTP" "200"
+login "$C1_NAME" "$C1_PW" 198.51.100.44;       assert_eq "login con la contraseña ANTERIOR es rechazado" "$HTTP" "400"
+
+echo ""
+echo "-- 2b) changePassword SIN refreshToken (o con uno ajeno) => se revocan TODAS las sesiones"
+preparar_usuario_con_sesiones OPERARIO "$(gen_valid_password)"; C2="$P_ID"; C2_NAME="$P_NAME"; C2_PW="$P_PW"; C2_ACCESS="$S1_ACCESS"
+assert_eq "sesiones activas antes" "$(sesiones_activas "$C2")" "3"
+NEW_C2=$(gen_valid_password); registrar_secreto "$NEW_C2"
+REQ_BODY=$(C="$C2_PW" N="$NEW_C2" R="refresh-ajeno-inexistente" jq -n '{currentPassword:env.C,newPassword:env.N,refreshToken:env.R}')
+call POST /auth/change-password "$C2_ACCESS" 198.51.100.45
+assert_eq "HTTP change-password (refreshToken que no es de este usuario)" "$HTTP" "200"
+assert_eq "sesiones activas después (todas revocadas)" "$(sesiones_activas "$C2")" "0"
+
+echo ""
+echo "-- 2c) reset por token de recuperación"
+preparar_usuario_con_sesiones OPERARIO "$(gen_valid_password)"; C3="$P_ID"; C3_NAME="$P_NAME"
+RAW_TOKEN=$(rand_chars 48 'a-f0-9'); registrar_secreto "$RAW_TOKEN"
+TOK_HASH=$(printf '%s' "$RAW_TOKEN" | sha256sum | cut -d' ' -f1)
+psql_q "UPDATE usuarios SET token_recuperacion='$TOK_HASH', token_recuperacion_expira=NOW()+INTERVAL '1 hour', intentos_fallidos=5, bloqueado_hasta=NOW()+INTERVAL '20 minutes', ultimo_cambio_password = NOW() - INTERVAL '1 day' WHERE id=$C3;" > /dev/null
+HASH_ANTES3=$(psql_q "SELECT password_hash FROM usuarios WHERE id=$C3;")
+CAMBIO_ANTES3=$(psql_q "SELECT EXTRACT(EPOCH FROM ultimo_cambio_password)::bigint FROM usuarios WHERE id=$C3;")
+echo "ANTES:"; psql_tab "SELECT id, intentos_fallidos, bloqueado_hasta > NOW() AS bloqueado, (SELECT count(*) FROM usuarios_sesiones s WHERE s.usuario_id=u.id AND NOT s.revocado) AS sesiones_activas FROM usuarios u WHERE id=$C3;"
+NEW_C3=$(gen_valid_password); registrar_secreto "$NEW_C3"
+REQ_BODY=$(T="$RAW_TOKEN" N="$NEW_C3" jq -n '{resetToken:env.T,newPassword:env.N}')
+call POST /auth/reset-password "" 198.51.100.46
+echo "reset-password => HTTP $HTTP :: $(print_safe)"
+assert_eq "HTTP reset-password" "$HTTP" "200"
+echo "DESPUÉS:"; psql_tab "SELECT id, intentos_fallidos, bloqueado_hasta IS NULL AS sin_bloqueo, ultimo_cambio_password, (token_recuperacion IS NULL) AS token_limpio, (SELECT count(*) FROM usuarios_sesiones s WHERE s.usuario_id=u.id AND NOT s.revocado) AS sesiones_activas, (SELECT count(*) FROM usuarios_historial_passwords h WHERE h.usuario_id=u.id) AS historial FROM usuarios u WHERE id=$C3;"
+assert_eq "intentos_fallidos" "$(intentos "$C3")" "0"
+assert_eq "bloqueado_hasta NULL" "$(bloqueado_null "$C3")" "t"
+CAMBIO_DESP3=$(psql_q "SELECT EXTRACT(EPOCH FROM ultimo_cambio_password)::bigint FROM usuarios WHERE id=$C3;")
+[ "$CAMBIO_DESP3" -gt "$CAMBIO_ANTES3" ] && ok "ultimo_cambio_password actualizado" || fallo "ultimo_cambio_password NO se actualizó"
+assert_eq "sesiones activas (todas revocadas)" "$(sesiones_activas "$C3")" "0"
+assert_eq "historial guarda el hash anterior" "$(psql_q "SELECT count(*) FROM usuarios_historial_passwords WHERE usuario_id=$C3 AND password_hash='$HASH_ANTES3';")" "1"
+assert_eq "token_recuperacion limpiado" "$(psql_q "SELECT token_recuperacion IS NULL FROM usuarios WHERE id=$C3;")" "t"
+
+echo ""
+echo "-- 2d) reset por administrador"
+preparar_usuario_con_sesiones OPERARIO "$(gen_valid_password)"; C4="$P_ID"; C4_NAME="$P_NAME"
+psql_q "UPDATE usuarios SET intentos_fallidos=5, bloqueado_hasta=NOW()+INTERVAL '20 minutes', ultimo_cambio_password = NOW() - INTERVAL '1 day' WHERE id=$C4;" > /dev/null
+HASH_ANTES4=$(psql_q "SELECT password_hash FROM usuarios WHERE id=$C4;")
+CAMBIO_ANTES4=$(psql_q "SELECT EXTRACT(EPOCH FROM ultimo_cambio_password)::bigint FROM usuarios WHERE id=$C4;")
+nuevo_login "$ADM_NAME" "$PW_ADM" 198.51.100.50; ADM_ACCESS="$ACCESS"
+[ -n "$ADM_ACCESS" ] || fallo "no se pudo loguear el ADMIN de prueba"
+echo "ANTES:"; psql_tab "SELECT id, intentos_fallidos, bloqueado_hasta > NOW() AS bloqueado, (SELECT count(*) FROM usuarios_sesiones s WHERE s.usuario_id=u.id AND NOT s.revocado) AS sesiones_activas FROM usuarios u WHERE id=$C4;"
+NEW_C4=$(gen_valid_password); registrar_secreto "$NEW_C4"
+REQ_BODY=$(N="$NEW_C4" jq -n '{newPassword:env.N}')
+call POST "/users/$C4/reset-password" "$ADM_ACCESS" 198.51.100.50
+echo "admin reset-password => HTTP $HTTP :: $(print_safe)"
+assert_eq "HTTP admin reset-password" "$HTTP" "200"
+echo "DESPUÉS:"; psql_tab "SELECT id, intentos_fallidos, bloqueado_hasta IS NULL AS sin_bloqueo, ultimo_cambio_password, (SELECT count(*) FROM usuarios_sesiones s WHERE s.usuario_id=u.id AND NOT s.revocado) AS sesiones_activas, (SELECT count(*) FROM usuarios_historial_passwords h WHERE h.usuario_id=u.id) AS historial FROM usuarios u WHERE id=$C4;"
+assert_eq "intentos_fallidos" "$(intentos "$C4")" "0"
+assert_eq "bloqueado_hasta NULL" "$(bloqueado_null "$C4")" "t"
+CAMBIO_DESP4=$(psql_q "SELECT EXTRACT(EPOCH FROM ultimo_cambio_password)::bigint FROM usuarios WHERE id=$C4;")
+[ "$CAMBIO_DESP4" -gt "$CAMBIO_ANTES4" ] && ok "ultimo_cambio_password actualizado (antes el reset admin NO lo hacía)" || fallo "ultimo_cambio_password NO se actualizó"
+assert_eq "sesiones activas (todas revocadas)" "$(sesiones_activas "$C4")" "0"
+assert_eq "historial guarda el hash anterior" "$(psql_q "SELECT count(*) FROM usuarios_historial_passwords WHERE usuario_id=$C4 AND password_hash='$HASH_ANTES4';")" "1"
+nuevo_login "$C4_NAME" "$NEW_C4" 198.51.100.51; assert_eq "el usuario entra con la contraseña puesta por el admin" "$HTTP" "200"
+
+echo ""
+echo "-- 2e) NEGATIVOS: nada cambia si la operación falla o no está permitida"
+preparar_usuario_con_sesiones OPERARIO "$(gen_valid_password)"; N1="$P_ID"; N1_NAME="$P_NAME"; N1_PW="$P_PW"; N1_ACCESS="$S1_ACCESS"
+psql_q "UPDATE usuarios SET intentos_fallidos=2 WHERE id=$N1;" > /dev/null
+AUD_ANTES=$(psql_q "SELECT count(*) FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id=$N1;")
+REQ_BODY=$(C="$(gen_password_generica)" N="$(gen_valid_password)" jq -n '{currentPassword:env.C,newPassword:env.N}')
+call POST /auth/change-password "$N1_ACCESS" 198.51.100.60
+assert_eq "clave actual incorrecta => HTTP" "$HTTP" "400"
+assert_eq "clave actual incorrecta => mensaje sin cambios" "$(msg)" "Contraseña actual incorrecta"
+assert_eq "intentos_fallidos intacto" "$(intentos "$N1")" "2"
+assert_eq "sesiones intactas" "$(sesiones_activas "$N1")" "3"
+assert_eq "sin fila de historial" "$(historial_count "$N1")" "0"
+assert_eq "sin fila de auditoría nueva" "$(psql_q "SELECT count(*) FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id=$N1;")" "$AUD_ANTES"
+# rol sin permiso: un OPERARIO intenta reset admin sobre otro usuario
+REQ_BODY=$(N="$(gen_valid_password)" jq -n '{newPassword:env.N}')
+call POST "/users/$C1/reset-password" "$N1_ACCESS" 198.51.100.61
+assert_eq "OPERARIO intenta reset admin => HTTP" "$HTTP" "403"
+assert_eq "no se creó auditoría de reset para el objetivo" "$(audit_count "$C1" RESET_PASSWORD_ADMIN)" "0"
+# nueva contraseña que incumple la regla real
+SIN_ESPECIAL=$(rand_chars 12 'A-Za-z0-9')
+REQ_BODY=$(C="$N1_PW" N="$SIN_ESPECIAL" jq -n '{currentPassword:env.C,newPassword:env.N}')
+call POST /auth/change-password "$N1_ACCESS" 198.51.100.62
+assert_eq "nueva contraseña inválida => HTTP" "$HTTP" "400"
+assert_eq "sesiones siguen intactas tras validación fallida" "$(sesiones_activas "$N1")" "3"
+
+# ===========================================================================
+seccion "PUNTO 4 — auditoría de seguridad en auditoria_cambios (sin hashes ni tokens)"
+# ===========================================================================
+echo "-- 4a) desbloqueo manual por admin"
+psql_q "UPDATE usuarios SET intentos_fallidos=5, bloqueado_hasta=NOW()+INTERVAL '25 minutes' WHERE id=$U1;" > /dev/null
+call GET "/users/$U1" "$ADM_ACCESS" 198.51.100.50
+assert_eq "GET /users/:id devuelve bloqueado_hasta con valor (UI puede mostrarlo)" "$(echo "$BODY_JSON" | jq -r '.data.bloqueado_hasta // .data.user.bloqueado_hasta // empty' | grep -c .)" "1"
+echo "SELECT previo al desbloqueo:"; psql_tab "SELECT id, intentos_fallidos, bloqueado_hasta > NOW() AS bloqueado FROM usuarios WHERE id=$U1;"
+REQ_BODY='{}'
+call POST "/users/$U1/unlock" "$ADM_ACCESS" 198.51.100.50 "$UA_TEST"
+echo "unlock => HTTP $HTTP :: $(print_safe)"
+assert_eq "HTTP unlock" "$HTTP" "200"
+assert_eq "intentos_fallidos tras unlock" "$(intentos "$U1")" "0"
+assert_eq "bloqueado_hasta NULL tras unlock" "$(bloqueado_null "$U1")" "t"
+call GET "/users/$U1" "$ADM_ACCESS" 198.51.100.50
+assert_eq "tras el unlock la API ya no informa bloqueo (se refleja en la UI)" "$(echo "$BODY_JSON" | jq -r '.data.bloqueado_hasta // .data.user.bloqueado_hasta // "null"')" "null"
+
+echo ""
+echo "-- 4b) filas de auditoría de ESTA corrida (sin hash, token ni contraseña)"
+IDS_PRUEBA=$(IFS=,; echo "${TEST_USER_IDS[*]}")
+psql_tab "SELECT id, registro_id AS objetivo, operacion, campos_modificados, usuario_id AS actor, usuario_nombre, host(ip_address) AS ip, left(user_agent,24) AS ua, motivo, datos_nuevos FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id IN ($IDS_PRUEBA) ORDER BY id;"
+assert_eq "CAMBIO_PASSWORD (C1)"             "$(audit_count "$C1" CAMBIO_PASSWORD)" "1"
+assert_eq "CAMBIO_PASSWORD (C2)"             "$(audit_count "$C2" CAMBIO_PASSWORD)" "1"
+assert_eq "RESET_PASSWORD_TOKEN (C3)"        "$(audit_count "$C3" RESET_PASSWORD_TOKEN)" "1"
+assert_eq "RESET_PASSWORD_ADMIN (C4)"        "$(audit_count "$C4" RESET_PASSWORD_ADMIN)" "1"
+LOCKS=$(audit_count "$U1" BLOQUEO_CUENTA_INTENTOS)
+[ "${LOCKS:-0}" -ge 2 ] && ok "BLOQUEO_CUENTA_INTENTOS registrado ($LOCKS veces para U1: 1a y 1e)" || fallo "BLOQUEO_CUENTA_INTENTOS: se esperaban >=2 filas para U1, hay $LOCKS"
+assert_eq "DESBLOQUEO_MANUAL (U1)"           "$(audit_count "$U1" DESBLOQUEO_MANUAL)" "1"
+assert_eq "el actor del desbloqueo es el ADMIN" "$(psql_q "SELECT usuario_id FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id=$U1 AND motivo LIKE 'DESBLOQUEO_MANUAL%' ORDER BY id DESC LIMIT 1;")" "$ADM"
+assert_eq "el actor del reset admin es el ADMIN" "$(psql_q "SELECT usuario_id FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id=$C4 AND motivo LIKE 'RESET_PASSWORD_ADMIN%' LIMIT 1;")" "$ADM"
+assert_eq "la auditoría del cambio de contraseña guarda la IP real" "$(psql_q "SELECT host(ip_address) FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id=$C1 AND motivo LIKE 'CAMBIO_PASSWORD%' LIMIT 1;")" "198.51.100.41"
+
+echo ""
+echo "-- 4c) escaneo de fugas: ni hash bcrypt, ni token, ni contraseña en claro en ningún jsonb/motivo"
+TEXTO_AUDIT=$(psql_q "SELECT COALESCE(datos_anteriores::text,'')||' '||COALESCE(datos_nuevos::text,'')||' '||COALESCE(motivo,'')||' '||COALESCE(usuario_nombre,'') FROM auditoria_cambios WHERE tabla='usuarios' AND registro_id IN ($IDS_PRUEBA);")
+if printf '%s' "$TEXTO_AUDIT" | grep -qE '\$2[aby]\$'; then fallo "hay un hash bcrypt en auditoria_cambios"; else ok "ningún hash bcrypt (\$2a\$/\$2b\$/\$2y\$) en datos_anteriores/datos_nuevos/motivo"; fi
+if printf '%s' "$TEXTO_AUDIT" | grep -qiE 'password_hash|refresh_?token|token_recuperacion|"?newPassword|"?currentPassword'; then fallo "hay nombres de campos secretos en los jsonb/motivo"; else ok "ninguna clave secreta (password_hash/refresh_token/token_recuperacion/newPassword/currentPassword) en los jsonb/motivo"; fi
+if printf '%s' "$TEXTO_AUDIT" | grep -q -F -f "$SECRETS_FILE"; then fallo "una contraseña/token en claro generado por este script aparece en la auditoría"; else ok "ninguna contraseña ni token en claro generado por este script aparece en la auditoría"; fi
+FUGAS_SESION=$(psql_q "SELECT count(*) FROM auditoria WHERE tabla='usuarios_sesiones' AND usuario_id IN ($IDS_PRUEBA) AND cambios::text ~ 'refresh|token|\$2[aby]\$';")
+assert_eq "la tabla auditoria (trigger de sesiones) tampoco filtra tokens" "$FUGAS_SESION" "0"
+
+# ===========================================================================
+seccion "PUNTO 6 — renovación automática de token (interceptor REAL de api.ts vs staging)"
+# ===========================================================================
+PW_F=$(gen_valid_password); registrar_secreto "$PW_F"
+crear_usuario OPERARIO "$PW_F"; UF="$NEW_ID"; UF_NAME="$NEW_NAME"
+if (cd "$REPO_ROOT" && API_URL="$API_URL" TEST_USERNAME="$UF_NAME" TEST_PASSWORD="$PW_F" run_node scripts/tests/frontend-token-refresh.test.mjs); then
+  ok "harness del interceptor: TODOS los escenarios F1–F6 pasaron"
+else
+  fallo "el harness del interceptor (frontend-token-refresh.test.mjs) FALLÓ — ver salida arriba"
+fi
+echo "Evidencia server-side del flujo F1/F2 (sesiones del usuario de prueba):"
+psql_tab "SELECT id, revocado, host(ip_address) AS ip, left(user_agent,20) AS ua, created_at FROM usuarios_sesiones WHERE usuario_id=$UF ORDER BY id;"
+if grep -q "fetch(" "$REPO_ROOT/frontend/src/hooks/useVersionCheck.ts" && ! grep -q "apiService\|axios" "$REPO_ROOT/frontend/src/hooks/useVersionCheck.ts"; then
+  ok "el polling de /api/version usa fetch nativo (no pasa por el interceptor de axios => no puede disparar renovaciones)"
+else
+  fallo "useVersionCheck.ts ya no usa fetch nativo: revisar que no pase por el interceptor"
+fi
+
+# ===========================================================================
+seccion "REGRESIÓN COMPLETA (qa-agent: no solo lo nuevo)"
+# ===========================================================================
+echo "-- jest (backend)"
+JEST_OUT=$(cd "$REPO_ROOT/backend" && run_node ./node_modules/.bin/jest --silent 2>&1)
+if echo "$JEST_OUT" | grep -qE '^Tests:.* failed'; then fallo "hay tests de jest en rojo"; else ok "jest sin fallos"; fi
+echo "$JEST_OUT" | grep -E '^(Tests|Test Suites):'
+
+if [ "$SKIP_REGRESION" = "1" ]; then
+  echo "SKIP_REGRESION=1: se omiten los scripts de regresión previos (solo para depurar este script)."
+else
+  for s in test_error_desconocido_cambio_password.sh fix-audit-session-trigger.sh user_hierarchy_and_full_regression.sh test_session_replaced_guard.sh test_rate_limit_diferenciado.sh; do
+    echo ""; echo "-- $s"
+    if [ -f "$REPO_ROOT/scripts/tests/$s" ]; then
+      if bash "$REPO_ROOT/scripts/tests/$s" > "/tmp/reg_$s.out" 2>&1; then
+        ok "$s: exit 0"; tail -n 3 "/tmp/reg_$s.out"
+      else
+        fallo "$s: FALLÓ"; tail -n 25 "/tmp/reg_$s.out"
+      fi
+    else
+      fallo "no existe $s"
+    fi
+  done
+fi
+
+# ===========================================================================
+seccion "SANIDAD DE SECRETOS (secrets-hygiene-in-tests, regla 6)"
+# ===========================================================================
+# Lista explícita (el árbol de staging puede tener archivos sucios ajenos a esta tarea).
+ARCHIVOS_TOCADOS="backend/src/utils/clientInfo.js backend/src/services/securityHelpers.js backend/src/services/auth.service.js backend/src/services/user.service.js backend/src/controllers/auth.controller.js backend/src/controllers/user.controller.js backend/src/services/__tests__/auth.service.security.test.js frontend/src/services/api.ts frontend/src/services/authService.ts frontend/src/pages/Configuracion/GestionUsuarios.tsx scripts/tests/test_seguridad_cuentas_auth.sh scripts/tests/frontend-token-refresh.test.mjs"
+echo "Archivos revisados:"; echo "$ARCHIVOS_TOCADOS" | sed 's/^/  /'
+HITS=$(cd "$REPO_ROOT" && for f in $ARCHIVOS_TOCADOS; do [ -f "$f" ] && grep -nE "(password|passwd|secret|token)[A-Za-z_]*[\"']?\s*[:=]\s*[\"'][^\"'\$]{6,}[\"']" "$f" /dev/null | grep -viE "test|process\.env|req\.body|placeholder|type=|useState|label|\bt\(" ; done)
+if [ -z "$HITS" ]; then ok "grep de sanidad: sin literales de contraseña/credencial en los archivos tocados"; else echo "$HITS"; fallo "posibles literales de credencial (revisar manualmente las líneas de arriba)"; fi
+
+echo ""
+echo "===================================================="
+if [ "$FALLOS" -eq 0 ]; then
+  echo "TODOS LOS CHECKS PASARON"
+  exit 0
+else
+  echo "$FALLOS CHECK(S) FALLARON"
+  exit 1
+fi
