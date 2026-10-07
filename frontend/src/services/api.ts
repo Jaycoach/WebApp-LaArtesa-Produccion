@@ -9,6 +9,7 @@ import axios, {
 } from 'axios';
 import { API_CONFIG, HTTP_STATUS, MESSAGES } from '../config/api.config';
 import { useAuthStore } from '../store/useAuthStore';
+import { esSesionReemplazada, marcarAvisoSesionReemplazada } from '../utils/sesionReemplazada';
 import { ApiResponse } from '../types/api';
 
 /** Marcas internas para controlar la renovación automática del token. */
@@ -86,6 +87,8 @@ class ApiService {
     const config = error.config as ConfigRenovable | undefined;
     if (error.response?.status !== HTTP_STATUS.UNAUTHORIZED || !config) return false;
     if (config._retry || config._skipRefresh) return false;
+    // Sesión reemplazada por otro inicio de sesión: renovar fallaría igual (su refresh ya está revocado)
+    if (esSesionReemplazada(error.response.data)) return false;
     return !RUTAS_SIN_RENOVACION.test(config.url || '');
   }
 
@@ -191,6 +194,8 @@ class ApiService {
       case HTTP_STATUS.UNAUTHORIZED:
         // Sesión expirada (y la renovación no fue posible o no aplica) - redirigir a login
         console.error('Unauthorized - redirecting to login');
+        // Si fue por sesión única, se deja el aviso (sessionStorage) para mostrarlo una vez en /login
+        if (esSesionReemplazada(data)) marcarAvisoSesionReemplazada();
         this.cerrarSesionYRedirigir();
         return Promise.reject({
           success: false,

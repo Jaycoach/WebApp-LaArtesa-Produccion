@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '@/store';
 import { Button, Alert } from '@/components/common';
 import { authService } from '@/services/authService';
+import { consumirAvisoSesionReemplazada } from '@/utils/sesionReemplazada';
 
 type Paso = 'login' | 'solicitar-email' | 'email-enviado';
 
@@ -15,13 +16,20 @@ export const Login: React.FC = () => {
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
-  const [sessionReplacedNotice] = useState(
+  const [sessionReplacedNotice, setSessionReplacedNotice] = useState(
     searchParams.get('session_replaced') === '1'
       ? 'Tu sesión se cerró porque se inició sesión con otro usuario en este navegador. Vuelve a iniciar sesión.'
       : ''
   );
   const [isLoading, setIsLoading] = useState(false);
   const [paso, setPaso] = useState<Paso>('login');
+
+  // Sesión única: si el interceptor cerró la sesión por SESSION_REPLACED, el aviso queda en
+  // sessionStorage; se lee y se BORRA aquí (se ve una sola vez, también con la recarga a /login).
+  useEffect(() => {
+    const aviso = consumirAvisoSesionReemplazada();
+    if (aviso) setSessionReplacedNotice(aviso);
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
