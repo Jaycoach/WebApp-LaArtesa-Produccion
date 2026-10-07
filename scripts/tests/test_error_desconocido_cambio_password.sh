@@ -195,7 +195,7 @@ fi
 TMP_SQL=$(mktemp)
 cat > "$TMP_SQL" <<EOF
 INSERT INTO usuarios (username, email, password_hash, nombre_completo, rol, activo, email_verificado, intentos_fallidos, bloqueado_hasta, debe_cambiar_password)
-VALUES ('$TEST_USERNAME', '$TEST_EMAIL', '$HASH', 'Usuario Prueba Diagnostico Error Desconocido', 'ADMIN', true, true, 0, NULL, false)
+VALUES ('$TEST_USERNAME', '$TEST_EMAIL', '$HASH', 'Usuario Prueba Diagnostico Error Desconocido', 'OPERARIO', true, true, 0, NULL, false)
 RETURNING id;
 EOF
 USER_ID=$(PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -q -t -A -f "$TMP_SQL")
