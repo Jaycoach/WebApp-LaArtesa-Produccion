@@ -4,6 +4,7 @@ import { useAuthStore } from '@/store';
 import { apiService } from '@/services/api';
 import { authService } from '@/services/authService';
 import { API_CONFIG } from '@/config/api.config';
+import { cuentaBloqueada, detalleBloqueo, textoBloqueo } from '@/utils/bloqueoCuenta';
 
 interface Usuario {
   id: number;
@@ -29,8 +30,7 @@ const RANGO_ROL: Record<string, number> = {
   AUDITOR: 1,
 };
 
-const estaBloqueado = (u: Usuario) =>
-  !!u.bloqueado_hasta && new Date(u.bloqueado_hasta) > new Date();
+const estaBloqueado = (u: Usuario) => cuentaBloqueada(u.bloqueado_hasta);
 
 interface CrearUsuarioForm {
   username: string;
@@ -457,13 +457,22 @@ export const GestionUsuarios: React.FC = () => {
                     }`}>
                       {u.activo ? 'Activo' : 'Inactivo'}
                     </span>
-                    {estaBloqueado(u) && (
+                    {estaBloqueado(u) ? (
                       <span
                         className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700"
-                        title={`Bloqueado hasta ${new Date(u.bloqueado_hasta as string).toLocaleString()}`}
+                        title={`${detalleBloqueo(u.bloqueado_hasta)}${u.intentos_fallidos ? ` · ${u.intentos_fallidos} intentos fallidos` : ''}`}
                       >
-                        Bloqueado{u.intentos_fallidos ? ` (${u.intentos_fallidos} intentos)` : ''}
+                        {textoBloqueo(u.bloqueado_hasta)}{u.intentos_fallidos ? ` (${u.intentos_fallidos} intentos)` : ''}
                       </span>
+                    ) : (
+                      !!u.intentos_fallidos && u.intentos_fallidos > 0 && (
+                        <span
+                          className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700"
+                          title="Intentos de inicio de sesión fallidos acumulados (se reinician con un acceso correcto)"
+                        >
+                          {u.intentos_fallidos} {u.intentos_fallidos === 1 ? 'intento fallido' : 'intentos fallidos'}
+                        </span>
+                      )
                     )}
                   </div>
                   <p className="text-sm text-gray-500">@{u.username} · {u.email}</p>
