@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Button, Alert, Card } from '@/components/common';
 import { useAuthStore } from '@/store';
 import { apiService } from '@/services/api';
@@ -6,6 +6,17 @@ import { authService } from '@/services/authService';
 import { API_CONFIG } from '@/config/api.config';
 import { cuentaBloqueada, detalleBloqueo, textoBloqueo } from '@/utils/bloqueoCuenta';
 import { ModalRestablecerPassword } from './ModalRestablecerPassword';
+import type { ApiResponse } from '@/types/api';
+
+const USUARIOS_POR_PAGINA = 10;
+
+// GET /users devuelve `pagination` en la raíz de la respuesta (fuera de `data`)
+interface PaginacionUsuarios {
+  total: number;
+  page: number;
+  limit: number;
+  pages: number;
+}
 
 interface Usuario {
   id: number;
@@ -79,6 +90,11 @@ export const GestionUsuarios: React.FC = () => {
 
   const [pendientes, setPendientes] = useState<Usuario[]>([]);
   const [todos, setTodos] = useState<Usuario[]>([]);
+  const [paginacion, setPaginacion] = useState<PaginacionUsuarios | null>(null);
+  // Página mostrada (ref para que las recargas tras acciones usen siempre la actual)
+  const paginaRef = useRef(1);
+  // Id de la última petición de "Todos": descarta respuestas viejas
+  const peticionTodosRef = useRef(0);
   const [tab, setTab] = useState<'pendientes' | 'todos' | 'crear' | 'password' | 'perfil'>('pendientes');
   const [isLoading, setIsLoading] = useState(false);
   const [accionando, setAccionando] = useState<number | null>(null);
@@ -207,10 +223,24 @@ export const GestionUsuarios: React.FC = () => {
     } catch {}
   };
 
-  const cargarTodos = async () => {
+  const cargarTodos = async (pagina: number = paginaRef.current) => {
+    const peticion = ++peticionTodosRef.current;
     try {
-      const res = await apiService.get<{ users: Usuario[] }>(API_CONFIG.ENDPOINTS.USERS.LIST);
-      if (res.success && res.data) setTodos(res.data.users || []);
+      const res: ApiResponse<{ users: Usuario[] }> & { pagination?: PaginacionUsuarios } =
+        await apiService.get<{ users: Usuario[] }>(
+          `${API_CONFIG.ENDPOINTS.USERS.LIST}?page=${pagina}&limit=${USUARIOS_POR_PAGINA}`
+        );
+      if (peticion !== peticionTodosRef.current) return;
+      if (res.success && res.data) {
+        const ultima = Math.max(res.pagination?.pages ?? 1, 1);
+        if (pagina > ultima) {
+          await cargarTodos(ultima);
+          return;
+        }
+        paginaRef.current = pagina;
+        setTodos(res.data.users || []);
+        setPaginacion(res.pagination ?? null);
+      }
     } catch {}
   };
 
@@ -514,6 +544,24 @@ export const GestionUsuarios: React.FC = () => {
               </div>
             ))}
           </div>
+          {paginacion && paginacion.pages > 1 && (
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-gray-100 pt-4 px-2">
+              <p className="text-sm text-gray-500">
+                Mostrando {(paginacion.page - 1) * paginacion.limit + 1}–{(paginacion.page - 1) * paginacion.limit + todos.length} de {paginacion.total}
+              </p>
+              <div className="flex items-center gap-3">
+                <Button variant="outline" size="sm" disabled={paginacion.page <= 1}
+                  onClick={() => cargarTodos(paginacion.page - 1)}>
+                  Anterior
+                </Button>
+                <span className="text-sm text-gray-700">Página {paginacion.page} de {paginacion.pages}</span>
+                <Button variant="outline" size="sm" disabled={paginacion.page >= paginacion.pages}
+                  onClick={() => cargarTodos(paginacion.page + 1)}>
+                  Siguiente
+                </Button>
+              </div>
+            </div>
+          )}
         </Card>
       )}
 
