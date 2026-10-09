@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { useAuthStore } from '@/store';
 import masasService from '@/services/masasService';
 
 const FASE_CONFIG: Record<string, {
@@ -60,9 +59,9 @@ interface Masa {
 }
 
 const MasaCard = ({
-  masa, faseKey, canEdit, onNavigate,
+  masa, faseKey, onNavigate,
 }: {
-  masa: Masa; faseKey: string; canEdit: boolean;
+  masa: Masa; faseKey: string;
   onNavigate: (masaId: number, faseKey: string) => void;
 }) => {
   const cfg = FASE_CONFIG[faseKey];
@@ -70,8 +69,8 @@ const MasaCard = ({
     <div
       className={`rounded-lg border p-4 transition-all bg-white
         ${masa.es_repeticion ? 'border-red-300 bg-red-50' : masa.prioridad ? 'border-purple-300 bg-purple-50' : cfg.borderColor}
-        ${canEdit ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5' : 'opacity-90'}`}
-      onClick={() => canEdit && onNavigate(masa.id, faseKey)}
+        cursor-pointer hover:shadow-md hover:-translate-y-0.5`}
+      onClick={() => onNavigate(masa.id, faseKey)}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
@@ -124,10 +123,7 @@ const MasaCard = ({
             Fase actual: <strong>{masa.fase_actual}</strong>
           </span>
         </div>
-        {canEdit
-          ? <span className={`text-xs font-medium ${cfg.color}`}>Ver detalle →</span>
-          : <span className="text-xs text-gray-400">Solo lectura</span>
-        }
+        <span className={`text-xs font-medium ${cfg.color}`}>Ver detalle →</span>
       </div>
     </div>
   );
@@ -136,7 +132,6 @@ const MasaCard = ({
 const FaseListado = () => {
   const { nombreFase } = useParams<{ nombreFase: string }>();
   const navigate = useNavigate();
-  const user = useAuthStore((state) => state.user);
 
   // Fecha de hoy en horario Colombia (America/Bogota), no UTC del navegador/servidor.
   const hoy = new Intl.DateTimeFormat('en-CA', {
@@ -149,7 +144,6 @@ const FaseListado = () => {
 
   const faseKey = (nombreFase ?? '').toLowerCase();
   const cfg = FASE_CONFIG[faseKey];
-  const canEdit = ['admin', 'supervisor'].includes(user?.rol ?? '');
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['masas-por-fase', faseKey, fecha],
@@ -196,9 +190,7 @@ const FaseListado = () => {
             <div>
               <h1 className={`text-2xl font-bold ${cfg.color}`}>{cfg.label}</h1>
               <p className="text-sm text-gray-500 mt-0.5">
-                {canEdit
-                  ? 'Puedes ver y editar las masas en esta fase'
-                  : 'Vista de solo lectura — histórico de esta fase'}
+                Puedes ver y editar las masas en esta fase
               </p>
             </div>
           </div>
@@ -267,7 +259,6 @@ const FaseListado = () => {
                 key={masa.id}
                 masa={masa}
                 faseKey={faseKey}
-                canEdit={canEdit}
                 onNavigate={handleNavigate}
               />
             ))}
